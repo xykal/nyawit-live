@@ -374,6 +374,7 @@ public class MainActivity : Activity
             {
                 case Keycode.Enter:
                 case Keycode.ButtonStart:
+                    _renderer.Quality.SetManualPreset((NyawitEngine.Core.GraphicsPreset)3, disableAuto: true);
                     if (_renderer.Stage == AppSceneStage.Lobby)
                     {
                         _sfx?.Play("ui_open");
@@ -387,7 +388,7 @@ public class MainActivity : Activity
                 case Keycode.F:
                     _glView?.QueueEvent(() =>
                     {
-                        _renderer.Quality.SetPreset(QualityPreset.MaxHd);
+                        _renderer.Quality.SetManualPreset((NyawitEngine.Core.GraphicsPreset)3, disableAuto: true);
                         if (_renderer.InTruck) _renderer.ToggleVehicleEnterExit();
                         _renderer.JoyX = 0f;
                         _renderer.JoyY = 0f;
@@ -408,7 +409,7 @@ public class MainActivity : Activity
                 case Keycode.T:
                     _glView?.QueueEvent(() =>
                     {
-                        _renderer.Quality.SetPreset(QualityPreset.MaxHd);
+                        _renderer.Quality.SetManualPreset((NyawitEngine.Core.GraphicsPreset)3, disableAuto: true);
                         _renderer.Physics.MainTruck.VisualCargoUnits = System.Math.Max(_renderer.Physics.MainTruck.VisualCargoUnits, 8);
                         if (!_renderer.InTruck) _renderer.ToggleVehicleEnterExit();
                         _renderer.JoyX = -0.86f;
