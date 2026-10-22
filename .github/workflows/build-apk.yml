@@ -39,26 +39,26 @@ jobs:
           npm install --no-audit --no-fund
           npm run check
 
-      - name: Setup Java 17 (Temurin) for Android Build Tools
+      - name: Setup Java 21 (Temurin) for Android SDK 35/36 Build Tools
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
-      - name: Setup .NET 8 SDK & Android Workload
+      - name: Setup .NET 10 LTS SDK & Android Workload
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Install .NET Android Workload
-        run: dotnet workload install android --skip-manifest-update
+        run: dotnet workload install android
 
       - name: Compile Native C11 / ARM NEON Culler (arm64-v8a, armeabi-v7a & host x64)
         run: |
-          mkdir -p src/Nyawit.Android/Libs/arm64-v8a src/Nyawit.Android/Libs/armeabi-v7a tests/NyawitEngine.Tests/bin/Release/net8.0
+          mkdir -p src/Nyawit.Android/Libs/arm64-v8a src/Nyawit.Android/Libs/armeabi-v7a tests/NyawitEngine.Tests/bin/Release/net10.0
 
           gcc -O3 -std=c11 -Wall -Wextra -Werror -shared -fPIC native/nyawit_simd.c \
-            -o tests/NyawitEngine.Tests/bin/Release/net8.0/libnyawit_simd.so
+            -o tests/NyawitEngine.Tests/bin/Release/net10.0/libnyawit_simd.so
 
           NDK_ROOT="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
           CLANG_BIN="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
@@ -73,7 +73,7 @@ jobs:
           ls -lh src/Nyawit.Android/Libs/*/*.so
 
       - name: Run Automated C# Engine & NPAK Mesh Integrity Unit Tests
-        run: dotnet test tests/NyawitEngine.Tests/NyawitEngine.Tests.csproj -c Release --verbosity normal
+        run: dotnet test tests/NyawitEngine.Tests/NyawitEngine.Tests.csproj -f net10.0 -c Release --verbosity normal
 
       - name: Prepare Release Signing Keystore
         run: |
@@ -96,7 +96,7 @@ jobs:
       - name: Build & Sign Universal Release Android APK (arm64-v8a + armeabi-v7a)
         run: |
           dotnet publish src/Nyawit.Android/Nyawit.Android.csproj \
-            -f net8.0-android \
+            -f net10.0-android \
             -c Release \
             -p:AndroidPackageFormat=apk \
             -p:AndroidCreatePackagePerAbi=false \

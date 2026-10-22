@@ -99,7 +99,7 @@ dotnet test tests/NyawitEngine.Tests/NyawitEngine.Tests.csproj -c Release
 
 ### 3. Build Universal Signed Android APK (`arm64-v8a` + `armeabi-v7a`)
 ```bash
-dotnet publish src/Nyawit.Android/Nyawit.Android.csproj -f net8.0-android -c Release -p:AndroidPackageFormat=apk
+dotnet publish src/Nyawit.Android/Nyawit.Android.csproj -f net10.0-android -c Release -p:AndroidPackageFormat=apk
 ```
 
 ### 4. Re-bake Sculpted 3D Models (`nyawit_models.npak`) & Run Server Locally
