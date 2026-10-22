@@ -18,6 +18,21 @@ public static class Mat4Utils
         outColMajor[14] = 2f * far * near * nf;
     }
 
+    public static void CreateOrthographic(Span<float> outColMajor, float left, float right, float bottom, float top, float near, float far)
+    {
+        outColMajor.Clear();
+        float rl = 1f / (right - left);
+        float tb = 1f / (top - bottom);
+        float fn = 1f / (far - near);
+        outColMajor[0] = 2f * rl;
+        outColMajor[5] = 2f * tb;
+        outColMajor[10] = -2f * fn;
+        outColMajor[12] = -(right + left) * rl;
+        outColMajor[13] = -(top + bottom) * tb;
+        outColMajor[14] = -(far + near) * fn;
+        outColMajor[15] = 1f;
+    }
+
     public static void CreateLookAt(Span<float> outColMajor, float ex, float ey, float ez, float tx, float ty, float tz)
     {
         float zx = ex - tx, zy = ey - ty, zz = ez - tz;

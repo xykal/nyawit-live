@@ -28,6 +28,8 @@ public sealed class AvatarConfig
     public string OutfitHex { get; set; } = "#27AE60";
     public string Aura { get; set; } = "leaf";
     public string Title { get; set; } = "Pemanen Kebun";
+    public bool Glasses { get; set; } = false;
+    public bool WaistParang { get; set; } = true;
 
     public (float R, float G, float B) GetOutfitRgb()
     {

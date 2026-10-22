@@ -181,24 +181,27 @@ public static class PlantationWorld
                     float dCanal = System.Math.Clamp(1f - MathF.Abs(z - CanalZ) / 6.2f, 0f, 1f);
                     float lushWave = 0.5f + 0.5f * MathF.Sin(x * 0.14f + MathF.Cos(z * 0.13f) * 1.6f);
 
-                    float r = 42f + lushWave * 28f, g = 112f + lushWave * 38f, b = 36f + lushWave * 18f;
-                    r = r * (1f - md) + 84f * md; g = g * (1f - md) + 58f * md; b = b * (1f - md) + 38f * md;
-                    r = r * (1f - rd) + 172f * rd; g = g * (1f - rd) + 122f * rd; b = b * (1f - rd) + 78f * rd;
-                    r = r * (1f - dCanal * 0.65f) + 96f * (dCanal * 0.65f);
-                    g = g * (1f - dCanal * 0.65f) + 84f * (dCanal * 0.65f);
-                    b = b * (1f - dCanal * 0.65f) + 56f * (dCanal * 0.65f);
-                    r = r * (1f - yard) + 128f * yard; g = g * (1f - yard) + 134f * yard; b = b * (1f - yard) + 142f * yard;
-                    float ao = 250f - dCanal * 48f - md * 18f;
+                    // Subtle natural macro tint modulated on top of multi-scale PBR Grass/Dirt/Concrete textures!
+                    float r = 226f + lushWave * 24f;
+                    float g = 232f + lushWave * 20f;
+                    float b = 212f + lushWave * 20f;
+                    r = r * (1f - md * 0.35f) + 190f * (md * 0.35f);
+                    g = g * (1f - md * 0.35f) + 168f * (md * 0.35f);
+                    b = b * (1f - md * 0.35f) + 146f * (md * 0.35f);
+                    r = r * (1f - dCanal * 0.35f) + 162f * (dCanal * 0.35f);
+                    g = g * (1f - dCanal * 0.35f) + 158f * (dCanal * 0.35f);
+                    b = b * (1f - dCanal * 0.35f) + 132f * (dCanal * 0.35f);
+                    float ao = 10f + yard * 36f + rd * 22f + md * 85f; // Low spec on dry grass/soil, wet sheen on mud!
 
                     bw.Write(x); bw.Write(h); bw.Write(z);
                     bw.Write(nx); bw.Write(ny); bw.Write(nz);
-                    // uv.x = road/mud splat hint, uv.y = 0.05 tags HD procedural terrain shader path!
-                    bw.Write(System.Math.Clamp(md * 0.7f + rd * 0.25f, 0f, 0.7f));
-                    bw.Write(0.05f);
+                    // uv.x = RoadFactor [0..1], uv.y = MudFactor [0..1] for multi-scale PBR splat shader!
+                    bw.Write(System.Math.Clamp(rd, 0f, 1f));
+                    bw.Write(System.Math.Clamp(md, 0f, 1f));
                     bw.Write((byte)System.Math.Clamp((int)r, 0, 255));
                     bw.Write((byte)System.Math.Clamp((int)g, 0, 255));
                     bw.Write((byte)System.Math.Clamp((int)b, 0, 255));
-                    bw.Write((byte)System.Math.Clamp((int)ao, 140, 255));
+                    bw.Write((byte)System.Math.Clamp((int)ao, 0, 240));
                 }
             }
         }

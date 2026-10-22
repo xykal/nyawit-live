@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Text;
 using Android;
 using Android.App;
 using Android.Content;
@@ -10,22 +9,22 @@ using Android.Opengl;
 using Android.OS;
 using Android.Runtime;
 using Android.Views;
+using Android.Views.InputMethods;
 using Android.Widget;
 using Javax.Microedition.Khronos.Egl;
 using Nyawit.AndroidClient.Audio;
 using Nyawit.AndroidClient.Rendering;
 using Nyawit.AndroidClient.UI;
 using NyawitEngine.Assets;
+using NyawitEngine.Core;
 using NyawitEngine.Network;
+using NyawitEngine.Physics;
 using NyawitEngine.World;
 using EGLConfig = Javax.Microedition.Khronos.Egl.EGLConfig;
 using EGLDisplay = Javax.Microedition.Khronos.Egl.EGLDisplay;
 
 namespace Nyawit.AndroidClient;
 
-/// <summary>
-/// Universal resilient EGL config selector for Qualcomm Adreno, ARM Mali, PowerVR, Xclipse &amp; Virtio/SwiftShader GPUs.
-/// </summary>
 public sealed class SafeGles3ConfigChooser : Java.Lang.Object, GLSurfaceView.IEGLConfigChooser
 {
     private const int EglRenderableType = 0x3040;
@@ -81,6 +80,7 @@ public sealed class SafeGles3ConfigChooser : Java.Lang.Object, GLSurfaceView.IEG
 
 [Activity(
     Label = "Nyawit Live 3D",
+    Theme = "@android:style/Theme.Black.NoTitleBar.Fullscreen",
     MainLauncher = true,
     Exported = true,
     ScreenOrientation = ScreenOrientation.SensorLandscape,
@@ -89,6 +89,8 @@ public class MainActivity : Activity
 {
     private const int ReqRecordAudio = 4102;
 
+    private FrameLayout? _rootLayout;
+    private LinearLayout? _inlineInputOverlay;
     private GLSurfaceView? _glView;
     private Gles3InstancedRenderer? _renderer;
     private HudOverlayView? _hud;
@@ -99,15 +101,17 @@ public class MainActivity : Activity
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
+        RequestWindowFeature(WindowFeatures.NoTitle);
         base.OnCreate(savedInstanceState);
+        ScheduleImmersiveFullscreen();
 
         try
         {
-            _prefs = GetSharedPreferences("nyawit_live_prefs", FileCreationMode.Private);
+            _prefs = GetSharedPreferences("nyawit_live_prefs_v4", FileCreationMode.Private);
 
             NpakArchive archive;
             using (var assetStream = Assets!.Open("Meshes/nyawit_models.npak"))
-            using (var mem = new MemoryStream(8 * 1024 * 1024))
+            using (var mem = new MemoryStream(2 * 1024 * 1024))
             {
                 assetStream.CopyTo(mem);
                 mem.Position = 0;
@@ -117,11 +121,19 @@ public class MainActivity : Activity
             Typeface displayFont = Typeface.DefaultBold!;
             try { displayFont = Typeface.CreateFromAsset(Assets, "Fonts/XyVerseDisplay-Semibold.otf") ?? Typeface.DefaultBold!; } catch { }
 
+            var bmpOpts = new BitmapFactory.Options { InScaled = false };
             Bitmap? smallBrandMark = null;
+            Bitmap? wideBrandLogo = null;
             try
             {
                 using var markStream = Assets.Open("Brand/mark_kecil_transparan_putih.png");
-                smallBrandMark = BitmapFactory.DecodeStream(markStream);
+                smallBrandMark = BitmapFactory.DecodeStream(markStream, null, bmpOpts);
+            }
+            catch { }
+            try
+            {
+                using var wideStream = Assets.Open("Brand/logo_utama_horizontal_transparan_putih.png");
+                wideBrandLogo = BitmapFactory.DecodeStream(wideStream, null, bmpOpts);
             }
             catch { }
 
@@ -132,6 +144,7 @@ public class MainActivity : Activity
             _sfx = new ProceduralSfxPlayer();
             _voice = new VoiceChatManager(_net);
             _renderer = new Gles3InstancedRenderer(this, archive, trees, _net);
+            RestoreGraphicsSettings();
 
             _glView = new GLSurfaceView(this);
             _glView.SetEGLContextClientVersion(3);
@@ -144,20 +157,19 @@ public class MainActivity : Activity
             _renderer.OnWorldReady += () =>
             {
                 _sfx?.Play("world_ready");
-                RunOnUiThread(() => _hud?.ShowToast("DUNIA KEBUN SIAP - SELAMAT MEMANEN!"));
+                RunOnUiThread(() => _hud?.ShowToast("DUNIA KEBUN SAWIT SIAP — SELAMAT MEMANEN!"));
             };
 
-            _hud = new HudOverlayView(this, _renderer, _net, _sfx, _voice, displayFont, smallBrandMark);
-            WireGameplayAndModalEvents();
+            _hud = new HudOverlayView(this, _renderer, _net, _sfx, _voice, displayFont, smallBrandMark, wideBrandLogo);
+            WireGameplayEvents();
 
-            var root = new FrameLayout(this);
-            root.SetBackgroundColor(Color.Rgb(9, 13, 16));
-            root.AddView(_glView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
-            root.AddView(_hud, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+            _rootLayout = new FrameLayout(this);
+            _rootLayout.SetBackgroundColor(Color.Rgb(9, 11, 13));
+            _rootLayout.AddView(_glView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+            _rootLayout.AddView(_hud, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
 
-            SetContentView(root);
-            ScheduleImmersiveFullscreen();
-
+            SetContentView(_rootLayout);
+            ApplyHardwareDisplayRefreshRate(_renderer.Quality.TargetFps);
             _net.StartBackgroundConnect();
         }
         catch (Exception ex)
@@ -175,6 +187,41 @@ public class MainActivity : Activity
         }
     }
 
+    private void ApplyHardwareDisplayRefreshRate(int targetFps)
+    {
+        var win = Window;
+        if (win == null || !OperatingSystem.IsAndroidVersionAtLeast(23)) return;
+        try
+        {
+#pragma warning disable CA1422
+            var display = WindowManager?.DefaultDisplay;
+#pragma warning restore CA1422
+            var modes = display?.GetSupportedModes();
+            if (modes == null || modes.Length == 0) return;
+
+            Display.Mode? best = null;
+            float bestDiff = float.MaxValue;
+            foreach (var m in modes)
+            {
+                float diff = System.Math.Abs(m.RefreshRate - targetFps);
+                if (diff < bestDiff)
+                {
+                    bestDiff = diff;
+                    best = m;
+                }
+            }
+
+            if (best != null && win.Attributes != null)
+            {
+                var lp = win.Attributes;
+                lp.PreferredDisplayModeId = best.ModeId;
+                win.Attributes = lp;
+            }
+            SaveGraphicsSettings();
+        }
+        catch { }
+    }
+
     private void ApplyHardwareRenderScale(float scale)
     {
         if (_glView?.Holder == null) return;
@@ -183,7 +230,7 @@ public class MainActivity : Activity
             int fullW = _glView.Width;
             int fullH = _glView.Height;
             if (fullW <= 64 || fullH <= 64) return;
-            int maxH = scale < 0.70f ? 540 : (scale < 0.88f ? 720 : 1080);
+            int maxH = scale < 0.70f ? 540 : (scale < 0.88f ? 760 : 1080);
             float effScale = System.Math.Min(scale, System.Math.Min(1f, maxH / (float)fullH));
             if (effScale >= 0.99f)
             {
@@ -195,11 +242,12 @@ public class MainActivity : Activity
                 int sh = System.Math.Max(180, (int)(fullH * effScale) & ~1);
                 _glView.Holder.SetFixedSize(sw, sh);
             }
+            SaveGraphicsSettings();
         }
         catch { }
     }
 
-    private void WireGameplayAndModalEvents()
+    private void WireGameplayEvents()
     {
         if (_hud == null || _renderer == null || _net == null || _sfx == null || _voice == null) return;
 
@@ -207,6 +255,13 @@ public class MainActivity : Activity
         _net.OnSoundTrigger += clip => _sfx?.Play(clip);
         _net.OnProfilePersisted += SaveLocalProfile;
         _renderer.Physics.OnPhysicsSfx += clip => _sfx?.Play(clip);
+
+        _hud.OnProfileModified += SaveLocalProfile;
+        _hud.OnTargetFpsSelected += fps =>
+        {
+            ApplyHardwareDisplayRefreshRate(fps);
+            _hud.ShowToast($"TARGET FRAME RATE DIATUR KE {fps} FPS");
+        };
 
         _hud.OnEnterWorldRequested += () =>
         {
@@ -218,7 +273,7 @@ public class MainActivity : Activity
         {
             _sfx.Play("ui_open");
             _renderer.ReturnToLobby();
-            _hud.ShowToast("KEMBALI KE LOBBY UTAMA 3D");
+            _hud.ShowToast("GARASI SHOWROOM AKTIF");
         };
 
         _hud.OnToggleVoiceMic += ToggleVoiceChatWithPermission;
@@ -247,7 +302,7 @@ public class MainActivity : Activity
             }
             else
             {
-                _hud.ShowToast("BAWA MUATAN TRUK / ANGKONG KE TIMBANGAN RAM PKS");
+                _hud.ShowToast("BAWA MUATAN KE TIMBANGAN RAM PKS");
             }
         };
 
@@ -256,8 +311,8 @@ public class MainActivity : Activity
             _renderer.ToggleVehicleEnterExit();
             _sfx.Play(_renderer.InTruck ? "engine_enter" : "ui_open");
             _hud.ShowToast(_renderer.InTruck
-                ? "KEMUDI CANTER OLENG AKTIF - SUSPENSI 4 RODA SIAP"
-                : "TURUN DARI KABIN CANTER - SIAP MEMANEN");
+                ? "KABIN MITSUBISHI CANTER AKTIF — SUSPENSI BAN DOBEL SIAP"
+                : "TURUN DARI KABIN CANTER");
         };
 
         _hud.OnHornPressed += () =>
@@ -265,14 +320,109 @@ public class MainActivity : Activity
             _renderer.BoostTimer = 2.6f;
             _sfx.Play("horn");
             _net.SendHorn();
-            _hud.ShowToast("TELOLET BASURI AKTIF - TURBO DIESEL BOOST");
+            _hud.ShowToast("TURBO DIESEL CANTER AKTIF");
         };
 
-        _hud.OnOpenChat += () => { _sfx.Play("ui_open"); ShowChatDialog(); };
-        _hud.OnOpenRankings += () => { _sfx.Play("ui_open"); ShowRankingsAndTournamentDialog(); };
-        _hud.OnOpenAvatar += () => { _sfx.Play("ui_open"); ShowAvatarCustomizerDialog(); };
-        _hud.OnOpenDaily += () => { _sfx.Play("ui_open"); ShowDailyRewardDialog(); };
-        _hud.OnOpenSocialShare += () => { _sfx.Play("ui_open"); ShowSocialAndShareDialog(); };
+        _hud.OnCustomChatInputRequested += () => ShowInlineTextPrompt("KETIK PESAN SERVER LIVE...", "", txt =>
+        {
+            if (!string.IsNullOrWhiteSpace(txt))
+            {
+                _net.SendChat(txt.Trim());
+                _hud.ShowToast("PESAN TERKIRIM");
+            }
+        });
+
+        _hud.OnRenamePlayerRequested += () => ShowInlineTextPrompt("NAMA PEMANEN / JURAGAN BARU", _net.Profile.Name, txt =>
+        {
+            string clean = txt.Trim();
+            if (clean.Length >= 2)
+            {
+                _net.Profile.Name = clean.Length > 18 ? clean[..18] : clean;
+                _net.SaveAvatar(_net.Profile.Name, _net.Profile.Avatar);
+                SaveLocalProfile();
+                _hud.ShowToast($"NAMA DIUBAH: {_net.Profile.Name}");
+                _hud.PostInvalidate();
+            }
+        });
+    }
+
+    private void ShowInlineTextPrompt(string hint, string initial, Action<string> onSubmit)
+    {
+        if (_rootLayout == null) return;
+        DismissInlineTextPrompt();
+
+        var bar = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        bar.SetBackgroundColor(Color.Argb(248, 12, 20, 26));
+        int p = (int)(12 * (Resources?.DisplayMetrics?.Density ?? 2.5f));
+        bar.SetPadding(p, p, p, p);
+
+        var input = new EditText(this)
+        {
+            Text = initial,
+            Hint = hint,
+            TextSize = 13f,
+        };
+        input.SetSingleLine(true);
+        input.SetTextColor(Color.White);
+        input.SetHintTextColor(Color.Rgb(148, 163, 184));
+        input.SetBackgroundColor(Color.Rgb(20, 32, 40));
+        input.SetPadding(p, p / 2, p, p / 2);
+
+        var sendBtn = new TextView(this)
+        {
+            Text = "SIMPAN",
+            TextSize = 12f,
+            Gravity = GravityFlags.Center,
+        };
+        sendBtn.SetTypeface(Typeface.DefaultBold, TypefaceStyle.Bold);
+        sendBtn.SetTextColor(Color.White);
+        sendBtn.SetBackgroundColor(Color.Rgb(22, 163, 74));
+        sendBtn.SetPadding(p * 2, p / 2, p * 2, p / 2);
+        sendBtn.Click += (_, _) =>
+        {
+            string val = input.Text ?? "";
+            DismissInlineTextPrompt();
+            onSubmit(val);
+            ScheduleImmersiveFullscreen();
+        };
+
+        var cancelBtn = new TextView(this)
+        {
+            Text = "BATAL",
+            TextSize = 12f,
+            Gravity = GravityFlags.Center,
+        };
+        cancelBtn.SetTypeface(Typeface.DefaultBold, TypefaceStyle.Bold);
+        cancelBtn.SetTextColor(Color.White);
+        cancelBtn.SetBackgroundColor(Color.Rgb(127, 29, 29));
+        cancelBtn.SetPadding(p, p / 2, p, p / 2);
+        cancelBtn.Click += (_, _) =>
+        {
+            DismissInlineTextPrompt();
+            ScheduleImmersiveFullscreen();
+        };
+
+        bar.AddView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f));
+        bar.AddView(sendBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.MatchParent) { LeftMargin = p / 2 });
+        bar.AddView(cancelBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.MatchParent) { LeftMargin = p / 2 });
+
+        var lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent, GravityFlags.Top);
+        _inlineInputOverlay = bar;
+        _rootLayout.AddView(bar, lp);
+        input.RequestFocus();
+        var imm = GetSystemService(InputMethodService) as InputMethodManager;
+        imm?.ShowSoftInput(input, ShowFlags.Implicit);
+    }
+
+    private void DismissInlineTextPrompt()
+    {
+        if (_inlineInputOverlay != null && _rootLayout != null)
+        {
+            var imm = GetSystemService(InputMethodService) as InputMethodManager;
+            imm?.HideSoftInputFromWindow(_inlineInputOverlay.WindowToken, HideSoftInputFlags.None);
+            _rootLayout.RemoveView(_inlineInputOverlay);
+            _inlineInputOverlay = null;
+        }
     }
 
     private void TriggerHarvestAction()
@@ -301,11 +451,11 @@ public class MainActivity : Activity
         int picked = _renderer.Physics.TryPickupGroundFruit();
         if (picked > 0)
         {
-            _hud.ShowToast($"DIAMBIL {picked} JANJANG TBS - BAWA KE TRUK CANTER ATAU ANGKONG");
+            _hud.ShowToast($"DIAMBIL {picked} JANJANG TBS — MUAT KE TRUK CANTER ATAU ANGKONG");
         }
         else if (_renderer.Physics.Player.HasHeldTbs)
         {
-            _hud.ShowToast("DEKATI BAK TRUK CANTER ATAU ANGKONG UNTUK MEMUAT TBS");
+            _hud.ShowToast("DEKATI BAK TRUK CANTER ATAU ANGKONG UNTUK MEMUAT");
         }
         else
         {
@@ -326,384 +476,150 @@ public class MainActivity : Activity
         {
             _renderer.Physics.Player.ActiveAngkongIndex = _renderer.NearbyAngkongId;
             _sfx.Play("pickup");
-            _hud.ShowToast("MENDORONG ANGKONG SAWIT - RODA AKTIF");
+            _hud.ShowToast("MENDORONG ANGKONG SAWIT");
+        }
+        else
+        {
+            _hud.ShowToast("DEKATI ANGKONG MERAH DI KEBUN");
         }
     }
 
     private void ToggleVoiceChatWithPermission()
     {
-        if (_voice == null || _renderer == null || _hud == null || _sfx == null) return;
-        if (_voice.IsMicTransmitting)
-        {
-            _voice.SetMicEnabled(false);
-            _renderer.LocalMicSpeaking = false;
-            _sfx.Play("ui_click");
-            _hud.ShowToast("VOICE CHAT NONAKTIF");
-            return;
-        }
-
-        if (OperatingSystem.IsAndroidVersionAtLeast(23) && CheckSelfPermission(Manifest.Permission.RecordAudio) != Permission.Granted)
+        if (_voice == null || _renderer == null || _hud == null) return;
+        if (OperatingSystem.IsAndroidVersionAtLeast(23) &&
+            CheckSelfPermission(Manifest.Permission.RecordAudio) != Permission.Granted)
         {
             RequestPermissions([Manifest.Permission.RecordAudio], ReqRecordAudio);
             return;
         }
-
-        bool started = _voice.SetMicEnabled(true);
-        _renderer.LocalMicSpeaking = started;
-        _sfx.Play("ui_open");
-        _hud.ShowToast(started ? "VOICE CHAT LIVE 8KHZ AKTIF" : "MIKROFON TIDAK TERSEDIA DI PERANGKAT INI");
+        bool nowOn = !_voice.MicEnabled;
+        bool ok = _voice.SetMicEnabled(nowOn);
+        _renderer.LocalMicSpeaking = ok && nowOn;
+        _hud.ShowToast(ok && nowOn ? "VOICE CHAT LIVE AKTIF" : "VOICE CHAT DIMATIKAN");
+        _hud.PostInvalidate();
     }
 
     public override void OnRequestPermissionsResult(int requestCode, string[] permissions, [GeneratedEnum] Permission[] grantResults)
     {
         base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == ReqRecordAudio && grantResults.Length > 0 && grantResults[0] == Permission.Granted)
-        {
-            bool ok = _voice?.SetMicEnabled(true) ?? false;
-            if (_renderer != null) _renderer.LocalMicSpeaking = ok;
-            _hud?.ShowToast(ok ? "VOICE CHAT LIVE 8KHZ AKTIF" : "MIKROFON TIDAK TERSEDIA");
-        }
+            ToggleVoiceChatWithPermission();
     }
 
     public override bool OnKeyDown([GeneratedEnum] Keycode keyCode, KeyEvent? e)
     {
-        // Supports full physical gamepad / keyboard play + deterministic Android 14 hardware verification!
-        if (_renderer != null && _hud != null)
+        if (_renderer != null && _hud != null && _net != null)
         {
-            switch (keyCode)
+            if (keyCode == Keycode.Back && _hud.ActiveModal != ActiveModalOverlay.None)
             {
-                case Keycode.Enter:
-                case Keycode.ButtonStart:
-                    _renderer.Quality.SetManualPreset((NyawitEngine.Core.GraphicsPreset)3, disableAuto: true);
-                    if (_renderer.Stage == AppSceneStage.Lobby)
-                    {
-                        _sfx?.Play("ui_open");
-                        _renderer.BeginWorldPreparation();
-                    }
-                    return true;
-                case Keycode.H:
-                case Keycode.Space:
-                    TriggerHarvestAction();
-                    return true;
-                case Keycode.F:
-                    _glView?.QueueEvent(() =>
-                    {
-                        _renderer.Quality.SetManualPreset((NyawitEngine.Core.GraphicsPreset)3, disableAuto: true);
-                        if (_renderer.InTruck) _renderer.ToggleVehicleEnterExit();
-                        _renderer.JoyX = 0f;
-                        _renderer.JoyY = 0f;
-                        // Step clearly into open sunlit clearing beside Canter & Palm Grove for unobstructed close-up!
-                        _renderer.Physics.Player.X = 5.10f;
-                        _renderer.Physics.Player.Z = 9.80f;
-                        _renderer.Physics.Player.Y = NyawitEngine.Physics.RigidBodyWorld.SurfaceHeightWithStructures(5.10f, 9.80f);
-                        _renderer.Physics.Player.Yaw = 0.24f;
-                        _renderer.Physics.SpawnHarvestedGroundFruit(5.55f, 10.25f, isGold: false);
-                        for (int i = 0; i < 90; i++) _renderer.Physics.StepWorld(0.016f, false, 0f, 0f, _renderer.CamYaw, []);
-                        _renderer.Physics.TryPickupGroundFruit();
-                        _renderer.Physics.Player.HeldTbsUnits = System.Math.Max(1, _renderer.Physics.Player.HeldTbsUnits);
-                        RunOnUiThread(() => _hud?.ShowToast("DIAMBIL 1 JANJANG TBS - ANIMASI PEGANG AKTIF"));
-                        _renderer.LockShowcaseCam = true;
-                        _renderer.CamDist = 2.65f;
-                        _renderer.CamPitch = 0.04f;
-                        _renderer.CamYaw = _renderer.Physics.Player.Yaw + 0.26f;
-                    });
-                    return true;
-                case Keycode.L:
-                    TriggerPickupOrLoadAction();
-                    return true;
-                case Keycode.T:
-                    _glView?.QueueEvent(() =>
-                    {
-                        _renderer.Quality.SetManualPreset((NyawitEngine.Core.GraphicsPreset)3, disableAuto: true);
-                        _renderer.Physics.MainTruck.VisualCargoUnits = System.Math.Max(_renderer.Physics.MainTruck.VisualCargoUnits, 8);
-                        if (!_renderer.InTruck) _renderer.ToggleVehicleEnterExit();
-                        _renderer.JoyX = -0.86f;
-                        _renderer.JoyY = -0.46f;
-                        _renderer.LockShowcaseCam = true;
-                        _renderer.CamDist = 4.65f;
-                        _renderer.CamPitch = 0.08f;
-                        _renderer.CamYaw = _renderer.Physics.MainTruck.Yaw + 0.68f;
-                    });
-                    return true;
+                _hud.CloseModal();
+                return true;
+            }
+            if (keyCode == Keycode.G)
+            {
+                _hud.CloseModal();
+                _renderer.SkipSplashToLobby();
+                _renderer.ReturnToLobby();
+                return true;
+            }
+            if (keyCode == Keycode.Enter)
+            {
+                _hud.CloseModal();
+                _renderer.BeginWorldPreparation();
+                return true;
+            }
+            if (keyCode == Keycode.P)
+            {
+                _hud.SettingsTabIndex = 0;
+                _hud.OpenModal(ActiveModalOverlay.Settings);
+                return true;
+            }
+            if (keyCode == Keycode.F)
+            {
+                // Hero On-Foot Plantation Showcase: MaxHD + PCF Shadows + Clouds + Spiky TBS Held + COE Canter Parked Nearby!
+                _hud.CloseModal();
+                _renderer.RequestPresetChange(GraphicsPreset.MaxHD);
+                _renderer.Quality.ShadowTier = ShadowQualityTier.High;
+                _renderer.Quality.CloudsEnabled = true;
+                _renderer.InTruck = false;
+                _renderer.LockShowcaseCam = true;
+                _renderer.Physics.Player.X = -6.2f;
+                _renderer.Physics.Player.Z = 14.0f;
+                _renderer.Physics.Player.Y = RigidBodyWorld.SurfaceHeightWithStructures(-6.2f, 14.0f);
+                _renderer.Physics.Player.Yaw = 0.25f;
+                _renderer.Physics.Player.HeldTbsUnits = 3;
+                _renderer.Physics.Player.HeldGoldUnits = 0;
+                _renderer.Physics.Player.Stance = HoldStance.CarryingTbs;
+                _net.Profile.Avatar.Hat = MeshCatalog.HatCaping;
+                _net.Profile.Avatar.Back = MeshCatalog.BackBasket;
+                _net.Profile.Avatar.Tool = MeshCatalog.ToolEgrek;
+                _net.Profile.Avatar.Glasses = true;
+                _net.Profile.Avatar.WaistParang = true;
+
+                _renderer.Physics.MainTruck.X = -3.1f;
+                _renderer.Physics.MainTruck.Z = 11.2f;
+                _renderer.Physics.MainTruck.Y = RigidBodyWorld.SurfaceHeightWithStructures(-3.1f, 11.2f);
+                _renderer.Physics.MainTruck.Yaw = -0.62f;
+                _renderer.Physics.MainTruck.SteerAngle = 0.34f;
+                _renderer.Physics.MainTruck.VisualCargoUnits = 16;
+
+                _renderer.CamYaw = 0.14f;
+                _renderer.CamPitch = 0.11f;
+                _renderer.CamDist = 3.65f;
+                _hud.PostInvalidate();
+                return true;
+            }
+            if (keyCode == Keycode.L)
+            {
+                TriggerPickupOrLoadAction();
+                return true;
+            }
+            if (keyCode == Keycode.T)
+            {
+                // Hero COE Canter Driving Showcase: 3/4 Front-Side View of Flat-Nose Canter + Dual Rear Tires + Tire Dust + Shadows!
+                _hud.CloseModal();
+                _renderer.InTruck = true;
+                _renderer.LockShowcaseCam = true;
+                _renderer.Physics.MainTruck.X = 0.0f;
+                _renderer.Physics.MainTruck.Z = 14.0f;
+                _renderer.Physics.MainTruck.Y = RigidBodyWorld.SurfaceHeightWithStructures(0.0f, 14.0f);
+                _renderer.Physics.MainTruck.Yaw = 0.0f;
+                _renderer.Physics.MainTruck.VisualCargoUnits = 18;
+                _renderer.CamDist = 6.2f;
+                _renderer.CamPitch = 0.19f;
+                _renderer.JoyX = -0.78f;
+                _renderer.JoyY = -0.52f;
+                _hud.PostInvalidate();
+                return true;
             }
         }
         return base.OnKeyDown(keyCode, e);
     }
 
-    private void ShowChatDialog()
+    private void RestoreGraphicsSettings()
     {
-        if (_net == null) return;
-        var layout = CreateDialogContainer(out _);
-
-        var logText = new TextView(this) { TextSize = 12.5f };
-        logText.SetTextColor(Color.Argb(255, 225, 232, 240));
-        var chats = new System.Collections.Generic.List<ChatMessageEntry>();
-        _net.CopyRenderState(new(), new(), chats, 0f);
-        var sb = new StringBuilder();
-        foreach (var c in chats) sb.AppendLine($"[{c.SenderName}]: {c.Text}");
-        if (sb.Length == 0) sb.AppendLine("BELUM ADA CHAT. SAPA PEMANEN LAIN SEKARANG!");
-        logText.Text = sb.ToString();
-        layout.AddView(logText);
-
-        var input = new EditText(this) { Hint = "Ketik pesan ke Global Chat..." };
-        input.SetTextColor(Color.White);
-        input.SetHintTextColor(Color.Gray);
-        layout.AddView(input);
-
-        string[] quick = ["GAS PANEN BLOK TIMUR!", "SAWIT EMAS MUNCUL!", "ANTRI TIMBANGAN RAM PKS!", "CANTER OLENG BOS!"];
-        foreach (var q in quick)
-        {
-            string msg = q;
-            var b = CreateStyledButton($" PESAN CEPAT: {msg}", false);
-            b.Click += (_, _) => { _sfx?.Play("ui_click"); _net.SendChat(msg); _hud?.ShowToast("CHAT TERKIRIM KE GLOBAL SERVER"); };
-            layout.AddView(b);
-        }
-
-        new AlertDialog.Builder(this)
-            .SetTitle("GLOBAL CHAT & ROOM SERVER")!
-            .SetView(WrapScroll(layout))!
-            .SetPositiveButton("KIRIM PESAN", (_, _) =>
-            {
-                _sfx?.Play("ui_click");
-                string txt = (input.Text ?? "").Trim();
-                if (!string.IsNullOrEmpty(txt)) _net.SendChat(txt);
-            })!
-            .SetNegativeButton("TUTUP", (_, _) => _sfx?.Play("ui_click"))!
-            .Show();
+        if (_prefs == null || _renderer == null) return;
+        int preset = _prefs.GetInt("gfx_preset", (int)GraphicsPreset.Ultra);
+        _renderer.Quality.SetManualPreset((GraphicsPreset)System.Math.Clamp(preset, 0, 3), disableAuto: false);
+        _renderer.Quality.TargetFps = _prefs.GetInt("gfx_fps", 60);
+        _renderer.Quality.ShadowTier = (ShadowQualityTier)System.Math.Clamp(_prefs.GetInt("gfx_shadow", 2), 0, 2);
+        _renderer.Quality.CloudsEnabled = _prefs.GetBoolean("gfx_clouds", true);
+        _renderer.Quality.ParticlesEnabled = _prefs.GetBoolean("gfx_particles", true);
+        _renderer.Quality.ShowFpsHud = _prefs.GetBoolean("gfx_show_fps", true);
     }
 
-    private void ShowRankingsAndTournamentDialog()
+    private void SaveGraphicsSettings()
     {
-        if (_net == null) return;
-        _net.RefreshBoards();
-        var (globalB, weeklyB, tiers) = _net.GetBoardsSnapshot();
-        var layout = CreateDialogContainer(out _);
-
-        long remSec = System.Math.Max(0, (_net.TournamentEndsAtMs - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) / 1000);
-        var header = new TextView(this)
-        {
-            Text = $"TURNAMEN MINGGUAN ({_net.TournamentWeekId}) - RESET {remSec / 86400}H {(remSec % 86400) / 3600}J\nPOIN MINGGUAN: {_net.Profile.WeeklyPoints:N0} PTS  //  SETORAN: {_net.Profile.TotalKg:N0} KG",
-            TextSize = 13f
-        };
-        header.SetTextColor(Color.Argb(255, 245, 195, 56));
-        layout.AddView(header);
-
-        foreach (var t in tiers)
-        {
-            string tid = t.Id;
-            bool claimed = _net.Profile.ClaimedTiers.Contains(tid);
-            bool ready = _net.Profile.WeeklyPoints >= t.MinPts && !claimed;
-            var btn = CreateStyledButton($"{t.Label} {(claimed ? "[DIKLAIM]" : ready ? "[KLAIM]" : $"[{_net.Profile.WeeklyPoints}/{t.MinPts}]")}", ready);
-            btn.Enabled = ready;
-            btn.Click += (_, _) => { _sfx?.Play("ui_click"); _net.ClaimTournamentTier(tid); };
-            layout.AddView(btn);
-        }
-
-        var sb = new StringBuilder("\n[ TOP GLOBAL RANKING SEPANJANG MASA ]\n");
-        foreach (var r in globalB)
-            sb.AppendLine($"#{r.Rank}  {r.Name} [{r.Title}] - {r.TotalKg:N0} KG // {r.Score:N0} PTS");
-
-        sb.AppendLine("\n[ KLASEMEN TURNAMEN MINGGU INI ]");
-        foreach (var r in weeklyB)
-            sb.AppendLine($"#{r.Rank}  {r.Name} - {r.Score:N0} POIN ({r.TotalKg:N0} KG)");
-
-        var tv = new TextView(this) { Text = sb.ToString(), TextSize = 12f };
-        tv.SetTextColor(Color.White);
-        layout.AddView(tv);
-
-        new AlertDialog.Builder(this)
-            .SetTitle("GLOBAL RANKING & TURNAMEN MINGGUAN")!
-            .SetView(WrapScroll(layout))!
-            .SetPositiveButton("TUTUP", (_, _) => _sfx?.Play("ui_click"))!
-            .Show();
-    }
-
-    private void ShowAvatarCustomizerDialog()
-    {
-        if (_net == null) return;
-        var layout = CreateDialogContainer(out _);
-        var av = _net.Profile.Avatar;
-
-        var nameEdit = new EditText(this) { Text = _net.Profile.Name, Hint = "Nama Panggilan 3D" };
-        nameEdit.SetTextColor(Color.White);
-        layout.AddView(nameEdit);
-
-        (string id, string label)[] hats =
-        [
-            (MeshCatalog.HatCaping, "TOPI CAPING BAMBU"),
-            (MeshCatalog.HatSafety, "HELM PROYEK SAFETY"),
-            (MeshCatalog.HatHeadband, "IKAT KEPALA PENDEKAR"),
-            (MeshCatalog.HatCowboy, "TOPI KOBOI JURAGAN"),
-            (MeshCatalog.HatCrownGold, "MAHKOTA RAJA SAWIT 24K")
-        ];
-        (string id, string label)[] backs =
-        [
-            (MeshCatalog.BackBasket, "KERANJANG ROTAN TBS"),
-            (MeshCatalog.BackPack, "RANSEL TAKTIS LAPANGAN"),
-            (MeshCatalog.BackCape, "JUBAH MANDOR SULTAN"),
-            (MeshCatalog.BackWingsGold, "SAYAP PHOENIX EMAS JUARA")
-        ];
-        (string id, string label)[] tools =
-        [
-            (MeshCatalog.ToolEgrek, "EGREK GALAH PANJANG"),
-            (MeshCatalog.ToolDodos, "DODOS BAJA TAJAM"),
-            (MeshCatalog.ToolEgrekDragon, "SABIT NAGA SAWIT 24K")
-        ];
-        string[] colors = ["#27AE60", "#E67E22", "#E74C3C", "#2980B9", "#8E44AD", "#F1C40F", "#16A085", "#ECF0F1"];
-
-        string selHat = av.Hat, selBack = av.Back, selTool = av.Tool, selHex = av.OutfitHex;
-
-        AddOptionGroup(layout, "PILIH PENUTUP KEPALA 3D:", hats, id => { selHat = id; ApplyAvatarNow(); });
-        AddOptionGroup(layout, "PILIH AKSESORIS PUNGGUNG 3D:", backs, id => { selBack = id; ApplyAvatarNow(); });
-        AddOptionGroup(layout, "PILIH ALAT PANEN 3D:", tools, id => { selTool = id; ApplyAvatarNow(); });
-
-        var colorRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
-        foreach (var hex in colors)
-        {
-            string h = hex;
-            var cb = new Button(this) { Text = " " };
-            cb.SetBackgroundColor(Color.ParseColor(h));
-            cb.Click += (_, _) => { _sfx?.Play("ui_click"); selHex = h; ApplyAvatarNow(); };
-            colorRow.AddView(cb, new LinearLayout.LayoutParams(90, 72) { RightMargin = 10 });
-        }
-        layout.AddView(colorRow);
-
-        void ApplyAvatarNow()
-        {
-            _net.SaveAvatar((nameEdit.Text ?? _net.Profile.Name).Trim(), new AvatarConfig
-            {
-                Hat = selHat, Back = selBack, Tool = selTool, OutfitHex = selHex, Aura = av.Aura, Title = av.Title
-            });
-            _hud?.ShowToast("AVATAR 3D & WARNA TRUK TERSIMPAN");
-        }
-
-        new AlertDialog.Builder(this)
-            .SetTitle("KUSTOMISASI AVATAR 3D & WARNA CANTER")!
-            .SetView(WrapScroll(layout))!
-            .SetPositiveButton("SIMPAN AVATAR", (_, _) => { _sfx?.Play("ui_click"); ApplyAvatarNow(); })!
-            .SetNegativeButton("TUTUP", (_, _) => _sfx?.Play("ui_click"))!
-            .Show();
-    }
-
-    private void ShowDailyRewardDialog()
-    {
-        if (_net == null) return;
-        var layout = CreateDialogContainer(out _);
-        string[] rewards =
-        [
-            "HARI 1: RP 150.000 + 10 PERMATA",
-            "HARI 2: RP 250.000 + 15 PERMATA + HELM SAFETY",
-            "HARI 3: RP 400.000 + 25 PERMATA",
-            "HARI 4: RP 600.000 + 35 PERMATA + AURA API",
-            "HARI 5: RP 850.000 + 50 PERMATA + RANSEL TAKTIS",
-            "HARI 6: RP 1.200.000 + 75 PERMATA",
-            "HARI 7 JACKPOT: RP 2.500.000 + 150 PERMATA + SABIT EMAS"
-        ];
-        var info = new TextView(this)
-        {
-            Text = $"STREAK LOGIN AKTIF: {_net.Profile.StreakDay} HARI BERTURUT-TURUT\n\n" + string.Join("\n", rewards),
-            TextSize = 13f
-        };
-        info.SetTextColor(Color.White);
-        layout.AddView(info);
-
-        new AlertDialog.Builder(this)
-            .SetTitle("REWARD HARIAN 7-HARI")!
-            .SetView(WrapScroll(layout))!
-            .SetPositiveButton(_net.Profile.CanClaimDaily ? "KLAIM REWARD HARI INI" : "SUDAH DIKLAIM HARI INI", (_, _) =>
-            {
-                _sfx?.Play("ui_click");
-                if (_net.Profile.CanClaimDaily) _net.ClaimDaily();
-            })!
-            .SetNegativeButton("TUTUP", (_, _) => _sfx?.Play("ui_click"))!
-            .Show();
-    }
-
-    private void ShowSocialAndShareDialog()
-    {
-        if (_net == null) return;
-        var layout = CreateDialogContainer(out _);
-
-        var handleInput = new EditText(this)
-        {
-            Text = string.IsNullOrEmpty(_net.Profile.SocialHandle) ? $"@{_net.Profile.Name.ToLowerInvariant()}" : _net.Profile.SocialHandle,
-            Hint = "@username sosmed / email Google"
-        };
-        handleInput.SetTextColor(Color.White);
-        layout.AddView(handleInput);
-
-        string[] providers = ["google", "tiktok", "instagram", "x", "whatsapp"];
-        foreach (var p in providers)
-        {
-            string prov = p;
-            var btn = CreateStyledButton($"TAUTKAN AKUN {prov.ToUpperInvariant()} (+30 PERMATA)", false);
-            btn.Click += (_, _) => { _sfx?.Play("ui_click"); _net.LinkSocial(prov, _net.Profile.Name, (handleInput.Text ?? "@juragansawit").Trim()); };
-            layout.AddView(btn);
-        }
-
-        var shareBtn = CreateStyledButton("BAGIKAN KARTU PENCAPAIAN RESMI", true);
-        shareBtn.Click += async (_, _) =>
-        {
-            _sfx?.Play("ui_click");
-            _hud?.ShowToast("MENYIAPKAN LINK KARTU PENCAPAIAN LIVE...");
-            var (_, text) = await _net.CreateShareCardAsync();
-            RunOnUiThread(() =>
-            {
-                var sendIntent = new Intent(Intent.ActionSend);
-                sendIntent.SetType("text/plain");
-                sendIntent.PutExtra(Intent.ExtraSubject, "Pencapaian Nyawit Live 3D");
-                sendIntent.PutExtra(Intent.ExtraText, text);
-                StartActivity(Intent.CreateChooser(sendIntent, "Bagikan Pencapaian Nyawit Live 3D"));
-            });
-        };
-        layout.AddView(shareBtn);
-
-        new AlertDialog.Builder(this)
-            .SetTitle("TAUTKAN SOSMED & SHARE PENCAPAIAN")!
-            .SetView(WrapScroll(layout))!
-            .SetPositiveButton("TUTUP", (_, _) => _sfx?.Play("ui_click"))!
-            .Show();
-    }
-
-    private void AddOptionGroup(LinearLayout parent, string heading, (string id, string label)[] items, Action<string> onPick)
-    {
-        var tv = new TextView(this) { Text = heading, TextSize = 11.5f };
-        tv.SetTextColor(Color.Argb(255, 245, 195, 56));
-        parent.AddView(tv);
-        foreach (var (id, label) in items)
-        {
-            string captured = id;
-            var b = CreateStyledButton(label, false);
-            b.Click += (_, _) => { _sfx?.Play("ui_click"); onPick(captured); };
-            parent.AddView(b);
-        }
-    }
-
-    private LinearLayout CreateDialogContainer(out int pad)
-    {
-        float dp = Resources?.DisplayMetrics?.Density ?? 2.5f;
-        pad = (int)(16 * dp);
-        var ll = new LinearLayout(this) { Orientation = Orientation.Vertical };
-        ll.SetPadding(pad, pad, pad, pad);
-        ll.SetBackgroundColor(Color.Argb(255, 12, 17, 21));
-        return ll;
-    }
-
-    private ScrollView WrapScroll(View child)
-    {
-        var sv = new ScrollView(this);
-        sv.AddView(child);
-        return sv;
-    }
-
-    private Button CreateStyledButton(string text, bool highlightGold)
-    {
-        var b = new Button(this) { Text = text, TextSize = 11.5f };
-        b.SetBackgroundColor(highlightGold ? Color.Argb(255, 246, 195, 56) : Color.Argb(255, 22, 34, 42));
-        b.SetTextColor(highlightGold ? Color.Black : Color.White);
-        var lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent) { TopMargin = 10 };
-        b.LayoutParameters = lp;
-        return b;
+        if (_prefs == null || _renderer == null) return;
+        var ed = _prefs.Edit()!;
+        ed.PutInt("gfx_preset", (int)_renderer.Quality.CurrentPreset);
+        ed.PutInt("gfx_fps", _renderer.Quality.TargetFps);
+        ed.PutInt("gfx_shadow", (int)_renderer.Quality.ShadowTier);
+        ed.PutBoolean("gfx_clouds", _renderer.Quality.CloudsEnabled);
+        ed.PutBoolean("gfx_particles", _renderer.Quality.ParticlesEnabled);
+        ed.PutBoolean("gfx_show_fps", _renderer.Quality.ShowFpsHud);
+        ed.Apply();
     }
 
     private void RestoreLocalProfile(PlayerProfile p)
@@ -712,10 +628,12 @@ public class MainActivity : Activity
         p.Id = _prefs.GetString("player_id", "") ?? "";
         p.Token = _prefs.GetString("player_token", "") ?? "";
         p.Name = _prefs.GetString("player_name", $"Juragan{Random.Shared.Next(100, 999)}") ?? "JuraganSawit";
-        p.Avatar.Hat = _prefs.GetString("av_hat", "hat_caping") ?? "hat_caping";
-        p.Avatar.Back = _prefs.GetString("av_back", "back_basket") ?? "back_basket";
-        p.Avatar.Tool = _prefs.GetString("av_tool", "tool_egrek") ?? "tool_egrek";
+        p.Avatar.Hat = _prefs.GetString("av_hat", MeshCatalog.HatCaping) ?? MeshCatalog.HatCaping;
+        p.Avatar.Back = _prefs.GetString("av_back", MeshCatalog.BackBasket) ?? MeshCatalog.BackBasket;
+        p.Avatar.Tool = _prefs.GetString("av_tool", MeshCatalog.ToolEgrek) ?? MeshCatalog.ToolEgrek;
         p.Avatar.OutfitHex = _prefs.GetString("av_hex", "#27AE60") ?? "#27AE60";
+        p.Avatar.Glasses = _prefs.GetBoolean("av_glasses", false);
+        p.Avatar.WaistParang = _prefs.GetBoolean("av_parang", true);
     }
 
     private void SaveLocalProfile()
@@ -729,6 +647,8 @@ public class MainActivity : Activity
         ed.PutString("av_back", _net.Profile.Avatar.Back);
         ed.PutString("av_tool", _net.Profile.Avatar.Tool);
         ed.PutString("av_hex", _net.Profile.Avatar.OutfitHex);
+        ed.PutBoolean("av_glasses", _net.Profile.Avatar.Glasses);
+        ed.PutBoolean("av_parang", _net.Profile.Avatar.WaistParang);
         ed.Apply();
     }
 

@@ -91,10 +91,12 @@ public sealed class ProceduralSfxPlayer : IDisposable
             BuildSweep(1047f, 1060f, 0.20f, 0.44f, false));
     }
 
+    public bool Muted { get; set; }
+
     public void Play(string name)
     {
-        if (_disposed || !_clips.TryGetValue(name, out var pcm)) return;
-        _ = Task.Run(() =>
+        if (_disposed || Muted || !_clips.TryGetValue(name, out var pcm)) return;
+        _ = Task.Run(async () =>
         {
             try
             {
@@ -111,7 +113,7 @@ public sealed class ProceduralSfxPlayer : IDisposable
                 using var track = new AudioTrack(attrs, fmt, byteLen, AudioTrackMode.Static, 0);
                 track.Write(pcm, 0, pcm.Length);
                 track.Play();
-                Task.Delay((int)(pcm.Length * 1000.0 / SampleRate) + 45).Wait();
+                await Task.Delay((int)(pcm.Length * 1000.0 / SampleRate) + 45).ConfigureAwait(false);
                 track.Stop();
             }
             catch { }
@@ -238,6 +240,8 @@ public sealed class VoiceChatManager : IDisposable
             catch { }
         });
     }
+
+    public bool MicEnabled => IsMicTransmitting;
 
     public bool SetMicEnabled(bool enable)
     {

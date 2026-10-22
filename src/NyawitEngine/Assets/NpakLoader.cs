@@ -13,6 +13,7 @@ public static class MeshCatalog
     public const string TropicalFern = "tropical_fern";
     public const string RockBoulder = "rock_boulder";
     public const string CanterTruckBody = "canter_truck_body";
+    public const string CanterSteeringWheel = "canter_steering_wheel";
     public const string TruckWheel = "truck_wheel";
     public const string TruckCargoHeap = "truck_cargo_heap";
     public const string AngkongCart = "angkong_cart";
@@ -22,6 +23,8 @@ public static class MeshCatalog
     public const string WeighbridgeRam = "weighbridge_ram";
     public const string MandorPost = "mandor_post";
     public const string WoodenBridge = "wooden_bridge";
+    public const string GarageShowroom = "garage_showroom";
+    public const string VfxPuffQuad = "vfx_puff_quad";
     public const string CelengBoar = "celeng_boar";
     public const string BoarLeg = "boar_leg";
     public const string CharTorsoHead = "char_torso_head";
@@ -37,6 +40,9 @@ public static class MeshCatalog
     public const string HatCowboy = "hat_cowboy";
     public const string HatCrownGold = "hat_crown_gold";
 
+    public const string AccGlasses = "acc_glasses";
+    public const string AccParangWaist = "acc_parang_waist";
+
     public const string BackBasket = "back_basket";
     public const string BackPack = "back_pack";
     public const string BackCape = "back_cape";
@@ -44,17 +50,20 @@ public static class MeshCatalog
 
     public const string ToolEgrek = "tool_egrek";
     public const string ToolDodos = "tool_dodos";
+    public const string ToolTojok = "tool_tojok";
     public const string ToolEgrekDragon = "tool_egrek_dragon";
 
     public static readonly string[] AllRequiredNames =
     [
         PalmTrunk, PalmCrown, TbsBunch, TropicalFern, RockBoulder,
-        CanterTruckBody, TruckWheel, TruckCargoHeap, AngkongCart,
-        PksFactory, PksFan, SteamPuff, WeighbridgeRam, MandorPost, WoodenBridge, CelengBoar, BoarLeg,
+        CanterTruckBody, CanterSteeringWheel, TruckWheel, TruckCargoHeap, AngkongCart,
+        PksFactory, PksFan, SteamPuff, WeighbridgeRam, MandorPost, WoodenBridge,
+        GarageShowroom, VfxPuffQuad, CelengBoar, BoarLeg,
         CharTorsoHead, CharHead, CharArm, CharForearmHand, CharLeg, CharCalfBoot,
         HatCaping, HatSafety, HatHeadband, HatCowboy, HatCrownGold,
+        AccGlasses, AccParangWaist,
         BackBasket, BackPack, BackCape, BackWingsGold,
-        ToolEgrek, ToolDodos, ToolEgrekDragon
+        ToolEgrek, ToolDodos, ToolTojok, ToolEgrekDragon
     ];
 }
 

@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using Android.Content;
+using Android.Graphics;
 using Android.Opengl;
 using Android.Runtime;
 using Java.Nio;
@@ -18,9 +20,10 @@ namespace Nyawit.AndroidClient.Rendering;
 
 public enum AppSceneStage : byte
 {
-    Lobby = 0,
-    PreparingWorld = 1,
-    Gameplay = 2,
+    Splash = 0,          // Custom XyVerse + Nyawit Live boot splash & shader/atlas warm-up
+    Lobby = 1,           // Dedicated separate 3D Garage/Workshop Showroom (NOT inside plantation map!)
+    PreparingWorld = 2,  // Full-screen "MENYIAPKAN DUNIA" world streaming screen
+    Gameplay = 3,        // Live multiplayer plantation open world
 }
 
 public sealed class GpuMeshHandle
@@ -39,16 +42,39 @@ public struct ProjectedLabel
     public bool IsSpeaking;
 }
 
+public struct VfxParticle
+{
+    public bool Active;
+    public float X, Y, Z;
+    public float Vx, Vy, Vz;
+    public float SizeStart, SizeEnd;
+    public float R, G, B, Alpha;
+    public float Age, Life;
+    public float Spin;
+}
+
+public struct SmoothedRigPose
+{
+    public bool Initialized;
+    public float HipOffsetY, TorsoRx;
+    public float ThighLRx, KneeLRx, ThighRRx, KneeRRx;
+    public float UaLRx, UaLRz, FaLRx, FaLRy;
+    public float UaRRx, UaRRz, FaRRx, FaRRy;
+}
+
 /// <summary>
-/// NyawitEngine v3.0 Watertight OpenGL ES 3.0 Hardware-Instanced PBR Renderer &amp; Full RigidBody Integrator:
-///   - Zero mesh holes ("0% bolong-bolong"): GL_CULL_FACE disabled + gl_FrontFacing normal orientation + watertight NPAK v3.0
-///   - 3D Main Lobby Showcase Stage + "MENYIAPKAN DUNIA..." Loading Stage + Live Multiplayer Plantation World
-///   - Full 11-Part Articulated Human Anatomy Rig (Head/Face/Eyes/Hair + Torso/Belt + UpperArm + Forearm/5-Finger Hand + Thigh + Calf/Boot)
-///   - Full Action &amp; Hold Animations: Two-Hand Egrek Grip &amp; Slash, Knee-Squat Ground Pickup, Two-Hand TBS Chest Hold, Parabolic Throw, Angkong Push, Seated Steering
-///   - 4-Wheel Spring-Damper Vehicle Suspension + Steered Front Wheels + Rolling Tires + Chassis Pitch/Roll ("Canter Oleng")
+/// NyawitEngine v4.0 Photorealistic OpenGL ES 3.0 Hardware-Instanced PBR + Shadow-Mapped Renderer:
+///   - 2048x2048 Mipmapped + Anisotropic RGBA8 PBR Texture Atlas + Zero-Seam Alpha Cutout Foliage
+///   - Real 1024x1024 Hardware Directional Sun Shadow Map FBO + 4-Tap Rotated Poisson PCF
+///   - Multi-Scale Splatmapped Laterite Dirt Road / Lush Plantation Grass / Concrete PKS Yard
+///   - Animated Volumetric Cumulus Sky Clouds + Atmospheric Golden Haze + Soft GPU VFX Particle Pool
+///   - Separate Dedicated 3D Garage/Workshop Lobby Scene (14 draw calls -> locked 60-120 FPS!)
+///   - Spring-Smoothed Fluid Human Kinematics + Complete Accessories + COE Canter Dual Rear Wheels & Live Steering Wheel
 /// </summary>
 public sealed class Gles3InstancedRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
 {
+    private const int ShadowMapSize = 1024;
+
     private const string SkyVertexSrc = @"#version 300 es
 precision highp float;
 const vec2 kQuad[4] = vec2[4](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0), vec2(1.0, 1.0));
@@ -69,18 +95,106 @@ uniform vec3 uSkyZenith;
 uniform vec3 uSkyHorizon;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
+uniform float uTime;
+uniform float uCloudsOn;
 out vec4 fragColor;
+
+float hash21(vec2 p) {
+    p = fract(p * vec2(127.1, 311.7));
+    p += dot(p, p + 34.23);
+    return fract(p.x * p.y);
+}
+float vnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+float fbmCloud(vec2 p) {
+    float s = 0.0, a = 0.52;
+    mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+    for (int i = 0; i < 5; i++) {
+        s += a * vnoise(p);
+        p = m * p;
+        a *= 0.5;
+    }
+    return s;
+}
+
 void main() {
     vec3 d = normalize(vRay);
-    float up = clamp(d.y * 1.15 + 0.06, 0.0, 1.0);
-    vec3 col = mix(uSkyHorizon, uSkyZenith, pow(up, 0.62));
-    float sd = max(dot(d, normalize(uSunDir)), 0.0);
-    col += uSunColor * (pow(sd, 12.0) * 0.28 + smoothstep(0.9965, 0.9994, sd) * 1.85);
+    vec3 L = normalize(uSunDir);
+    float up = clamp(d.y * 1.15 + 0.04, 0.0, 1.0);
+    vec3 col = mix(uSkyHorizon, uSkyZenith, pow(up, 0.58));
+
+    // Volumetric Tropical Cumulus Cloud Deck + Sunlit Silver-Gold Lining!
+    if (uCloudsOn > 0.5 && d.y > 0.015) {
+        vec2 uvC = d.xz / (d.y + 0.14);
+        vec2 drift = vec2(uTime * 0.022, uTime * 0.011);
+        float dens = fbmCloud(uvC * 0.95 + drift);
+        float detail = fbmCloud(uvC * 2.65 - drift * 1.4);
+        float cloud = smoothstep(0.47, 0.86, dens * 0.80 + detail * 0.28);
+        // Directional derivative toward sun for realistic self-shadowed cloud bellies!
+        float densSun = fbmCloud((uvC + L.xz * 0.12) * 0.95 + drift);
+        float lit = clamp(0.55 + (dens - densSun) * 3.4, 0.18, 1.15);
+        float sd = max(dot(d, L), 0.0);
+        vec3 cloudDark = mix(vec3(0.24, 0.30, 0.40), uSkyHorizon * 0.72, 0.35);
+        vec3 cloudBright = vec3(1.06, 1.03, 0.98) + uSunColor * pow(sd, 5.0) * 0.45;
+        vec3 cCol = mix(cloudDark, cloudBright, lit);
+        float horizonFade = smoothstep(0.015, 0.22, d.y);
+        col = mix(col, cCol, cloud * 0.90 * horizonFade);
+    }
+
+    float sd = max(dot(d, L), 0.0);
+    col += uSunColor * (pow(sd, 9.0) * 0.20 + pow(sd, 96.0) * 0.55 + smoothstep(0.9968, 0.9995, sd) * 1.9);
+    // Warm tropical atmospheric horizon scatter
+    col = mix(col, uSkyHorizon * 1.06, pow(1.0 - clamp(abs(d.y) * 2.4, 0.0, 1.0), 4.0) * 0.45);
     col = (col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14);
     fragColor = vec4(pow(clamp(col, 0.0, 1.0), vec3(0.4545)), 1.0);
 }";
 
-    private const string ShadowVertexSrc = @"#version 300 es
+    // Hardware Depth-Only Sun Shadow Caster Program (supports wind animation + alpha-cutout palm fronds!)
+    private const string DepthShadowVertexSrc = @"#version 300 es
+precision highp float;
+layout(location = 0) in vec3 aPos;
+layout(location = 2) in vec2 aUV;
+layout(location = 4) in vec4 iRow0;
+layout(location = 5) in vec4 iRow1;
+layout(location = 6) in vec4 iRow2;
+layout(location = 7) in vec4 iTintAndWind;
+uniform mat4 uLightVP;
+uniform float uTime;
+out vec2 vUV;
+void main() {
+    vec4 localPos = vec4(aPos, 1.0);
+    vec3 worldPos = vec3(dot(iRow0, localPos), dot(iRow1, localPos), dot(iRow2, localPos));
+    float windAmp = iTintAndWind.w;
+    if (windAmp > 0.001) {
+        float h = max(0.0, aPos.y + length(aPos.xz) * 0.42);
+        float gust = sin(uTime * 2.05 + iRow0.w * 0.14 + iRow2.w * 0.11);
+        float flutter = cos(uTime * 3.90 + aPos.x * 2.2 + iRow2.w * 0.17);
+        worldPos.x += gust * 0.048 * h * windAmp;
+        worldPos.z += flutter * 0.026 * h * windAmp;
+        worldPos.y -= abs(gust) * 0.010 * h * windAmp;
+    }
+    float isDye = step(1.5, aUV.x);
+    vUV = vec2(aUV.x - isDye * 2.0, aUV.y);
+    gl_Position = uLightVP * vec4(worldPos, 1.0);
+}";
+
+    private const string DepthShadowFragmentSrc = @"#version 300 es
+precision mediump float;
+in vec2 vUV;
+uniform sampler2D uAtlas;
+void main() {
+    if (texture(uAtlas, vUV).a < 0.44) discard;
+}";
+
+    private const string ContactShadowVertexSrc = @"#version 300 es
 precision highp float;
 layout(location = 0) in vec3 aPos;
 layout(location = 3) in vec4 aColor;
@@ -97,12 +211,12 @@ void main() {
     gl_Position = uVP * vec4(wp, 1.0);
 }";
 
-    private const string ShadowFragmentSrc = @"#version 300 es
-precision highp float;
+    private const string ContactShadowFragmentSrc = @"#version 300 es
+precision mediump float;
 in float vAlpha;
 out vec4 fragColor;
 void main() {
-    fragColor = vec4(0.02, 0.05, 0.04, clamp(vAlpha * 0.56, 0.0, 0.62));
+    fragColor = vec4(0.015, 0.035, 0.025, clamp(vAlpha * 0.48, 0.0, 0.56));
 }";
 
     private const string VertexShaderSrc = @"#version 300 es
@@ -117,26 +231,28 @@ layout(location = 6) in vec4 iRow2;
 layout(location = 7) in vec4 iTintAndWind;
 
 uniform mat4 uVP;
+uniform mat4 uLightVP;
 uniform float uTime;
 
 out vec3 vNormal;
 out vec3 vWorldPos;
 out vec4 vColor;
-out vec3 vTint;
+out vec4 vTintWind;
 out vec2 vUV;
+out vec4 vShadowCoord;
 
 void main() {
     vec4 localPos = vec4(aPos, 1.0);
     vec3 worldPos = vec3(dot(iRow0, localPos), dot(iRow1, localPos), dot(iRow2, localPos));
 
     float windAmp = iTintAndWind.w;
-    if (windAmp > 0.001) {
+    if (windAmp > 0.001 && aColor.a < 0.99) {
         float h = max(0.0, aPos.y + length(aPos.xz) * 0.42);
-        float gust = sin(uTime * 2.15 + iRow0.w * 0.14 + iRow2.w * 0.11);
-        float flutter = cos(uTime * 4.30 + aPos.x * 2.4 + iRow2.w * 0.17);
-        worldPos.x += gust * 0.052 * h * windAmp;
-        worldPos.z += flutter * 0.028 * h * windAmp;
-        worldPos.y -= abs(gust) * 0.012 * h * windAmp;
+        float gust = sin(uTime * 2.05 + iRow0.w * 0.14 + iRow2.w * 0.11);
+        float flutter = cos(uTime * 3.90 + aPos.x * 2.2 + iRow2.w * 0.17);
+        worldPos.x += gust * 0.048 * h * windAmp;
+        worldPos.z += flutter * 0.026 * h * windAmp;
+        worldPos.y -= abs(gust) * 0.010 * h * windAmp;
     }
 
     mat3 rotScale = mat3(
@@ -147,8 +263,9 @@ void main() {
     vNormal = normalize(rotScale * aNormal);
     vWorldPos = worldPos;
     vColor = aColor;
-    vTint = iTintAndWind.rgb;
+    vTintWind = iTintAndWind;
     vUV = aUV;
+    vShadowCoord = uLightVP * vec4(worldPos, 1.0);
     gl_Position = uVP * vec4(worldPos, 1.0);
 }";
 
@@ -157,9 +274,12 @@ precision highp float;
 in vec3 vNormal;
 in vec3 vWorldPos;
 in vec4 vColor;
-in vec3 vTint;
+in vec4 vTintWind;
 in vec2 vUV;
+in vec4 vShadowCoord;
 
+uniform sampler2D uAtlas;
+uniform sampler2D uShadowMap;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform vec3 uSkyTop;
@@ -168,90 +288,155 @@ uniform vec3 uFogColor;
 uniform vec3 uCamPos;
 uniform float uFogDensity;
 uniform float uTime;
-uniform float uDetailStrength;
+uniform int uRenderMode;   // 0 = Standard PBR + Alpha-Cutout Mesh, 1 = Multi-Scale PBR Terrain, 2 = Soft Alpha VFX Puff
+uniform int uShadowMode;   // 0 = Off, 1 = Single-Tap Fast Shadow, 2 = 4-Tap Soft PCF Shadow
+uniform float uCloudsOn;
 
 out vec4 fragColor;
 
-float hash21(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
+vec2 tileUv(vec2 w, vec2 cellOrigin) {
+    vec2 f = clamp(fract(w), vec2(0.018), vec2(0.982));
+    return cellOrigin + f * 0.25;
 }
 
-float vnoise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float a = hash21(i);
-    float b = hash21(i + vec2(1.0, 0.0));
-    float c = hash21(i + vec2(0.0, 1.0));
-    float d = hash21(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+float computeSunShadow(vec3 N, vec3 L, float camDist) {
+    if (uShadowMode <= 0 || camDist > 34.0) return 1.0;
+    vec3 sc = vShadowCoord.xyz / max(vShadowCoord.w, 1e-4);
+    sc = sc * 0.5 + 0.5;
+    if (sc.x < 0.01 || sc.x > 0.99 || sc.y < 0.01 || sc.y > 0.99 || sc.z > 0.998) return 1.0;
+
+    float bias = max(0.0022 * (1.0 - max(dot(N, L), 0.0)), 0.00085);
+    float fade = 1.0 - smoothstep(23.0, 33.5, camDist);
+
+    if (uShadowMode == 1) {
+        float d = texture(uShadowMap, sc.xy).r;
+        float lit = sc.z - bias <= d ? 1.0 : 0.24;
+        return mix(1.0, lit, fade);
+    }
+
+    const vec2 kPoisson[4] = vec2[4](
+        vec2(-0.9420, -0.3990),
+        vec2( 0.9455, -0.7689),
+        vec2(-0.0941, -0.9293),
+        vec2( 0.3449,  0.2938)
+    );
+    float vis = 0.0;
+    float spread = 1.45 / 1024.0;
+    for (int i = 0; i < 4; i++) {
+        float d = texture(uShadowMap, sc.xy + kPoisson[i] * spread).r;
+        vis += (sc.z - bias <= d) ? 1.0 : 0.20;
+    }
+    return mix(1.0, vis * 0.25, fade);
 }
 
 void main() {
-    // True double-sided surface shading guarantee: backfaces orient cleanly toward camera!
+    float dist = length(uCamPos - vWorldPos);
+
+    // Mode 2: Soft Volumetric Alpha Particle Puff (Tire Dust, Diesel Exhaust, Harvest Chaff, Boiler Steam!)
+    if (uRenderMode == 2) {
+        float isDyeP = step(1.5, vUV.x);
+        vec2 puv = vec2(vUV.x - isDyeP * 2.0, vUV.y);
+        vec4 ptex = texture(uAtlas, puv);
+        float alpha = ptex.a * clamp(vTintWind.w, 0.0, 1.0);
+        if (alpha < 0.02) discard;
+        vec3 pcol = pow(max(ptex.rgb, vec3(0.01)), vec3(2.2)) * vTintWind.rgb;
+        vec3 mappedP = (pcol * (2.51 * pcol + 0.03)) / (pcol * (2.43 * pcol + 0.59) + 0.14);
+        fragColor = vec4(pow(clamp(mappedP, 0.0, 1.0), vec3(0.4545)), alpha);
+        return;
+    }
+
     vec3 N = normalize(vNormal) * (gl_FrontFacing ? 1.0 : -1.0);
     vec3 L = normalize(uSunDir);
     vec3 V = normalize(uCamPos - vWorldPos);
-    float dist = length(uCamPos - vWorldPos);
 
-    vec3 effTint = mix(vec3(1.0), vTint, step(0.75, vUV.x));
-    vec3 base = pow(max(vColor.rgb, vec3(0.001)), vec3(2.15)) * pow(max(effTint, vec3(0.001)), vec3(1.6));
-    float ao = mix(0.22, 1.0, vColor.a);
-    float gloss = vUV.y;
-
-    if (vUV.y < 0.12 && dist < 38.0 && uDetailStrength > 0.01) {
-        float fade = uDetailStrength * (1.0 - smoothstep(14.0, 38.0, dist));
-        float n1 = vnoise(vWorldPos.xz * 2.6);
-        float n2 = vnoise(vWorldPos.xz * 9.5);
-        float micro = (n1 - 0.5) * 0.28 + (n2 - 0.5) * 0.16;
-        base *= (1.0 + micro * fade);
-        float hDetail = n1 * 0.65 + n2 * 0.35;
-        vec3 dN = vec3(dFdx(hDetail), 0.0, dFdy(hDetail)) * 3.2 * fade;
-        N = normalize(N - dN);
-        gloss = mix(0.14, 0.80, clamp(vUV.x * 1.35 * n1, 0.0, 1.0));
+    // Water canal surface path
+    if (uRenderMode == 0 && vUV.y > 0.903 && vUV.y < 0.907 && vColor.b > 0.55 && vColor.r < 0.12) {
+        float w1 = sin(vWorldPos.x * 1.45 + uTime * 2.1 + sin(vWorldPos.z * 1.7) * 0.8);
+        float w2 = cos(vWorldPos.z * 2.55 - uTime * 1.6 + vWorldPos.x * 0.7);
+        N = normalize(vec3(w1 * 0.14, 1.0, w2 * 0.16));
+        float fres = pow(1.0 - max(dot(N, V), 0.0), 3.4);
+        vec3 waterAlb = mix(vec3(0.032, 0.058, 0.045), uSkyTop * 0.92, clamp(fres * 0.88 + 0.10, 0.0, 1.0));
+        vec3 Hw = normalize(L + V);
+        waterAlb += uSunColor * pow(max(dot(N, Hw), 0.0), 96.0) * 0.85;
+        float fogW = smoothstep(48.0, 190.0, dist) * 0.80;
+        vec3 outW = mix(waterAlb, uFogColor, fogW);
+        outW = (outW * (2.51 * outW + 0.03)) / (outW * (2.43 * outW + 0.59) + 0.14);
+        fragColor = vec4(pow(clamp(outW, 0.0, 1.0), vec3(0.4545)), 1.0);
+        return;
     }
 
-    if (vUV.y > 0.895 && vUV.y < 0.915) {
-        float w1 = sin(vWorldPos.x * 1.35 + uTime * 2.2 + sin(vWorldPos.z * 1.8) * 0.8);
-        float w2 = cos(vWorldPos.z * 2.65 - uTime * 1.7 + vWorldPos.x * 0.7);
-        N = normalize(vec3(w1 * 0.15, 1.0, w2 * 0.17));
-        float fres = pow(1.0 - max(dot(N, V), 0.0), 3.2);
-        base = mix(vec3(0.012, 0.095, 0.135), uSkyTop * 0.85, clamp(fres * 0.85 + 0.12, 0.0, 1.0));
-        float foam = smoothstep(3.55, 4.45, abs(vWorldPos.z + 48.0));
-        base = mix(base, vec3(0.55, 0.72, 0.78), foam * 0.55);
-        gloss = 0.92;
+    vec3 base;
+    float gloss = vColor.a;
+
+    if (uRenderMode == 1) {
+        // Multi-scale splatmapped plantation ground: Grass [0.00, 0.00] + Laterite Dirt Road [0.25, 0.00] + Concrete [0.25, 0.75]
+        float roadW = clamp(vUV.x, 0.0, 1.0);
+        float mudW  = clamp(vUV.y, 0.0, 1.0);
+        float yardW = clamp(1.0 - (length(vWorldPos.xz - vec2(0.0, -15.0)) - 13.5) / 4.5, 0.0, 1.0);
+
+        vec3 gNear = texture(uAtlas, tileUv(vWorldPos.xz * 0.28, vec2(0.00, 0.00))).rgb;
+        vec3 gFar  = texture(uAtlas, tileUv(vWorldPos.xz * 0.055 + 0.37, vec2(0.00, 0.00))).rgb;
+        vec3 grass = mix(gNear, gFar, 0.42);
+
+        vec3 dNear = texture(uAtlas, tileUv(vWorldPos.xz * 0.24, vec2(0.25, 0.00))).rgb;
+        vec3 dFar  = texture(uAtlas, tileUv(vWorldPos.xz * 0.062 + 0.19, vec2(0.25, 0.00))).rgb;
+        vec3 dirt  = mix(dNear, dFar, 0.36);
+
+        vec3 conc  = texture(uAtlas, tileUv(vWorldPos.xz * 0.22, vec2(0.25, 0.75))).rgb;
+
+        vec3 srgbTex = mix(grass, dirt, smoothstep(0.18, 0.78, max(roadW, mudW * 0.72)));
+        srgbTex = mix(srgbTex, conc, yardW * 0.92);
+        base = pow(max(srgbTex * vColor.rgb, vec3(0.002)), vec3(2.2));
+        // Subtle normal relief from luminance derivative on nearby ground!
+        if (dist < 28.0) {
+            float lum = dot(srgbTex, vec3(0.333));
+            float bumpFade = 1.0 - smoothstep(14.0, 28.0, dist);
+            N = normalize(N - vec3(dFdx(lum), 0.0, dFdy(lum)) * 2.1 * bumpFade);
+        }
+        gloss = clamp(gloss + mudW * 0.35, 0.04, 0.85);
+    } else {
+        float isDyeable = step(1.5, vUV.x);
+        vec2 atlasUV = vec2(vUV.x - isDyeable * 2.0, vUV.y);
+        vec4 texel = texture(uAtlas, atlasUV);
+        if (texel.a < 0.44) discard;
+        vec3 effTint = mix(vec3(1.0), vTintWind.rgb, isDyeable);
+        // Allow golden/highlight tint boost even on non-dyeable fruits (> 1.15)
+        effTint *= mix(vec3(1.0), vTintWind.rgb, step(1.12, max(vTintWind.r, vTintWind.g)) * (1.0 - isDyeable));
+        base = pow(max(texel.rgb * vColor.rgb, vec3(0.002)), vec3(2.2)) * pow(max(effTint, vec3(0.002)), vec3(1.65));
     }
 
-    if (gloss >= 0.94) {
-        vec3 hdrEm = base * 3.2;
-        float fogEm = smoothstep(52.0, 190.0, dist) * 0.75;
-        vec3 outEm = mix(hdrEm, uFogColor, fogEm);
-        outEm = (outEm * (2.51 * outEm + 0.03)) / (outEm * (2.43 * outEm + 0.59) + 0.14);
+    // Self-illuminated lamps / LED signs / fluorescent shop tubes
+    if (gloss > 0.965) {
+        vec3 hdrEm = base * 2.65;
+        vec3 outEm = (hdrEm * (2.51 * hdrEm + 0.03)) / (hdrEm * (2.43 * hdrEm + 0.59) + 0.14);
         fragColor = vec4(pow(clamp(outEm, 0.0, 1.0), vec3(0.4545)), 1.0);
         return;
     }
 
     vec3 H = normalize(L + V);
     float ndl = max(dot(N, L), 0.0);
-    float wrapNdl = max(dot(N, L) * 0.65 + 0.35, 0.0);
+    // Subsurface botanical translucency for oil palm fronds & ferns!
+    float isBotanical = step(0.75, 1.0 - abs(fract(vUV.x) - 0.125)) * step(0.25, vUV.y) * (1.0 - step(0.50, vUV.y));
+    float sss = (uRenderMode == 0 ? 1.0 : 0.0) * isBotanical * pow(clamp(dot(-V, L) * 0.5 + 0.5, 0.0, 1.0), 2.4) * 0.52;
+
+    float shadow = computeSunShadow(N, L, dist);
+    // Overhead drifting cumulus cloud light dapples across the vast plantation!
+    if (uCloudsOn > 0.5) {
+        float cWave = sin(vWorldPos.x * 0.042 + uTime * 0.32) * cos(vWorldPos.z * 0.038 + uTime * 0.21);
+        shadow *= mix(0.80, 1.05, cWave * 0.5 + 0.5);
+    }
+
     vec3 hemi = mix(uGroundBounce, uSkyTop, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
+    float shininess = mix(14.0, 96.0, clamp(gloss, 0.0, 1.0));
+    float spec = pow(max(dot(N, H), 0.0), shininess) * gloss * shadow;
+    float rim = pow(1.0 - max(dot(N, V), 0.0), 4.0) * 0.10;
 
-    float isFoliage = step(0.55, gloss) * (1.0 - step(0.68, gloss));
-    float sss = isFoliage * pow(clamp(dot(-V, L) * 0.5 + 0.5, 0.0, 1.0), 2.6) * 0.65;
-
-    float shininess = mix(16.0, 110.0, clamp(gloss, 0.0, 1.0));
-    float specStrength = mix(0.05, 0.95, clamp(gloss, 0.0, 1.0)) * ao;
-    float spec = pow(max(dot(N, H), 0.0), shininess) * specStrength;
-    float rim = pow(1.0 - max(dot(N, V), 0.0), 3.8) * 0.14 * ao;
-
-    vec3 lit = base * (hemi * ao + uSunColor * (ndl * 1.15 + wrapNdl * 0.22 * ao + sss))
-             + uSunColor * spec * 0.45
+    vec3 lit = base * (hemi + uSunColor * (ndl * shadow * 1.18 + 0.10 + sss))
+             + uSunColor * spec * 0.52
              + uSkyTop * rim;
 
-    float fogAmt = smoothstep(48.0, 195.0, dist) * (0.82 + uFogDensity * 12.0);
-    vec3 hdr = mix(lit, uFogColor, clamp(fogAmt, 0.0, 0.88));
+    float fogAmt = smoothstep(54.0, 205.0, dist) * (0.78 + uFogDensity * 10.0);
+    vec3 hdr = mix(lit, uFogColor, clamp(fogAmt, 0.0, 0.86));
 
     vec3 mapped = (hdr * (2.51 * hdr + 0.03)) / (hdr * (2.43 * hdr + 0.59) + 0.14);
     fragColor = vec4(pow(clamp(mapped, 0.0, 1.0), vec3(0.4545)), 1.0);
@@ -266,23 +451,31 @@ void main() {
 
     public RigidBodyWorld Physics { get; } = null!;
     public QualityGovernor Quality { get; } = new();
-    public AppSceneStage Stage { get; private set; } = AppSceneStage.Lobby;
+    public AppSceneStage Stage { get; private set; } = AppSceneStage.Splash;
+    public float SplashProgress { get; private set; }
+    public string SplashStatus { get; private set; } = "MEMUAT ENGINE 3D & TEKSTUR PBR...";
     public float WorldPrepProgress { get; private set; }
     public string WorldPrepStatus { get; private set; } = "MENYIAPKAN DUNIA...";
     public float LobbyAvatarSpinOffset { get; set; }
+    public float LobbyOrbitYaw { get; set; } = 0.06f;
 
     public event Action<float>? OnRenderScaleChanged;
     public event Action? OnWorldReady;
+    public event Action? OnStageChanged;
 
     private readonly Dictionary<string, GpuMeshHandle[]> _gpuMeshes = new(StringComparer.Ordinal);
     private GpuMeshHandle? _terrainGpu;
     private GpuMeshHandle? _waterGpu;
-    private GpuMeshHandle? _shadowGpu;
-    private int _skyProgram, _skyVao, _uSkyInvVp, _uSkyZenith, _uSkyHorizon, _uSkySunDir, _uSkySunCol;
-    private int _shadowProgram, _uShadowVp;
+    private GpuMeshHandle? _shadowDiscGpu;
+
+    private int _atlasTexId;
+    private int _shadowMapFbo, _shadowMapDepthTex;
+    private int _depthShadowProgram, _uDepthLightVp, _uDepthTime, _uDepthAtlas;
+    private int _skyProgram, _skyVao, _uSkyInvVp, _uSkyZenith, _uSkyHorizon, _uSkySunDir, _uSkySunCol, _uSkyTime, _uSkyClouds;
+    private int _contactShadowProgram, _uContactVp;
     private int _program;
     private int _instanceVbo;
-    private int _uVp, _uTime, _uSunDir, _uSunColor, _uSkyTop, _uGroundBounce, _uFogColor, _uCamPos, _uFogDensity, _uDetailStrength;
+    private int _uVp, _uLightVp, _uTime, _uAtlas, _uShadowMap, _uSunDir, _uSunColor, _uSkyTop, _uGroundBounce, _uFogColor, _uCamPos, _uFogDensity, _uRenderMode, _uShadowMode, _uCloudsOn;
     private bool _gpuReady;
 
     private const int MaxInstancesPerBatch = 1024;
@@ -290,15 +483,23 @@ void main() {
     private readonly float[] _shadowStaging = new float[MaxInstancesPerBatch * 16];
     private readonly float[][] _treeLodStaging = [new float[256 * 16], new float[256 * 16], new float[256 * 16]];
     private readonly float[] _fruitStaging = new float[256 * 16];
-    private readonly float[] _goldStaging = new float[128 * 16];
+    private readonly float[] _goldStaging = new float[256 * 16];
     private readonly float[] _treePositionsXyz = [];
     private readonly sbyte[] _treeLodResult = [];
     private FloatBuffer? _directFloatBuffer;
 
+    // Pre-allocated zero-GC VFX particle pool & spring-smoothed animation state!
+    private readonly VfxParticle[] _vfxPool = new VfxParticle[96];
+    private int _vfxCursor;
+    private float _dustEmitAccum;
+    private float _exhaustEmitAccum;
+    private SmoothedRigPose _localRigPose;
+
     public bool InTruck;
     public float BoostTimer;
     public float JoyX, JoyY;
-    public float CamYaw = 0.25f, CamPitch = 0.30f, CamDist = 7.8f;
+    public float CamYaw = 0.25f, CamPitch = 0.28f, CamDist = 7.4f;
+    public float CameraSensitivity = 1.0f;
     public bool LockShowcaseCam;
     public int NearestRipeTreeId = -1;
     public bool NearRamWeighbridge;
@@ -326,6 +527,9 @@ void main() {
     private readonly float[] _view = new float[16];
     private readonly float[] _vp = new float[16];
     private readonly float[] _invVp = new float[16];
+    private readonly float[] _lightProj = new float[16];
+    private readonly float[] _lightView = new float[16];
+    private readonly float[] _lightVp = new float[16];
 
     private readonly List<RemotePeerState> _peersSnap = new(24);
     private readonly List<BoarNetState> _boarsSnap = new(4);
@@ -365,41 +569,126 @@ void main() {
 
         _net.OnHarvestSpawnFruit += (tx, tz, isGold) =>
         {
+            float gy = PlantationWorld.TerrainHeight(tx, tz);
+            EmitHarvestBurstVfx(tx, gy + 5.6f, tz, isGold);
+            EmitDustBurstVfx(tx + 0.6f, gy + 0.25f, tz + 0.6f, 6);
             if (InTruck) Physics.LaunchDirectTreeToTruckArc(tx, tz, isGold);
             else Physics.SpawnHarvestedGroundFruit(tx, tz, isGold);
         };
         Physics.OnCargoLandedInVehicle += (units, isGold) =>
         {
+            EmitDustBurstVfx(Physics.MainTruck.X, Physics.MainTruck.Y + 1.45f, Physics.MainTruck.Z, 5);
             _net.SendLoadTbs(units, isGold ? 1 : 0);
         };
     }
 
     public List<PalmTreeNode> Trees => _trees;
 
+    public void EmitHarvestBurstVfx(float wx, float wy, float wz, bool isGold)
+    {
+        if (!Quality.ParticlesEnabled) return;
+        for (int i = 0; i < 8; i++)
+        {
+            float ang = i * 0.785f;
+            SpawnParticle(
+                wx + MathF.Cos(ang) * 0.35f, wy, wz + MathF.Sin(ang) * 0.35f,
+                MathF.Cos(ang) * 1.9f, 0.8f - (i % 3) * 0.5f, MathF.Sin(ang) * 1.9f,
+                0.24f, 0.62f,
+                isGold ? 0.95f : 0.24f, isGold ? 0.78f : 0.42f, 0.14f, 0.78f, 0.85f);
+        }
+    }
+
+    public void EmitDustBurstVfx(float wx, float wy, float wz, int count = 5)
+    {
+        if (!Quality.ParticlesEnabled) return;
+        for (int i = 0; i < count; i++)
+        {
+            float ang = i * (6.283f / System.Math.Max(1, count));
+            SpawnParticle(
+                wx + MathF.Cos(ang) * 0.28f, wy, wz + MathF.Sin(ang) * 0.28f,
+                MathF.Cos(ang) * 1.15f, 0.75f + (i % 2) * 0.35f, MathF.Sin(ang) * 1.15f,
+                0.30f, 1.05f, 0.42f, 0.31f, 0.21f, 0.48f, 0.78f);
+        }
+    }
+
+    private void SpawnParticle(
+        float x, float y, float z,
+        float vx, float vy, float vz,
+        float sizeStart, float sizeEnd,
+        float r, float g, float b, float alpha, float life)
+    {
+        ref var p = ref _vfxPool[_vfxCursor];
+        _vfxCursor = (_vfxCursor + 1) % _vfxPool.Length;
+        p.Active = true;
+        p.X = x; p.Y = y; p.Z = z;
+        p.Vx = vx; p.Vy = vy; p.Vz = vz;
+        p.SizeStart = sizeStart; p.SizeEnd = sizeEnd;
+        p.R = r; p.G = g; p.B = b; p.Alpha = alpha;
+        p.Age = 0f; p.Life = life;
+        p.Spin = (_vfxCursor % 7) * 0.8f;
+    }
+
+    private void StepVfxParticles(float dt)
+    {
+        for (int i = 0; i < _vfxPool.Length; i++)
+        {
+            if (!_vfxPool[i].Active) continue;
+            ref var p = ref _vfxPool[i];
+            p.Age += dt;
+            if (p.Age >= p.Life) { p.Active = false; continue; }
+            p.X += p.Vx * dt;
+            p.Y += p.Vy * dt;
+            p.Z += p.Vz * dt;
+            p.Vx *= (1f - dt * 1.8f);
+            p.Vz *= (1f - dt * 1.8f);
+            p.Vy -= 1.25f * dt;
+        }
+    }
+
+    public void SkipSplashToLobby()
+    {
+        if (!_gpuReady) return;
+        SplashProgress = 1.0f;
+        SetStage(AppSceneStage.Lobby);
+    }
+
     public void BeginWorldPreparation()
     {
         if (Stage == AppSceneStage.PreparingWorld) return;
+        // Park Canter cleanly in the PKS/Spawn plaza ready to drive or walk!
+        Physics.MainTruck.X = 5.4f;
+        Physics.MainTruck.Z = 4.2f;
+        Physics.MainTruck.Yaw = -0.35f;
+        Physics.MainTruck.SteerAngle = 0f;
+        Physics.MainTruck.Y = RigidBodyWorld.SurfaceHeightWithStructures(5.4f, 4.2f);
         WorldPrepProgress = 0.02f;
         WorldPrepStatus = "MEMBANGUN TOPOGRAFI KEBUN SAWIT & PARIT...";
-        Stage = AppSceneStage.PreparingWorld;
+        SetStage(AppSceneStage.PreparingWorld);
     }
 
     public void ReturnToLobby()
     {
         InTruck = false;
         JoyX = JoyY = 0f;
-        Stage = AppSceneStage.Lobby;
+        SetStage(AppSceneStage.Lobby);
+    }
+
+    private void SetStage(AppSceneStage next)
+    {
+        if (Stage == next) return;
+        Stage = next;
+        OnStageChanged?.Invoke();
     }
 
     public void RequestPresetChange(GraphicsPreset preset)
     {
         Quality.SetManualPreset(preset);
-        EnsureRenderScaleSynced();
+        SyncRenderScaleNow();
     }
 
-    private void EnsureRenderScaleSynced()
+    public void SyncRenderScaleNow()
     {
-        float target = Quality.Active.RenderScale;
+        float target = Quality.EffectiveRenderScale;
         if (MathF.Abs(target - _appliedScale) > 0.01f)
         {
             _appliedScale = target;
@@ -411,7 +700,6 @@ void main() {
     {
         if (!InTruck)
         {
-            // Bring Canter close in front/beside player if parked far away, or climb straight in!
             if (!Physics.IsNearMainTruck(9.5f))
             {
                 float sx = PlayerX + MathF.Sin(Physics.Player.Yaw) * 3.6f;
@@ -439,7 +727,7 @@ void main() {
 
     public void OnSurfaceCreated(IGL10? gl, EGLConfig? config)
     {
-        if (_archive == null) return;
+        if (_archive == null || _context == null) return;
 
         int byteCap = MaxInstancesPerBatch * 16 * sizeof(float);
         var initByteBuf = ByteBuffer.AllocateDirect(byteCap).Order(ByteOrder.NativeOrder()!);
@@ -451,17 +739,27 @@ void main() {
         _uSkyHorizon = GLES30.GlGetUniformLocation(_skyProgram, "uSkyHorizon");
         _uSkySunDir = GLES30.GlGetUniformLocation(_skyProgram, "uSunDir");
         _uSkySunCol = GLES30.GlGetUniformLocation(_skyProgram, "uSunColor");
+        _uSkyTime = GLES30.GlGetUniformLocation(_skyProgram, "uTime");
+        _uSkyClouds = GLES30.GlGetUniformLocation(_skyProgram, "uCloudsOn");
 
         int[] skyVaos = new int[1];
         GLES30.GlGenVertexArrays(1, skyVaos, 0);
         _skyVao = skyVaos[0];
 
-        _shadowProgram = BuildLinkedProgram(ShadowVertexSrc, ShadowFragmentSrc);
-        _uShadowVp = GLES30.GlGetUniformLocation(_shadowProgram, "uVP");
+        _depthShadowProgram = BuildLinkedProgram(DepthShadowVertexSrc, DepthShadowFragmentSrc);
+        _uDepthLightVp = GLES30.GlGetUniformLocation(_depthShadowProgram, "uLightVP");
+        _uDepthTime = GLES30.GlGetUniformLocation(_depthShadowProgram, "uTime");
+        _uDepthAtlas = GLES30.GlGetUniformLocation(_depthShadowProgram, "uAtlas");
+
+        _contactShadowProgram = BuildLinkedProgram(ContactShadowVertexSrc, ContactShadowFragmentSrc);
+        _uContactVp = GLES30.GlGetUniformLocation(_contactShadowProgram, "uVP");
 
         _program = BuildLinkedProgram(VertexShaderSrc, FragmentShaderSrc);
         _uVp = GLES30.GlGetUniformLocation(_program, "uVP");
+        _uLightVp = GLES30.GlGetUniformLocation(_program, "uLightVP");
         _uTime = GLES30.GlGetUniformLocation(_program, "uTime");
+        _uAtlas = GLES30.GlGetUniformLocation(_program, "uAtlas");
+        _uShadowMap = GLES30.GlGetUniformLocation(_program, "uShadowMap");
         _uSunDir = GLES30.GlGetUniformLocation(_program, "uSunDir");
         _uSunColor = GLES30.GlGetUniformLocation(_program, "uSunColor");
         _uSkyTop = GLES30.GlGetUniformLocation(_program, "uSkyTop");
@@ -469,7 +767,9 @@ void main() {
         _uFogColor = GLES30.GlGetUniformLocation(_program, "uFogColor");
         _uCamPos = GLES30.GlGetUniformLocation(_program, "uCamPos");
         _uFogDensity = GLES30.GlGetUniformLocation(_program, "uFogDensity");
-        _uDetailStrength = GLES30.GlGetUniformLocation(_program, "uDetailStrength");
+        _uRenderMode = GLES30.GlGetUniformLocation(_program, "uRenderMode");
+        _uShadowMode = GLES30.GlGetUniformLocation(_program, "uShadowMode");
+        _uCloudsOn = GLES30.GlGetUniformLocation(_program, "uCloudsOn");
 
         int[] bufs = new int[1];
         GLES30.GlGenBuffers(1, bufs, 0);
@@ -477,6 +777,9 @@ void main() {
         initByteBuf.Position(0);
         GLES30.GlBindBuffer(GLES30.GlArrayBuffer, _instanceVbo);
         GLES30.GlBufferData(GLES30.GlArrayBuffer, byteCap, initByteBuf, GLES30.GlDynamicDraw);
+
+        _atlasTexId = UploadPbrAtlasTexture();
+        CreateHardwareShadowMapFbo();
 
         _gpuMeshes.Clear();
         foreach (var kv in _archive.Meshes)
@@ -488,13 +791,72 @@ void main() {
         }
         _terrainGpu = UploadMeshToGpu(PlantationWorld.BuildSplattedTerrainMesh(136, 224f));
         _waterGpu = UploadMeshToGpu(PlantationWorld.BuildCanalWaterMesh(64));
-        _shadowGpu = UploadMeshToGpu(PlantationWorld.BuildSoftShadowDiscMesh(16));
+        _shadowDiscGpu = UploadMeshToGpu(PlantationWorld.BuildSoftShadowDiscMesh(16));
 
         GLES30.GlEnable(GLES30.GlDepthTest);
-        // Disable backface culling so no open botanical/fabric or mirrored surface ever renders hollow!
         GLES30.GlDisable(0x0B44);
         _gpuReady = true;
         _lastTimeSec = _clock.Elapsed.TotalSeconds;
+    }
+
+    private int UploadPbrAtlasTexture()
+    {
+        int[] tex = new int[1];
+        GLES30.GlGenTextures(1, tex, 0);
+        GLES30.GlBindTexture(GLES30.GlTexture2d, tex[0]);
+
+        var opts = new BitmapFactory.Options
+        {
+            InScaled = false,
+            InPremultiplied = false,
+            InPreferredConfig = Bitmap.Config.Argb8888,
+        };
+        using var stream = _context!.Assets!.Open("Textures/nyawit_pbr_atlas.png");
+        using var bmp = BitmapFactory.DecodeStream(stream, null, opts);
+        if (bmp != null)
+        {
+            GLUtils.TexImage2D(GLES30.GlTexture2d, 0, bmp, 0);
+            GLES30.GlGenerateMipmap(GLES30.GlTexture2d);
+        }
+
+        GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureMinFilter, GLES30.GlLinearMipmapLinear);
+        GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureMagFilter, GLES30.GlLinear);
+        GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureWrapS, GLES30.GlRepeat);
+        GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureWrapT, GLES30.GlRepeat);
+        // Hardware anisotropic filtering (GL_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FE) for razor-sharp roads at grazing angles!
+        try { GLES30.GlTexParameterf(GLES30.GlTexture2d, 0x84FE, 8.0f); } catch { }
+        return tex[0];
+    }
+
+    private void CreateHardwareShadowMapFbo()
+    {
+        int[] tex = new int[1];
+        GLES30.GlGenTextures(1, tex, 0);
+        _shadowMapDepthTex = tex[0];
+        GLES30.GlBindTexture(GLES30.GlTexture2d, _shadowMapDepthTex);
+        GLES30.GlTexImage2D(
+            GLES30.GlTexture2d, 0, GLES30.GlDepthComponent16,
+            ShadowMapSize, ShadowMapSize, 0,
+            GLES30.GlDepthComponent, GLES30.GlUnsignedShort, null);
+        GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureMinFilter, GLES30.GlNearest);
+        GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureMagFilter, GLES30.GlNearest);
+        GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureWrapS, GLES30.GlClampToEdge);
+        GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureWrapT, GLES30.GlClampToEdge);
+
+        int[] fbo = new int[1];
+        GLES30.GlGenFramebuffers(1, fbo, 0);
+        _shadowMapFbo = fbo[0];
+        GLES30.GlBindFramebuffer(GLES30.GlFramebuffer, _shadowMapFbo);
+        GLES30.GlFramebufferTexture2D(
+            GLES30.GlFramebuffer, GLES30.GlDepthAttachment,
+            GLES30.GlTexture2d, _shadowMapDepthTex, 0);
+        GLES30.GlDrawBuffers(1, new int[] { GLES30.GlNone }, 0);
+        GLES30.GlReadBuffer(GLES30.GlNone);
+        if (GLES30.GlCheckFramebufferStatus(GLES30.GlFramebuffer) != GLES30.GlFramebufferComplete)
+        {
+            _shadowMapFbo = 0;
+        }
+        GLES30.GlBindFramebuffer(GLES30.GlFramebuffer, 0);
     }
 
     public void OnSurfaceChanged(IGL10? gl, int width, int height)
@@ -508,52 +870,92 @@ void main() {
     {
         if (_net == null || _program == 0) return;
 
+        // Precision frame limiter when user selects battery-saving 30 FPS in Pengaturan!
+        int targetFps = Quality.TargetFps;
+        if (targetFps > 0 && targetFps <= 45)
+        {
+            double minFrameSec = 1.0 / targetFps;
+            double elapsed = _clock.Elapsed.TotalSeconds - _lastTimeSec;
+            if (elapsed < minFrameSec - 0.002)
+            {
+                int sleepMs = (int)((minFrameSec - elapsed) * 1000.0);
+                if (sleepMs > 1) Thread.Sleep(System.Math.Min(sleepMs, 24));
+            }
+        }
+
         double now = _clock.Elapsed.TotalSeconds;
         float dt = (float)System.Math.Clamp(now - _lastTimeSec, 0.001, 0.05);
         _lastTimeSec = now;
         Time.TotalTime = (float)now;
         Time.DeltaTime = dt;
         if (Quality.RecordFrame(dt))
-            EnsureRenderScaleSynced();
+            SyncRenderScaleNow();
+
+        if (Stage == AppSceneStage.Splash)
+        {
+            StepBootSplash(dt);
+            GLES30.GlViewport(0, 0, _surfaceWidth, _surfaceHeight);
+            GLES30.GlClearColor(0.035f, 0.045f, 0.052f, 1.0f);
+            GLES30.GlClear(GLES30.GlColorBufferBit | GLES30.GlDepthBufferBit);
+            return;
+        }
+
+        if (Stage == AppSceneStage.Lobby)
+        {
+            Physics.Player.IdleBreathPhase += dt * 2.15f;
+            RenderDedicatedGarageShowroom((float)now, dt);
+            return;
+        }
 
         if (Stage == AppSceneStage.PreparingWorld)
         {
             StepWorldPreparation(dt);
         }
-        else if (Stage == AppSceneStage.Gameplay)
-        {
-            StepGameplayPhysics(dt, now);
-        }
         else
         {
-            Physics.Player.IdleBreathPhase += dt * 2.2f;
+            StepGameplayPhysics(dt, now);
+            StepVfxParticles(dt);
         }
 
-        Render3DWorld((float)now, dt);
+        RenderPlantationWorld((float)now, dt);
+    }
+
+    private void StepBootSplash(float dt)
+    {
+        if (!_gpuReady) return;
+        float stepDt = System.Math.Min(dt, 0.033f);
+        SplashProgress = System.Math.Min(1.0f, SplashProgress + stepDt * 0.34f);
+        if (SplashProgress < 0.35f)
+            SplashStatus = "INISIALISASI SHADER PBR & SHADOW MAP...";
+        else if (SplashProgress < 0.72f)
+            SplashStatus = "MEMUAT ATLAS TEKSTUR 2048x2048 & 41 MODEL 3D...";
+        else
+            SplashStatus = "MEMBUKA GARASI SHOWROOM SAWIT...";
+
+        if (SplashProgress >= 1.0f)
+            SetStage(AppSceneStage.Lobby);
     }
 
     private void StepWorldPreparation(float dt)
     {
         if (!_gpuReady) return;
-        float stepDt = System.Math.Max(dt, 0.033f);
-        WorldPrepProgress = System.Math.Min(1.0f, WorldPrepProgress + stepDt * 0.44f);
+        float stepDt = System.Math.Max(dt, 0.032f);
+        WorldPrepProgress = System.Math.Min(1.0f, WorldPrepProgress + stepDt * 0.48f);
 
-        if (WorldPrepProgress < 0.25f)
-            WorldPrepStatus = "MEMBANGUN TOPOGRAFI KEBUN SAWIT & PARIT...";
-        else if (WorldPrepProgress < 0.52f)
-            WorldPrepStatus = $"MEMUAT FISIKA RIGIDBODY & {Physics.StaticColliders.Count} COLLIDER SOLID...";
-        else if (WorldPrepProgress < 0.78f)
-            WorldPrepStatus = "MENYIAPKAN SUSPENSI 4 RODA TRUK CANTER & ANGKONG...";
-        else if (WorldPrepProgress < 0.96f)
-            WorldPrepStatus = $"SINKRONISASI SERVER LIVE ({_net?.CurrentRoomId.ToUpperInvariant()})...";
+        if (WorldPrepProgress < 0.28f)
+            WorldPrepStatus = "MEMBANGUN TOPOGRAFI JALAN TANAH MERAH & PARIT...";
+        else if (WorldPrepProgress < 0.56f)
+            WorldPrepStatus = $"MEMUAT {Physics.StaticColliders.Count} COLLIDER FISIKA SOLID & BAYANGAN POHON...";
+        else if (WorldPrepProgress < 0.84f)
+            WorldPrepStatus = "MENYIAPKAN SUSPENSI BAN DOBEL MITSUBISHI CANTER...";
         else
-            WorldPrepStatus = "DUNIA SIAP - SELAMAT MEMANEN!";
+            WorldPrepStatus = $"SINKRONISASI SERVER LIVE ({_net?.CurrentRoomId.ToUpperInvariant()})...";
 
         Physics.StepWorld(dt, inTruck: false, inputSide: 0f, inputForward: 0f, camYaw: CamYaw, boars: _boarsSnap);
 
         if (WorldPrepProgress >= 1.0f)
         {
-            Stage = AppSceneStage.Gameplay;
+            SetStage(AppSceneStage.Gameplay);
             OnWorldReady?.Invoke();
         }
     }
@@ -572,8 +974,39 @@ void main() {
             camYaw: CamYaw,
             boars: _boarsSnap);
 
-        // Smooth camera follow behind Canter when driving!
-        if (!LockShowcaseCam && InTruck && MathF.Abs(Physics.MainTruck.SpeedMs) > 0.6f)
+        // Emit realistic tire dust behind Canter dual rear wheels + diesel exhaust smoke!
+        float speedAbs = MathF.Abs(Physics.MainTruck.SpeedMs);
+        if (InTruck && Quality.ParticlesEnabled && speedAbs > 1.8f)
+        {
+            _dustEmitAccum += dt * (4.0f + speedAbs * 0.85f);
+            while (_dustEmitAccum >= 1f)
+            {
+                _dustEmitAccum -= 1f;
+                float sy = MathF.Sin(Physics.MainTruck.Yaw), cy = MathF.Cos(Physics.MainTruck.Yaw);
+                float side = (_vfxCursor % 2 == 0) ? -0.92f : 0.92f;
+                float wx = Physics.MainTruck.X + side * cy - 1.35f * sy;
+                float wz = Physics.MainTruck.Z - side * sy - 1.35f * cy;
+                SpawnParticle(
+                    wx, Physics.MainTruck.Y + 0.26f, wz,
+                    -sy * 0.8f + side * 0.25f, 0.55f, -cy * 0.8f,
+                    0.35f, 1.35f, 0.44f, 0.33f, 0.22f, 0.42f, 0.85f);
+            }
+
+            _exhaustEmitAccum += dt * 6.5f;
+            while (_exhaustEmitAccum >= 1f)
+            {
+                _exhaustEmitAccum -= 1f;
+                float sy = MathF.Sin(Physics.MainTruck.Yaw), cy = MathF.Cos(Physics.MainTruck.Yaw);
+                float exX = Physics.MainTruck.X + 0.86f * cy + 0.62f * sy;
+                float exZ = Physics.MainTruck.Z - 0.86f * sy + 0.62f * cy;
+                SpawnParticle(
+                    exX, Physics.MainTruck.Y + 2.30f, exZ,
+                    -sy * 0.5f, 1.35f, -cy * 0.5f,
+                    0.18f, 0.72f, 0.14f, 0.15f, 0.16f, 0.36f, 0.75f);
+            }
+        }
+
+        if (!LockShowcaseCam && InTruck && speedAbs > 0.6f)
         {
             float desiredCamYaw = Physics.MainTruck.Yaw + MathF.PI;
             float diff = desiredCamYaw - CamYaw;
@@ -582,7 +1015,6 @@ void main() {
             CamYaw += diff * MathF.Min(1f, dt * 3.1f);
         }
 
-        // Nearest ripe tree within harvest reach
         float bestD2 = InTruck ? 56.0f : 38.5f;
         int bestId = -1;
         for (int i = 0; i < _trees.Count; i++)
@@ -620,47 +1052,154 @@ void main() {
         }
     }
 
-    private void Render3DWorld(float now, float dt)
+    /// <summary>
+    /// Dedicated Separate 3D Garage/Workshop Lobby Scene!
+    /// Completely isolated from the 180-tree plantation map -> < 15 draw calls -> locked 60-120 FPS!
+    /// </summary>
+    private void RenderDedicatedGarageShowroom(float now, float dt)
+    {
+        if (_net == null) return;
+        GLES30.GlBindFramebuffer(GLES30.GlFramebuffer, 0);
+        GLES30.GlViewport(0, 0, _surfaceWidth, _surfaceHeight);
+        GLES30.GlClearColor(0.06f, 0.09f, 0.13f, 1.0f);
+        GLES30.GlClear(GLES30.GlColorBufferBit | GLES30.GlDepthBufferBit);
+
+        float orbit = LobbyOrbitYaw + MathF.Sin(now * 0.45f) * 0.045f;
+        float lookX = -0.35f, lookY = 1.36f, lookZ = -0.25f;
+        float eyeX = lookX + MathF.Sin(orbit) * 6.95f;
+        float eyeY = 2.08f;
+        float eyeZ = lookZ + MathF.Cos(orbit) * 6.95f;
+
+        Mat4Utils.CreatePerspective(_proj, 42f * MathF.PI / 180f, _surfaceWidth / (float)_surfaceHeight, 0.25f, 120f);
+        Mat4Utils.CreateLookAt(_view, eyeX, eyeY, eyeZ, lookX, lookY, lookZ);
+        Mat4Utils.Multiply(_vp, _proj, _view);
+        InvertMatrix4(_vp, _invVp);
+        Array.Clear(_lightVp, 0, 16);
+        _lightVp[0] = _lightVp[5] = _lightVp[10] = _lightVp[15] = 1f;
+
+        int drawCalls = 0, tris = 0;
+
+        // Open-front garage sky glimpse through workshop entrance
+        GLES30.GlDepthMask(false);
+        GLES30.GlDisable(GLES30.GlDepthTest);
+        GLES30.GlUseProgram(_skyProgram);
+        GLES30.GlUniformMatrix4fv(_uSkyInvVp, 1, false, _invVp, 0);
+        GLES30.GlUniform3f(_uSkySunDir, 0.35f, 0.65f, 0.66f);
+        GLES30.GlUniform3f(_uSkyZenith, 0.04f, 0.14f, 0.38f);
+        GLES30.GlUniform3f(_uSkyHorizon, 0.38f, 0.56f, 0.78f);
+        GLES30.GlUniform3f(_uSkySunCol, 1.15f, 0.95f, 0.68f);
+        GLES30.GlUniform1f(_uSkyTime, now);
+        GLES30.GlUniform1f(_uSkyClouds, Quality.CloudsEnabled ? 1f : 0f);
+        GLES30.GlBindVertexArray(_skyVao);
+        GLES30.GlDrawArrays(GLES30.GlTriangleStrip, 0, 4);
+        drawCalls++;
+        tris += 2;
+        GLES30.GlEnable(GLES30.GlDepthTest);
+        GLES30.GlDepthMask(true);
+
+        BindAtlasAndShadowTextures();
+        GLES30.GlUseProgram(_program);
+        GLES30.GlUniformMatrix4fv(_uVp, 1, false, _vp, 0);
+        GLES30.GlUniformMatrix4fv(_uLightVp, 1, false, _lightVp, 0);
+        GLES30.GlUniform1f(_uTime, now);
+        GLES30.GlUniform1i(_uAtlas, 0);
+        GLES30.GlUniform1i(_uShadowMap, 1);
+        GLES30.GlUniform3f(_uSunDir, 0.28f, 0.80f, 0.53f);
+        GLES30.GlUniform3f(_uSunColor, 1.95f, 1.82f, 1.56f);
+        GLES30.GlUniform3f(_uSkyTop, 0.30f, 0.38f, 0.52f);
+        GLES30.GlUniform3f(_uGroundBounce, 0.11f, 0.10f, 0.09f);
+        GLES30.GlUniform3f(_uFogColor, 0.08f, 0.11f, 0.16f);
+        GLES30.GlUniform3f(_uCamPos, eyeX, eyeY, eyeZ);
+        GLES30.GlUniform1f(_uFogDensity, 0.001f);
+        GLES30.GlUniform1i(_uRenderMode, 0);
+        GLES30.GlUniform1i(_uShadowMode, 0);
+        GLES30.GlUniform1f(_uCloudsOn, 0f);
+
+        // 1. Workshop Garage Interior + Turntable + Workbench + Spare Tires + Oil Drums
+        int c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, 0f, 0f, 0f, 0f, 0f, 0f, 1f, 1f, 1f);
+        DrawNamed(MeshCatalog.GarageShowroom, 0, _instStaging, c, ref drawCalls, ref tris);
+
+        // Soft showroom contact shadows on the turntable
+        int nSh = 0;
+        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, 1.15f, 0.085f, -0.55f, 0f, -0.56f, 0f, 1.48f, 1f, 2.95f, 1.0f);
+        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, -1.35f, 0.085f, 1.25f, 0f, 0f, 0f, 0.65f, 1f, 0.65f, 1.0f);
+        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, -3.55f, 0.085f, -1.65f, 0f, 0.52f, 0f, 0.68f, 1f, 0.96f, 0.9f);
+        GLES30.GlUseProgram(_contactShadowProgram);
+        GLES30.GlUniformMatrix4fv(_uContactVp, 1, false, _vp, 0);
+        GLES30.GlEnable(GLES30.GlBlend);
+        GLES30.GlBlendFunc(GLES30.GlSrcAlpha, GLES30.GlOneMinusSrcAlpha);
+        GLES30.GlDepthMask(false);
+        DrawGpuHandle(_shadowDiscGpu, _shadowStaging, nSh, ref drawCalls, ref tris);
+        GLES30.GlDepthMask(true);
+        GLES30.GlDisable(GLES30.GlBlend);
+        GLES30.GlUseProgram(_program);
+
+        // 2. Workshop Angkong Cart beside tool bench
+        var lobbyCart = Mat4Utils.BoneMat.TRS(-3.55f, 0.08f, -1.65f, 0f, 0.52f, 0f);
+        DrawNamed(MeshCatalog.AngkongCart, 0, _instStaging, lobbyCart.Emit(_instStaging, 0), ref drawCalls, ref tris);
+        DrawNamed(MeshCatalog.TruckWheel, 0, _goldStaging,
+            lobbyCart.Child(0f, 0.29f, 0.80f, sx: 0.45f, sy: 0.59f, sz: 0.59f).Emit(_goldStaging, 0),
+            ref drawCalls, ref tris);
+
+        // 3. Heroic Showroom Mitsubishi Canter COE Bak Kayu with full TBS cargo & steered front wheels!
+        var showroomTruck = new VehicleRigidBody
+        {
+            X = 1.15f,
+            Y = 0.08f,
+            Z = -0.55f,
+            Yaw = -0.56f,
+            SteerAngle = 0.36f,
+        };
+        for (int w = 0; w < 4; w++) showroomTruck.WheelWorldY[w] = 0.08f + 0.48f;
+        DrawCanterVehicleRig(showroomTruck, _net.Profile.Avatar, System.Math.Max(14, _net.LocalCargo), hasDriver: false, ref drawCalls, ref tris);
+
+        // 4. Local Harvester Character on Turntable Foreground with full live outfit/accessories!
+        DrawDetailedHumanRig(
+            -1.35f, 0.08f, 1.25f, 0.28f + LobbyAvatarSpinOffset,
+            walkPhase: 0f,
+            breathPhase: Physics.Player.IdleBreathPhase,
+            moving: false,
+            stance: HoldStance.TwoHandTool,
+            slashTimer: 0f,
+            pickupTimer: 0f,
+            throwTimer: 0f,
+            heldGold: false,
+            av: _net.Profile.Avatar,
+            dt: dt,
+            useSmoothState: true,
+            ref drawCalls, ref tris);
+
+        LastDrawCalls = drawCalls;
+        LastTriangles = tris;
+        lock (HudLock)
+        {
+            ProjectedLabels.Clear();
+            MinimapPeers.Clear();
+        }
+    }
+
+    private void RenderPlantationWorld(float now, float dt)
     {
         if (_net == null) return;
         var q = Quality.Active;
-        GLES30.GlViewport(0, 0, _surfaceWidth, _surfaceHeight);
-
         bool storm = _net.EventKind == "HUJAN_BADAI";
         bool goldRush = _net.EventKind == "DEMAM_SAWIT_EMAS";
 
-        GLES30.GlClearColor(0.24f, 0.56f, 0.86f, 1.0f);
-        GLES30.GlClear(GLES30.GlColorBufferBit | GLES30.GlDepthBufferBit);
-
         float eyeX, eyeY, eyeZ, lookX, lookY, lookZ, fovDeg;
-        if (Stage == AppSceneStage.Lobby)
+        if (Stage == AppSceneStage.PreparingWorld)
         {
-            // Heroic 3D Main Lobby Showroom Stage: close-up full-body view of Avatar + Canter Truck + PKS backdrop!
-            float gy = RigidBodyWorld.SurfaceHeightWithStructures(8.0f, 6.0f);
-            lookX = 8.35f;
-            lookY = gy + 1.18f;
-            lookZ = 5.45f;
-            float orbit = MathF.Sin(now * 0.42f) * 0.14f;
-            eyeX = 8.0f + MathF.Sin(orbit) * 3.55f;
-            eyeY = gy + 1.56f;
-            eyeZ = 6.0f + MathF.Cos(orbit) * 3.55f;
-            fovDeg = 46f;
-        }
-        else if (Stage == AppSceneStage.PreparingWorld)
-        {
-            // Cinematic sweeping fly-in camera descending smoothly from panoramic aerial view straight to shoulder!
             float t = WorldPrepProgress;
             float ease = t * t * (3f - 2f * t);
-            float dist = (1f - ease) * 34f + ease * CamDist;
-            float pitch = (1f - ease) * 0.72f + ease * CamPitch;
-            float yaw = CamYaw + (1f - ease) * 1.15f;
+            float dist = (1f - ease) * 32f + ease * CamDist;
+            float pitch = (1f - ease) * 0.68f + ease * CamPitch;
+            float yaw = CamYaw + (1f - ease) * 1.05f;
             eyeX = PlayerX + MathF.Sin(yaw) * MathF.Cos(pitch) * dist;
             eyeZ = PlayerZ + MathF.Cos(yaw) * MathF.Cos(pitch) * dist;
-            eyeY = System.Math.Max(PlantationWorld.TerrainHeight(eyeX, eyeZ) + 1.25f, PlayerY + 1.65f + MathF.Sin(pitch) * dist);
+            eyeY = System.Math.Max(PlantationWorld.TerrainHeight(eyeX, eyeZ) + 1.25f, PlayerY + 1.60f + MathF.Sin(pitch) * dist);
             lookX = PlayerX;
-            lookY = PlayerY + 1.45f;
+            lookY = PlayerY + 1.42f;
             lookZ = PlayerZ;
-            fovDeg = 55f;
+            fovDeg = 54f;
         }
         else
         {
@@ -670,44 +1209,83 @@ void main() {
             float dist = InTruck ? (LockShowcaseCam ? CamDist : CamDist * 1.22f) : CamDist;
             eyeX = PlayerX + MathF.Sin(CamYaw) * MathF.Cos(CamPitch) * dist;
             eyeZ = PlayerZ + MathF.Cos(CamYaw) * MathF.Cos(CamPitch) * dist;
-            float baseEyeH = LockShowcaseCam ? (InTruck ? 1.05f : 1.16f) : 1.62f;
+            float baseEyeH = LockShowcaseCam ? (InTruck ? 1.05f : 1.16f) : 1.60f;
             eyeY = System.Math.Max(PlantationWorld.TerrainHeight(eyeX, eyeZ) + (LockShowcaseCam ? 0.85f : 1.25f), PlayerY + baseEyeH + MathF.Sin(CamPitch) * dist);
             lookX = PlayerX;
-            lookY = PlayerY + (LockShowcaseCam ? (InTruck ? 1.18f : 1.20f) : (InTruck ? 1.68f : 1.38f));
+            lookY = PlayerY + (LockShowcaseCam ? (InTruck ? 1.18f : 1.20f) : (InTruck ? 1.66f : 1.38f));
             lookZ = PlayerZ;
             fovDeg = LockShowcaseCam ? 47f : 56f;
         }
+
+        _net.CopyRenderState(_peersSnap, _boarsSnap, _chatSnap, dt);
+
+        float fx = lookX - eyeX, fy = lookY - eyeY, fz = lookZ - eyeZ;
+        float fl = MathF.Max(1e-4f, MathF.Sqrt(fx * fx + fy * fy + fz * fz));
+        SimdCuller.SelectLodBatch(_treePositionsXyz, _trees.Count, eyeX, eyeY, eyeZ, fx / fl, fy / fl, fz / fl, q.Lod0Distance, q.Lod1Distance, q.MaxDrawDistance, _treeLodResult);
+
+        int drawCalls = 0, tris = 0;
+        float windAmp = storm ? 2.0f : 0.82f;
+
+        // Pass A: Hardware 1024x1024 Directional Sun Shadow Map Pass!
+        int activeShadowMode = (_shadowMapFbo != 0 && Quality.ShadowTier != ShadowQualityTier.Off)
+            ? (int)Quality.ShadowTier
+            : 0;
+        if (activeShadowMode > 0)
+        {
+            UpdateSunShadowMatrix(PlayerX, PlayerY, PlayerZ);
+            GLES30.GlBindFramebuffer(GLES30.GlFramebuffer, _shadowMapFbo);
+            GLES30.GlViewport(0, 0, ShadowMapSize, ShadowMapSize);
+            GLES30.GlClear(GLES30.GlDepthBufferBit);
+            GLES30.GlColorMask(false, false, false, false);
+
+            GLES30.GlActiveTexture(GLES30.GlTexture0);
+            GLES30.GlBindTexture(GLES30.GlTexture2d, _atlasTexId);
+            GLES30.GlUseProgram(_depthShadowProgram);
+            GLES30.GlUniformMatrix4fv(_uDepthLightVp, 1, false, _lightVp, 0);
+            GLES30.GlUniform1f(_uDepthTime, now);
+            GLES30.GlUniform1i(_uDepthAtlas, 0);
+
+            RenderShadowCasters(windAmp, ref drawCalls, ref tris);
+
+            GLES30.GlColorMask(true, true, true, true);
+            GLES30.GlBindFramebuffer(GLES30.GlFramebuffer, 0);
+        }
+
+        // Pass B: Main Color + Depth Framebuffer Pass
+        GLES30.GlViewport(0, 0, _surfaceWidth, _surfaceHeight);
+        GLES30.GlClearColor(0.28f, 0.56f, 0.84f, 1.0f);
+        GLES30.GlClear(GLES30.GlColorBufferBit | GLES30.GlDepthBufferBit);
 
         Mat4Utils.CreatePerspective(_proj, fovDeg * MathF.PI / 180f, _surfaceWidth / (float)_surfaceHeight, 0.30f, 260f);
         Mat4Utils.CreateLookAt(_view, eyeX, eyeY, eyeZ, lookX, lookY, lookZ);
         Mat4Utils.Multiply(_vp, _proj, _view);
         InvertMatrix4(_vp, _invVp);
 
-        int drawCalls = 0, tris = 0;
-
-        // Pass 0: Atmospheric Sky Gradient + Solar Halo Dome
+        // Volumetric Cumulus Sky Dome
         GLES30.GlDepthMask(false);
         GLES30.GlDisable(GLES30.GlDepthTest);
         GLES30.GlUseProgram(_skyProgram);
         GLES30.GlUniformMatrix4fv(_uSkyInvVp, 1, false, _invVp, 0);
         GLES30.GlUniform3f(_uSkySunDir, 0.48f, 0.72f, 0.44f);
+        GLES30.GlUniform1f(_uSkyTime, now);
+        GLES30.GlUniform1f(_uSkyClouds, Quality.CloudsEnabled ? 1f : 0f);
         if (storm)
         {
             GLES30.GlUniform3f(_uSkyZenith, 0.03f, 0.06f, 0.13f);
-            GLES30.GlUniform3f(_uSkyHorizon, 0.11f, 0.16f, 0.24f);
-            GLES30.GlUniform3f(_uSkySunCol, 0.28f, 0.34f, 0.48f);
+            GLES30.GlUniform3f(_uSkyHorizon, 0.14f, 0.19f, 0.26f);
+            GLES30.GlUniform3f(_uSkySunCol, 0.30f, 0.36f, 0.50f);
         }
         else if (goldRush)
         {
-            GLES30.GlUniform3f(_uSkyZenith, 0.05f, 0.16f, 0.46f);
-            GLES30.GlUniform3f(_uSkyHorizon, 0.72f, 0.42f, 0.14f);
-            GLES30.GlUniform3f(_uSkySunCol, 1.55f, 0.95f, 0.35f);
+            GLES30.GlUniform3f(_uSkyZenith, 0.05f, 0.17f, 0.48f);
+            GLES30.GlUniform3f(_uSkyHorizon, 0.74f, 0.46f, 0.18f);
+            GLES30.GlUniform3f(_uSkySunCol, 1.50f, 0.95f, 0.38f);
         }
         else
         {
-            GLES30.GlUniform3f(_uSkyZenith, 0.035f, 0.17f, 0.58f);
-            GLES30.GlUniform3f(_uSkyHorizon, 0.34f, 0.62f, 0.88f);
-            GLES30.GlUniform3f(_uSkySunCol, 1.45f, 1.25f, 0.86f);
+            GLES30.GlUniform3f(_uSkyZenith, 0.045f, 0.20f, 0.62f);
+            GLES30.GlUniform3f(_uSkyHorizon, 0.46f, 0.68f, 0.88f);
+            GLES30.GlUniform3f(_uSkySunCol, 1.38f, 1.18f, 0.84f);
         }
         GLES30.GlBindVertexArray(_skyVao);
         GLES30.GlDrawArrays(GLES30.GlTriangleStrip, 0, 4);
@@ -716,128 +1294,90 @@ void main() {
         GLES30.GlEnable(GLES30.GlDepthTest);
         GLES30.GlDepthMask(true);
 
-        // Pass 1: Main Double-Sided Watertight PBR Scene
+        BindAtlasAndShadowTextures();
         GLES30.GlUseProgram(_program);
         GLES30.GlUniformMatrix4fv(_uVp, 1, false, _vp, 0);
+        GLES30.GlUniformMatrix4fv(_uLightVp, 1, false, _lightVp, 0);
         GLES30.GlUniform1f(_uTime, now);
+        GLES30.GlUniform1i(_uAtlas, 0);
+        GLES30.GlUniform1i(_uShadowMap, 1);
         GLES30.GlUniform3f(_uSunDir, 0.48f, 0.72f, 0.44f);
         GLES30.GlUniform3f(_uCamPos, eyeX, eyeY, eyeZ);
-        GLES30.GlUniform1f(_uDetailStrength, q.Preset == GraphicsPreset.Smooth ? 0.35f : 1.0f);
+        GLES30.GlUniform1i(_uShadowMode, activeShadowMode);
+        GLES30.GlUniform1f(_uCloudsOn, Quality.CloudsEnabled ? 1f : 0f);
 
         if (storm)
         {
-            GLES30.GlUniform3f(_uSunColor, 0.62f, 0.72f, 0.95f);
-            GLES30.GlUniform3f(_uSkyTop, 0.14f, 0.20f, 0.32f);
-            GLES30.GlUniform3f(_uGroundBounce, 0.05f, 0.07f, 0.05f);
-            GLES30.GlUniform3f(_uFogColor, 0.11f, 0.16f, 0.24f);
-            GLES30.GlUniform1f(_uFogDensity, 0.0090f);
+            GLES30.GlUniform3f(_uSunColor, 0.65f, 0.75f, 0.98f);
+            GLES30.GlUniform3f(_uSkyTop, 0.15f, 0.21f, 0.32f);
+            GLES30.GlUniform3f(_uGroundBounce, 0.06f, 0.07f, 0.05f);
+            GLES30.GlUniform3f(_uFogColor, 0.14f, 0.19f, 0.26f);
+            GLES30.GlUniform1f(_uFogDensity, 0.009f);
         }
         else if (goldRush)
         {
-            GLES30.GlUniform3f(_uSunColor, 2.35f, 1.55f, 0.72f);
-            GLES30.GlUniform3f(_uSkyTop, 0.42f, 0.30f, 0.22f);
-            GLES30.GlUniform3f(_uGroundBounce, 0.14f, 0.10f, 0.05f);
-            GLES30.GlUniform3f(_uFogColor, 0.62f, 0.38f, 0.14f);
-            GLES30.GlUniform1f(_uFogDensity, 0.0040f);
+            GLES30.GlUniform3f(_uSunColor, 2.25f, 1.55f, 0.74f);
+            GLES30.GlUniform3f(_uSkyTop, 0.42f, 0.32f, 0.24f);
+            GLES30.GlUniform3f(_uGroundBounce, 0.13f, 0.09f, 0.05f);
+            GLES30.GlUniform3f(_uFogColor, 0.66f, 0.44f, 0.20f);
+            GLES30.GlUniform1f(_uFogDensity, 0.004f);
         }
         else
         {
-            GLES30.GlUniform3f(_uSunColor, 2.15f, 1.92f, 1.48f);
-            GLES30.GlUniform3f(_uSkyTop, 0.26f, 0.46f, 0.76f);
-            GLES30.GlUniform3f(_uGroundBounce, 0.09f, 0.14f, 0.06f);
-            GLES30.GlUniform3f(_uFogColor, 0.34f, 0.60f, 0.86f);
+            GLES30.GlUniform3f(_uSunColor, 2.08f, 1.88f, 1.46f);
+            GLES30.GlUniform3f(_uSkyTop, 0.28f, 0.46f, 0.74f);
+            GLES30.GlUniform3f(_uGroundBounce, 0.10f, 0.12f, 0.07f);
+            GLES30.GlUniform3f(_uFogColor, 0.48f, 0.68f, 0.86f);
             GLES30.GlUniform1f(_uFogDensity, 0.0035f);
         }
 
-        // 1. Terrain & Rippling Specular Canal Water
+        // 1. Multi-Scale Splatmapped Terrain (Mode 1) & Canal Water (Mode 0)
+        GLES30.GlUniform1i(_uRenderMode, 1);
         int c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1);
         DrawGpuHandle(_terrainGpu, _instStaging, c, ref drawCalls, ref tris);
+
+        GLES30.GlUniform1i(_uRenderMode, 0);
         c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, 0, MathF.Sin(now * 1.4f) * 0.03f, 0, 0, 0, 0, 1, 1, 1);
         DrawGpuHandle(_waterGpu, _instStaging, c, ref drawCalls, ref tris);
 
-        _net.CopyRenderState(_peersSnap, _boarsSnap, _chatSnap, dt);
-
-        float fx = lookX - eyeX, fy = lookY - eyeY, fz = lookZ - eyeZ;
-        float fl = MathF.Max(1e-4f, MathF.Sqrt(fx * fx + fy * fy + fz * fz));
-        SimdCuller.SelectLodBatch(_treePositionsXyz, _trees.Count, eyeX, eyeY, eyeZ, fx / fl, fy / fl, fz / fl, q.Lod0Distance, q.Lod1Distance, q.MaxDrawDistance, _treeLodResult);
-
-        // 1.5. Hardware-Instanced Soft Canopy, Vehicle & Character Contact Shadows!
+        // Soft grounding contact AO discs (plus distant tree canopy discs beyond the 34m shadow map!)
         int nSh = 0;
-        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, PlantationWorld.PksX, PlantationWorld.TerrainHeight(PlantationWorld.PksX, PlantationWorld.PksZ), PlantationWorld.PksZ, 0, 0, 0, 7.6f, 1f, 6.2f, 0.95f);
-        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, PlantationWorld.MandorX, PlantationWorld.TerrainHeight(PlantationWorld.MandorX, PlantationWorld.MandorZ), PlantationWorld.MandorZ, 0, 0, 0, 2.9f, 1f, 2.9f, 0.85f);
-        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.MainTruck.X, Physics.MainTruck.Y, Physics.MainTruck.Z, 0, Physics.MainTruck.Yaw, 0, 1.45f, 1f, 2.95f, 1.0f);
-        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.YardTruck.X, Physics.YardTruck.Y, Physics.YardTruck.Z, 0, Physics.YardTruck.Yaw, 0, 1.45f, 1f, 2.95f, 1.0f);
+        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.MainTruck.X, Physics.MainTruck.Y, Physics.MainTruck.Z, 0, Physics.MainTruck.Yaw, 0, 1.45f, 1f, 2.95f, 0.72f);
+        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.YardTruck.X, Physics.YardTruck.Y, Physics.YardTruck.Z, 0, Physics.YardTruck.Yaw, 0, 1.45f, 1f, 2.95f, 0.72f);
         if (!InTruck)
-            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, PlayerX, Physics.Player.GroundedY, PlayerZ, 0, Physics.Player.Yaw, 0, 0.68f, 1f, 0.68f, 1.0f);
+            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, PlayerX, Physics.Player.GroundedY, PlayerZ, 0, Physics.Player.Yaw, 0, 0.62f, 1f, 0.62f, 0.78f);
 
-        for (int i = 0; i < Physics.Angkongs.Length; i++)
-            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.Angkongs[i].X, Physics.Angkongs[i].Y, Physics.Angkongs[i].Z, 0, Physics.Angkongs[i].Yaw, 0, 0.68f, 1f, 0.98f, 0.88f);
-
-        for (int i = 0; i < _peersSnap.Count; i++)
-        {
-            var p = _peersSnap[i];
-            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, p.RenderX, p.RenderY, p.RenderZ, 0, p.RenderYaw, 0, p.InTruck ? 1.45f : 0.68f, 1f, p.InTruck ? 2.95f : 0.68f, 1.0f);
-        }
-        for (int i = 0; i < _boarsSnap.Count; i++)
-        {
-            var b = _boarsSnap[i];
-            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, b.X, PlantationWorld.TerrainHeight(b.X, b.Z), b.Z, 0, b.Yaw, 0, 0.72f, 1f, 0.98f, 0.90f);
-        }
         for (int i = 0; i < _trees.Count; i++)
         {
             sbyte tier = _treeLodResult[i];
-            if (tier < 0 || tier > (q.Preset == GraphicsPreset.Smooth ? 1 : 2)) continue;
+            if (tier < 0) continue;
             var t = _trees[i];
-            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, t.X + 0.45f, t.Y, t.Z + 0.35f, 0, 0, 0, 3.35f * t.Scale, 1f, 3.35f * t.Scale, tier == 2 ? 0.55f : 0.85f);
+            float d2 = (t.X - PlayerX) * (t.X - PlayerX) + (t.Z - PlayerZ) * (t.Z - PlayerZ);
+            if (activeShadowMode > 0 && d2 < 26f * 26f) continue; // Real 1024x1024 shadow map handles nearby trees!
+            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, t.X + 0.55f, t.Y, t.Z + 0.45f, 0, 0, 0, 3.25f * t.Scale, 1f, 3.25f * t.Scale, tier == 2 ? 0.52f : 0.78f);
         }
         if (nSh > 0)
         {
-            GLES30.GlUseProgram(_shadowProgram);
-            GLES30.GlUniformMatrix4fv(_uShadowVp, 1, false, _vp, 0);
+            GLES30.GlUseProgram(_contactShadowProgram);
+            GLES30.GlUniformMatrix4fv(_uContactVp, 1, false, _vp, 0);
             GLES30.GlEnable(GLES30.GlBlend);
             GLES30.GlBlendFunc(GLES30.GlSrcAlpha, GLES30.GlOneMinusSrcAlpha);
             GLES30.GlDepthMask(false);
-            DrawGpuHandle(_shadowGpu, _shadowStaging, nSh, ref drawCalls, ref tris);
+            DrawGpuHandle(_shadowDiscGpu, _shadowStaging, nSh, ref drawCalls, ref tris);
             GLES30.GlDepthMask(true);
             GLES30.GlDisable(GLES30.GlBlend);
             GLES30.GlUseProgram(_program);
         }
 
-        // 2. Living PKS Mill + Spinning Rooftop Turbines + Billowing Boiler Steam + RAM + Bridges + Mandor Post
+        // 2. PKS Mill + Turbines + Weighbridge RAM + Mandor Post + Wooden Bridges
         float pksGround = PlantationWorld.TerrainHeight(PlantationWorld.PksX, PlantationWorld.PksZ);
         c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, PlantationWorld.PksX, pksGround, PlantationWorld.PksZ, 0, 0, 0, 1, 1, 1);
         DrawNamed(MeshCatalog.PksFactory, 0, _instStaging, c, ref drawCalls, ref tris);
 
-        // Spinning industrial cyclone turbines on PKS rooftop!
         c = 0;
         c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.PksX - 1.5f, pksGround + 8.35f, PlantationWorld.PksZ - 1.6f, 0, now * 5.2f, 0, 1, 1, 1);
         c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.PksX + 1.5f, pksGround + 8.35f, PlantationWorld.PksZ + 1.6f, 0, -now * 4.6f, 0, 1, 1, 1);
         DrawNamed(MeshCatalog.PksFan, 0, _instStaging, c, ref drawCalls, ref tris);
-
-        // Rising billowing boiler steam clouds from twin PKS smokestacks + diesel truck exhaust!
-        c = 0;
-        for (int sp = 0; sp < 6; sp++)
-        {
-            float cycle = ((now * 0.42f + sp * 0.1666f) % 1.0f);
-            float cxChim = sp % 2 == 0 ? (PlantationWorld.PksX - 3.2f) : (PlantationWorld.PksX - 1.0f);
-            float sc = 0.85f + cycle * 2.15f;
-            c = Mat4Utils.WriteInstanceTRS(
-                _instStaging, c,
-                cxChim + cycle * 2.2f + MathF.Sin(now + sp) * 0.25f,
-                pksGround + 14.2f + cycle * 6.8f,
-                PlantationWorld.PksZ - 2.2f + cycle * 1.4f,
-                0, now * 0.6f + sp, 0, sc, sc * 0.82f, sc);
-        }
-        if (InTruck && MathF.Abs(Physics.MainTruck.SpeedMs) > 1.2f)
-        {
-            float exCycle = (now * 2.4f) % 1.0f;
-            float syT = MathF.Sin(Physics.MainTruck.Yaw), cyT = MathF.Cos(Physics.MainTruck.Yaw);
-            float exX = Physics.MainTruck.X + 0.85f * cyT + 0.86f * syT;
-            float exZ = Physics.MainTruck.Z - 0.85f * syT + 0.86f * cyT;
-            float exS = 0.22f + exCycle * 0.45f;
-            c = Mat4Utils.WriteInstanceTRS(_instStaging, c, exX, Physics.MainTruck.Y + 2.48f + exCycle * 1.15f, exZ, 0, now * 3f, 0, exS, exS, exS);
-        }
-        DrawNamed(MeshCatalog.SteamPuff, 0, _instStaging, c, ref drawCalls, ref tris);
 
         c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, PlantationWorld.RamX, PlantationWorld.TerrainHeight(PlantationWorld.RamX, PlantationWorld.RamZ), PlantationWorld.RamZ, 0, 0, 0, 1, 1, 1);
         DrawNamed(MeshCatalog.WeighbridgeRam, 0, _instStaging, c, ref drawCalls, ref tris);
@@ -850,7 +1390,7 @@ void main() {
         c = Mat4Utils.WriteInstanceTRS(_instStaging, c, 28f, PlantationWorld.TerrainHeight(28f, PlantationWorld.CanalZ - 4.7f), PlantationWorld.CanalZ, 0, 0, 0, 1, 1, 1);
         DrawNamed(MeshCatalog.WoodenBridge, 0, _instStaging, c, ref drawCalls, ref tris);
 
-        // 2.5. Physical Angkong Wheelbarrows + Independent Spinning Wheels!
+        // 2.5. Angkong Wheelbarrows
         int nCart = 0, nCartWheel = 0, nCartExtraFruit = 0;
         for (int i = 0; i < Physics.Angkongs.Length; i++)
         {
@@ -870,8 +1410,7 @@ void main() {
         DrawNamed(MeshCatalog.TruckWheel, 0, _goldStaging, nCartWheel, ref drawCalls, ref tris);
         if (nCartExtraFruit > 0) DrawNamed(MeshCatalog.TbsBunch, 0, _fruitStaging, nCartExtraFruit, ref drawCalls, ref tris);
 
-        // 3. Multi-LOD Oil Palms + Swaying Crowns + Hanging Ripe/Gold TBS
-        float windAmp = storm ? 2.1f : 0.85f;
+        // 3. Multi-LOD Tenera Oil Palms + Alpha-Cutout Pinnate Crowns + Glossy Spiky TBS Clusters!
         for (int tier = 0; tier < 3; tier++)
         {
             int nTrunk = 0, nCrown = 0, nBunch = 0;
@@ -885,9 +1424,9 @@ void main() {
                 nTrunk = Mat4Utils.WriteInstanceTRS(_treeLodStaging[0], nTrunk, t.X, t.Y - 0.12f, t.Z, 0, t.RotationY, 0, t.Scale, t.Scale, t.Scale, highlight, highlight, 1f, 0f);
                 nCrown = Mat4Utils.WriteInstanceTRS(
                     _treeLodStaging[1], nCrown,
-                    t.X + (0.30f * cy + 0.24f * sy) * t.Scale,
-                    t.Y + 6.18f * t.Scale,
-                    t.Z + (-0.30f * sy + 0.24f * cy) * t.Scale,
+                    t.X + (0.28f * cy + 0.20f * sy) * t.Scale,
+                    t.Y + 6.32f * t.Scale,
+                    t.Z + (-0.28f * sy + 0.20f * cy) * t.Scale,
                     0, t.RotationY, 0, t.Scale, t.Scale, t.Scale, 1f, 1f, 1f, tier < 2 ? windAmp : 0f);
 
                 if (t.State > 0 && tier <= 1)
@@ -899,11 +1438,11 @@ void main() {
                         float ang = t.RotationY + b * 1.256f;
                         nBunch = Mat4Utils.WriteInstanceTRS(
                             _fruitStaging, nBunch,
-                            t.X + MathF.Sin(ang) * 0.52f * t.Scale,
-                            t.Y + 5.82f * t.Scale,
-                            t.Z + MathF.Cos(ang) * 0.52f * t.Scale,
+                            t.X + (0.28f * cy + 0.20f * sy + MathF.Sin(ang) * 0.42f) * t.Scale,
+                            t.Y + (5.96f - (b % 2) * 0.18f) * t.Scale,
+                            t.Z + (-0.28f * sy + 0.20f * cy + MathF.Cos(ang) * 0.42f) * t.Scale,
                             0, ang, 0, t.Scale, t.Scale, t.Scale,
-                            isGold ? 2.35f : 1f, isGold ? 1.80f : 1f, isGold ? 0.45f : 1f, 0.35f);
+                            isGold ? 2.35f : 1f, isGold ? 1.80f : 1f, isGold ? 0.45f : 1f, 0.30f);
                     }
                 }
             }
@@ -912,16 +1451,16 @@ void main() {
             DrawNamed(MeshCatalog.TbsBunch, tier, _fruitStaging, nBunch, ref drawCalls, ref tris);
         }
 
-        // 3.5. Physical Ground Bouncing TBS Bunches + Parabolic Thrown TBS Projectiles!
+        // 3.5. Fallen Ground TBS & Thrown Arcs
         int nDynFruit = 0;
         for (int i = 0; i < Physics.GroundFruits.Length; i++)
         {
             if (!Physics.GroundFruits[i].Active) continue;
             ref var gf = ref Physics.GroundFruits[i];
-            float pulse = gf.Grounded ? (1.0f + MathF.Sin(now * 5.0f + i) * 0.05f) : 1.0f;
+            float pulse = gf.Grounded ? (1.0f + MathF.Sin(now * 4.5f + i) * 0.04f) : 1.0f;
             nDynFruit = Mat4Utils.WriteInstanceTRS(
                 _goldStaging, nDynFruit, gf.X, gf.Y, gf.Z, gf.RotX, gf.RotY, 0, pulse, pulse, pulse,
-                gf.IsGold ? 2.35f : 1.08f, gf.IsGold ? 1.80f : 1.05f, gf.IsGold ? 0.45f : 1.0f, 0f);
+                gf.IsGold ? 2.35f : 1.04f, gf.IsGold ? 1.80f : 1.02f, gf.IsGold ? 0.45f : 1.0f, 0f);
         }
         for (int i = 0; i < Physics.ThrownArcs.Length; i++)
         {
@@ -929,11 +1468,11 @@ void main() {
             ref var ar = ref Physics.ThrownArcs[i];
             nDynFruit = Mat4Utils.WriteInstanceTRS(
                 _goldStaging, nDynFruit, ar.CurX, ar.CurY, ar.CurZ, ar.SpinRad, ar.SpinRad * 0.7f, 0, 0.95f, 0.95f, 0.95f,
-                ar.IsGold ? 2.35f : 1.08f, ar.IsGold ? 1.80f : 1.05f, ar.IsGold ? 0.45f : 1.0f, 0f);
+                ar.IsGold ? 2.35f : 1.04f, ar.IsGold ? 1.80f : 1.02f, ar.IsGold ? 0.45f : 1.0f, 0f);
         }
         if (nDynFruit > 0) DrawNamed(MeshCatalog.TbsBunch, 0, _goldStaging, nDynFruit, ref drawCalls, ref tris);
 
-        // 4. Undergrowth Ferns & Boulders
+        // 4. Undergrowth Alpha-Cutout Ferns & Granite Boulders
         if (q.DrawUndergrowthFerns)
         {
             c = 0;
@@ -942,7 +1481,7 @@ void main() {
                 var f = _ferns[i];
                 float dx = f.X - eyeX, dz = f.Z - eyeZ;
                 if (dx * dx + dz * dz < q.Lod1Distance * q.Lod1Distance)
-                    c = Mat4Utils.WriteInstanceTRS(_instStaging, c, f.X, f.Y, f.Z, 0, f.RotY, 0, f.Scale, f.Scale, f.Scale, 1, 1, 1, 0.6f);
+                    c = Mat4Utils.WriteInstanceTRS(_instStaging, c, f.X, f.Y, f.Z, 0, f.RotY, 0, f.Scale, f.Scale, f.Scale, 1, 1, 1, 0.55f);
             }
             DrawNamed(MeshCatalog.TropicalFern, q.Preset == GraphicsPreset.Standard ? 1 : 0, _instStaging, c, ref drawCalls, ref tris);
         }
@@ -957,7 +1496,7 @@ void main() {
         }
         DrawNamed(MeshCatalog.RockBoulder, 1, _instStaging, c, ref drawCalls, ref tris);
 
-        // 5. Wild Celeng Boars with 4 Articulated Galloping Legs!
+        // 5. Wild Celeng Boars
         int nBoar = 0, nBoarLeg = 0;
         for (int i = 0; i < _boarsSnap.Count; i++)
         {
@@ -975,45 +1514,31 @@ void main() {
         DrawNamed(MeshCatalog.CelengBoar, 0, _instStaging, nBoar, ref drawCalls, ref tris);
         DrawNamed(MeshCatalog.BoarLeg, 0, _goldStaging, nBoarLeg, ref drawCalls, ref tris);
 
-        // 6. Render Both Physical Canter Trucks (Main Player Truck + Yard Canter Truck) with 4-Wheel Suspension & Steering!
-        if (Stage == AppSceneStage.Lobby)
-        {
-            // Showroom Canter parked at heroic 3/4 angle right behind avatar with front wheels steered +22 deg!
-            float tgy = RigidBodyWorld.SurfaceHeightWithStructures(9.85f, 3.85f);
-            Physics.MainTruck.X = 9.85f;
-            Physics.MainTruck.Z = 3.85f;
-            Physics.MainTruck.Y = tgy;
-            Physics.MainTruck.Yaw = -0.62f;
-            Physics.MainTruck.SteerAngle = 0.36f;
-            for (int w = 0; w < 4; w++) Physics.MainTruck.WheelWorldY[w] = tgy + 0.48f;
-        }
+        // 6. Physical Mitsubishi Fuso Canter COE Bak Kayu Trucks!
         int shownCargo = System.Math.Max(_net.LocalCargo, Physics.MainTruck.VisualCargoUnits);
-        DrawCanterVehicleRig(Physics.MainTruck, _net.Profile.Avatar, shownCargo, hasDriver: InTruck && Stage == AppSceneStage.Gameplay, ref drawCalls, ref tris);
+        DrawCanterVehicleRig(Physics.MainTruck, _net.Profile.Avatar, shownCargo, hasDriver: InTruck, ref drawCalls, ref tris);
         DrawCanterVehicleRig(Physics.YardTruck, new AvatarConfig { OutfitHex = "#E67E22" }, Physics.YardTruck.VisualCargoUnits, hasDriver: false, ref drawCalls, ref tris);
 
-        // 7. Render Local Player's Full 11-Part Detailed Anatomy Rig!
-        if (!InTruck || Stage != AppSceneStage.Gameplay)
+        // 7. Local Player Harvester (Fluid Spring-Smoothed Kinematics + Full Accessories!)
+        if (!InTruck)
         {
-            float renderYaw = Stage == AppSceneStage.Lobby ? (LobbyAvatarSpinOffset + MathF.Sin(now * 0.7f) * 0.06f) : Physics.Player.Yaw;
-            float px = Stage == AppSceneStage.Lobby ? 7.65f : PlayerX;
-            float pz = Stage == AppSceneStage.Lobby ? 6.15f : PlayerZ;
-            float py = Stage == AppSceneStage.Lobby ? RigidBodyWorld.SurfaceHeightWithStructures(px, pz) : PlayerY;
-
             DrawDetailedHumanRig(
-                px, py, pz, renderYaw,
-                walkPhase: Stage == AppSceneStage.Lobby ? 0f : Physics.Player.WalkCycleRad,
+                PlayerX, PlayerY, PlayerZ, Physics.Player.Yaw,
+                walkPhase: Physics.Player.WalkCycleRad,
                 breathPhase: Physics.Player.IdleBreathPhase,
-                moving: Stage == AppSceneStage.Gameplay && Physics.Player.MoveSpeedMs > 0.2f,
-                stance: Stage == AppSceneStage.Lobby ? HoldStance.TwoHandTool : Physics.Player.Stance,
+                moving: Physics.Player.MoveSpeedMs > 0.2f,
+                stance: Physics.Player.Stance,
                 slashTimer: Physics.Player.SlashTimer,
                 pickupTimer: Physics.Player.PickupTimer,
                 throwTimer: Physics.Player.ThrowTimer,
                 heldGold: Physics.Player.HeldGoldUnits > 0,
                 av: _net.Profile.Avatar,
+                dt: dt,
+                useSmoothState: true,
                 ref drawCalls, ref tris);
         }
 
-        // 8. Render Live Remote Multiplayer Peers (Full 11-Part Anatomy or Canter Rig!)
+        // 8. Live Remote Multiplayer Peers
         for (int i = 0; i < _peersSnap.Count; i++)
         {
             var p = _peersSnap[i];
@@ -1046,14 +1571,65 @@ void main() {
                     throwTimer: 0f,
                     heldGold: false,
                     av: p.Avatar,
+                    dt: dt,
+                    useSmoothState: false,
                     ref drawCalls, ref tris);
+            }
+        }
+
+        // 9. Soft Volumetric Billboards: PKS Boiler Steam + Tire Dust + Diesel Exhaust + Harvest Chaff (Mode 2)!
+        if (Quality.ParticlesEnabled)
+        {
+            float billboardYaw = MathF.Atan2(eyeX - lookX, eyeZ - lookZ);
+            int nPuff = 0;
+
+            // PKS Boiler Steam Plumes
+            for (int sp = 0; sp < 8; sp++)
+            {
+                float cycle = (now * 0.36f + sp * 0.125f) % 1.0f;
+                float cxChim = sp % 2 == 0 ? (PlantationWorld.PksX - 3.2f) : (PlantationWorld.PksX - 1.0f);
+                float sc = 1.25f + cycle * 3.4f;
+                float alpha = MathF.Sin(cycle * MathF.PI) * 0.44f;
+                nPuff = Mat4Utils.WriteInstanceTRS(
+                    _instStaging, nPuff,
+                    cxChim + cycle * 2.8f + MathF.Sin(now + sp) * 0.22f,
+                    pksGround + 14.3f + cycle * 7.2f,
+                    PlantationWorld.PksZ - 2.2f + cycle * 1.5f,
+                    0f, billboardYaw, cycle * 1.6f, sc, sc, sc,
+                    0.95f, 0.96f, 0.98f, alpha);
+            }
+
+            // Dynamic Tire Dust, Diesel Exhaust & Harvest Burst Particles!
+            for (int i = 0; i < _vfxPool.Length; i++)
+            {
+                if (!_vfxPool[i].Active) continue;
+                ref var p = ref _vfxPool[i];
+                float t = System.Math.Clamp(p.Age / p.Life, 0f, 1f);
+                float sz = p.SizeStart + (p.SizeEnd - p.SizeStart) * t;
+                float alpha = p.Alpha * (1f - t * t);
+                nPuff = Mat4Utils.WriteInstanceTRS(
+                    _instStaging, nPuff,
+                    p.X, p.Y, p.Z,
+                    0f, billboardYaw, p.Spin + t * 1.4f, sz, sz, sz,
+                    p.R, p.G, p.B, alpha);
+            }
+
+            if (nPuff > 0)
+            {
+                GLES30.GlUniform1i(_uRenderMode, 2);
+                GLES30.GlEnable(GLES30.GlBlend);
+                GLES30.GlBlendFunc(GLES30.GlSrcAlpha, GLES30.GlOneMinusSrcAlpha);
+                GLES30.GlDepthMask(false);
+                DrawNamed(MeshCatalog.VfxPuffQuad, 0, _instStaging, nPuff, ref drawCalls, ref tris);
+                GLES30.GlDepthMask(true);
+                GLES30.GlDisable(GLES30.GlBlend);
+                GLES30.GlUniform1i(_uRenderMode, 0);
             }
         }
 
         LastDrawCalls = drawCalls;
         LastTriangles = tris;
 
-        // Publish normalized screen projections for Gameplay Nameplates & Voice Waves
         lock (HudLock)
         {
             ProjectedLabels.Clear();
@@ -1062,7 +1638,7 @@ void main() {
             if (Stage == AppSceneStage.Gameplay)
             {
                 string myBubble = FindLatestBubble(_net.Profile.Id, now);
-                if (Mat4Utils.ProjectWorldToScreen(_vp, PlayerX, PlayerY + (InTruck ? 2.85f : 2.18f), PlayerZ, 1f, 1f, out float sx, out float sy))
+                if (Mat4Utils.ProjectWorldToScreen(_vp, PlayerX, PlayerY + (InTruck ? 2.75f : 2.15f), PlayerZ, 1f, 1f, out float sx, out float sy))
                 {
                     ProjectedLabels.Add(new ProjectedLabel
                     {
@@ -1080,7 +1656,7 @@ void main() {
                 {
                     var p = _peersSnap[i];
                     MinimapPeers.Add((p.RenderX, p.RenderZ, p.InTruck));
-                    if (Mat4Utils.ProjectWorldToScreen(_vp, p.RenderX, p.RenderY + (p.InTruck ? 2.85f : 2.18f), p.RenderZ, 1f, 1f, out float px, out float py))
+                    if (Mat4Utils.ProjectWorldToScreen(_vp, p.RenderX, p.RenderY + (p.InTruck ? 2.75f : 2.15f), p.RenderZ, 1f, 1f, out float px, out float py))
                     {
                         ProjectedLabels.Add(new ProjectedLabel
                         {
@@ -1098,6 +1674,70 @@ void main() {
         }
     }
 
+    private void UpdateSunShadowMatrix(float focusX, float focusY, float focusZ)
+    {
+        // Snap shadow frustum center to 0.5m world grid to eliminate shadow edge swimming completely!
+        float sx = MathF.Round(focusX * 2f) * 0.5f;
+        float sz = MathF.Round(focusZ * 2f) * 0.5f;
+        float halfExt = 27.0f;
+        Mat4Utils.CreateOrthographic(_lightProj, -halfExt, halfExt, -halfExt, halfExt, 1.0f, 96.0f);
+        Mat4Utils.CreateLookAt(
+            _lightView,
+            sx + 0.48f * 46f, focusY + 0.72f * 46f, sz + 0.44f * 46f,
+            sx, focusY, sz);
+        Mat4Utils.Multiply(_lightVp, _lightProj, _lightView);
+    }
+
+    private void RenderShadowCasters(float windAmp, ref int drawCalls, ref int tris)
+    {
+        float focusX = PlayerX, focusZ = PlayerZ;
+        int nTrunk = 0, nCrown = 0;
+        for (int i = 0; i < _trees.Count; i++)
+        {
+            var t = _trees[i];
+            float dx = t.X - focusX, dz = t.Z - focusZ;
+            if (dx * dx + dz * dz > 33f * 33f) continue;
+            float cy = MathF.Cos(t.RotationY), sy = MathF.Sin(t.RotationY);
+            nTrunk = Mat4Utils.WriteInstanceTRS(_treeLodStaging[0], nTrunk, t.X, t.Y - 0.12f, t.Z, 0, t.RotationY, 0, t.Scale, t.Scale, t.Scale);
+            nCrown = Mat4Utils.WriteInstanceTRS(
+                _treeLodStaging[1], nCrown,
+                t.X + (0.28f * cy + 0.20f * sy) * t.Scale,
+                t.Y + 6.32f * t.Scale,
+                t.Z + (-0.28f * sy + 0.20f * cy) * t.Scale,
+                0, t.RotationY, 0, t.Scale, t.Scale, t.Scale, 1f, 1f, 1f, windAmp);
+        }
+        DrawNamed(MeshCatalog.PalmTrunk, 1, _treeLodStaging[0], nTrunk, ref drawCalls, ref tris);
+        DrawNamed(MeshCatalog.PalmCrown, 1, _treeLodStaging[1], nCrown, ref drawCalls, ref tris);
+
+        // Shadow casters for Canter Trucks + PKS Factory + Player!
+        int c = 0;
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, Physics.MainTruck.X, Physics.MainTruck.Y, Physics.MainTruck.Z, Physics.MainTruck.PitchRad, Physics.MainTruck.Yaw, Physics.MainTruck.RollRad, 1, 1, 1);
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, Physics.YardTruck.X, Physics.YardTruck.Y, Physics.YardTruck.Z, Physics.YardTruck.PitchRad, Physics.YardTruck.Yaw, Physics.YardTruck.RollRad, 1, 1, 1);
+        DrawNamed(MeshCatalog.CanterTruckBody, 2, _instStaging, c, ref drawCalls, ref tris);
+
+        float pksGround = PlantationWorld.TerrainHeight(PlantationWorld.PksX, PlantationWorld.PksZ);
+        if ((PlantationWorld.PksX - focusX) * (PlantationWorld.PksX - focusX) + (PlantationWorld.PksZ - focusZ) * (PlantationWorld.PksZ - focusZ) < 42f * 42f)
+        {
+            c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, PlantationWorld.PksX, pksGround, PlantationWorld.PksZ, 0, 0, 0, 1, 1, 1);
+            DrawNamed(MeshCatalog.PksFactory, 2, _instStaging, c, ref drawCalls, ref tris);
+        }
+
+        if (!InTruck)
+        {
+            c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, PlayerX, PlayerY + 0.88f, PlayerZ, 0, Physics.Player.Yaw, 0, 1, 1, 1);
+            DrawNamed(MeshCatalog.CharTorsoHead, 2, _instStaging, c, ref drawCalls, ref tris);
+        }
+    }
+
+    private void BindAtlasAndShadowTextures()
+    {
+        GLES30.GlActiveTexture(GLES30.GlTexture0);
+        GLES30.GlBindTexture(GLES30.GlTexture2d, _atlasTexId);
+        GLES30.GlActiveTexture(GLES30.GlTexture1);
+        GLES30.GlBindTexture(GLES30.GlTexture2d, _shadowMapDepthTex);
+        GLES30.GlActiveTexture(GLES30.GlTexture0);
+    }
+
     private string FindLatestBubble(string senderId, float now)
     {
         for (int i = _chatSnap.Count - 1; i >= 0; i--)
@@ -1109,11 +1749,10 @@ void main() {
     }
 
     /// <summary>
-    /// Renders Mitsubishi Canter 'Oleng Sawit HD' with:
+    /// Renders authentic Indonesian COE Mitsubishi Fuso Canter FE 74 HD Bak Kayu:
     ///   - Chassis Pitch + Roll ("Canter Oleng") + Heave
-    ///   - 4 Independent Spring-Damper Suspension Wheels
-    ///   - Front-Wheel Steering Turn Angle (ry = Yaw + SteerAngle) + Rolling Tire Spin (rx = WheelSpinRad)
-    ///   - Seated Visible Driver inside Cab turning with SteerAngle!
+    ///   - 2 Single Front Steered Suspension Wheels + 4 DUAL Rear Axle Heavy Radial Wheels (6 wheels total!)
+    ///   - Live-Rotating 3D Cabin Steering Wheel (canter_steering_wheel) + Seated Driver turning with SteerAngle!
     /// </summary>
     private void DrawCanterVehicleRig(
         VehicleRigidBody v,
@@ -1129,42 +1768,55 @@ void main() {
         int n = chassis.Emit(_instStaging, 0, 1.0f, 1.0f, 1.0f);
         DrawNamed(MeshCatalog.CanterTruckBody, 0, _instStaging, n, ref drawCalls, ref tris);
 
-        // 4 Independent Suspension + Steer + Rolling Wheels!
+        // Live-rotating Canter steering wheel visible right through the wide COE windshield!
+        var steerMat = chassis.Child(0.42f, 1.44f, 1.86f, rx: 0.62f, rz: -v.SteerAngle * 2.2f);
+        DrawNamed(MeshCatalog.CanterSteeringWheel, 0, _instStaging, steerMat.Emit(_instStaging, 0), ref drawCalls, ref tris);
+
+        // 2 Front Steered Single Wheels + 4 Dual Rear Heavy Canter Wheels (6 wheels in ONE single instanced draw call!)
         float sy = MathF.Sin(v.Yaw), cy = MathF.Cos(v.Yaw);
-        ReadOnlySpan<float> lx = [-0.88f, 0.88f, -0.88f, 0.88f];
-        ReadOnlySpan<float> lz = [1.55f, 1.55f, -1.25f, -1.25f];
         int nw = 0;
-        for (int w = 0; w < 4; w++)
+        for (int s = 0; s < 2; s++)
         {
-            float wx = v.X + lx[w] * cy + lz[w] * sy;
-            float wz = v.Z - lx[w] * sy + lz[w] * cy;
-            float wy = v.WheelWorldY[w] > 0.001f ? v.WheelWorldY[w] : (v.Y + 0.48f);
-            float wheelYaw = w < 2 ? (v.Yaw + v.SteerAngle) : v.Yaw;
-            var hub = Mat4Utils.BoneMat.TRS(wx, wy, wz, ry: wheelYaw).Child(0f, 0f, 0f, rx: v.WheelSpinRad);
-            nw = hub.Emit(_instStaging, nw);
+            float sign = s == 0 ? -1f : 1f;
+            float wyFront = v.WheelWorldY[s] > 0.001f ? v.WheelWorldY[s] : (v.Y + 0.48f);
+            float fxW = v.X + (sign * 0.88f) * cy + 1.55f * sy;
+            float fzW = v.Z - (sign * 0.88f) * sy + 1.55f * cy;
+            nw = Mat4Utils.BoneMat.TRS(fxW, wyFront, fzW, ry: v.Yaw + v.SteerAngle)
+                .Child(0f, 0f, 0f, rx: v.WheelSpinRad)
+                .Emit(_instStaging, nw);
+
+            float wyRear = v.WheelWorldY[2 + s] > 0.001f ? v.WheelWorldY[2 + s] : (v.Y + 0.48f);
+            float innerX = sign * 0.74f, outerX = sign * 0.95f;
+            nw = Mat4Utils.BoneMat.TRS(v.X + innerX * cy - 1.25f * sy, wyRear, v.Z - innerX * sy - 1.25f * cy, ry: v.Yaw)
+                .Child(0f, 0f, 0f, rx: v.WheelSpinRad)
+                .Emit(_instStaging, nw);
+            nw = Mat4Utils.BoneMat.TRS(v.X + outerX * cy - 1.25f * sy, wyRear, v.Z - outerX * sy - 1.25f * cy, ry: v.Yaw)
+                .Child(0f, 0f, 0f, rx: v.WheelSpinRad)
+                .Emit(_instStaging, nw);
         }
         DrawNamed(MeshCatalog.TruckWheel, 0, _instStaging, nw, ref drawCalls, ref tris);
 
         if (cargoUnits > 0)
         {
-            float fill = System.Math.Min(1.12f, 0.45f + cargoUnits * 0.032f);
-            int nc = chassis.Child(0f, 0.82f, 0f, sx: 0.96f, sy: fill, sz: 0.96f).Emit(_instStaging, 0);
+            float fill = System.Math.Min(1.08f, 0.48f + cargoUnits * 0.030f);
+            int nc = chassis.Child(0f, 0.80f, 0f, sx: 0.96f, sy: fill, sz: 0.96f).Emit(_instStaging, 0);
             DrawNamed(MeshCatalog.TruckCargoHeap, 0, _instStaging, nc, ref drawCalls, ref tris);
         }
 
         if (hasDriver)
         {
-            // Seated detailed driver inside right-hand Indonesian cab turning with steering wheel!
-            var drvTorso = chassis.Child(0.42f, 1.16f, 1.62f, sx: 0.86f, sy: 0.86f, sz: 0.86f);
+            var drvTorso = chassis.Child(0.42f, 1.15f, 1.56f, sx: 0.86f, sy: 0.86f, sz: 0.86f);
             DrawNamed(MeshCatalog.CharTorsoHead, 0, _instStaging, drvTorso.Emit(_instStaging, 0, cr, cg, cb), ref drawCalls, ref tris);
-            var drvHead = drvTorso.Child(0f, 0.56f, 0.01f, ry: v.SteerAngle * 0.55f);
+            var drvHead = drvTorso.Child(0f, 0.58f, 0.01f, ry: v.SteerAngle * 0.55f);
             DrawNamed(MeshCatalog.CharHead, 0, _instStaging, drvHead.Emit(_instStaging, 0), ref drawCalls, ref tris);
+            if (av.Glasses)
+                DrawNamed(MeshCatalog.AccGlasses, 0, _instStaging, drvHead.Emit(_instStaging, 0), ref drawCalls, ref tris);
             if (!string.IsNullOrEmpty(av.Hat) && av.Hat != "none")
-                DrawNamed(av.Hat, 0, _instStaging, drvHead.Child(0f, 0.255f, 0.01f).Emit(_instStaging, 0), ref drawCalls, ref tris);
+                DrawNamed(av.Hat, 0, _instStaging, drvHead.Child(0f, 0.21f, 0f).Emit(_instStaging, 0, cr, cg, cb), ref drawCalls, ref tris);
 
             int na = 0, nf = 0;
-            var armL = drvTorso.Child(-0.24f, 0.46f, 0.02f, rx: -0.95f + v.SteerAngle * 0.45f, rz: -0.18f);
-            var armR = drvTorso.Child(0.24f, 0.46f, 0.02f, rx: -0.95f - v.SteerAngle * 0.45f, rz: 0.18f);
+            var armL = drvTorso.Child(-0.215f, 0.46f, 0.02f, rx: -0.92f + v.SteerAngle * 0.48f, rz: -0.16f);
+            var armR = drvTorso.Child(0.215f, 0.46f, 0.02f, rx: -0.92f - v.SteerAngle * 0.48f, rz: 0.16f);
             na = armL.Emit(_instStaging, na, cr, cg, cb);
             na = armR.Emit(_instStaging, na, cr, cg, cb);
             nf = armL.Child(0f, -0.27f, 0.01f, rx: -0.45f).Emit(_goldStaging, nf);
@@ -1174,13 +1826,8 @@ void main() {
         }
     }
 
-    /// <summary>
-    /// Full 11-Part Hierarchical Human Anatomy &amp; Action Animator:
-    ///   - Standing height = exact 1.76m, rubber boots flush on ground y = 0.00m
-    ///   - Animations: Idle Breath &amp; Head Scan, Athletic Stride + Knee Flexion, Overhead Egrek Slash,
-    ///     Knee-Squat Ground TBS Pickup ("Animasi Mengambil Sawit"), Two-Hand TBS Hold ("Animasi Pegang"),
-    ///     Two-Hand Heave &amp; Throw ("Animasi Menaruh ke Truk / Angkong"), and Angkong Handle Push!
-    /// </summary>
+    private static float SmoothDampValue(float current, float target, float k) => current + (target - current) * k;
+
     private void DrawDetailedHumanRig(
         float x, float y, float z, float yaw,
         float walkPhase,
@@ -1192,102 +1839,132 @@ void main() {
         float throwTimer,
         bool heldGold,
         AvatarConfig av,
+        float dt,
+        bool useSmoothState,
         ref int drawCalls,
         ref int tris)
     {
         var (cr, cg, cb) = av.GetOutfitRgb();
-        float breath = MathF.Sin(breathPhase) * 0.014f;
+        float breath = MathF.Sin(breathPhase) * 0.016f;
 
-        // 1. Compute Leg Kinematics (Hip -> Thigh -> Knee -> Calf + Rubber Boot)
         float stride = moving ? MathF.Sin(walkPhase) : 0f;
-        float bob = moving ? MathF.Abs(MathF.Cos(walkPhase)) * 0.042f : breath * 0.5f;
+        float bob = moving ? MathF.Abs(MathF.Cos(walkPhase)) * 0.046f : breath * 0.5f;
 
         float squatK = pickupTimer > 0.001f ? MathF.Sin(System.Math.Clamp(pickupTimer / 0.40f, 0f, 1f) * MathF.PI) : 0f;
-        float hipDrop = squatK * 0.34f;
-        float torsoLeanX = squatK * 0.56f + (moving ? 0.08f : 0f);
+        float tgtHipOffset = 0.88f + bob - squatK * 0.34f;
+        float tgtTorsoRx = squatK * 0.54f + (moving ? 0.09f : 0.015f + breath * 0.6f);
 
-        float thighL_rx = -stride * 0.62f - squatK * 0.92f;
-        float thighR_rx = stride * 0.62f - squatK * 0.92f;
-        float kneeL_rx = (moving ? MathF.Max(0f, MathF.Cos(walkPhase)) * 0.68f : 0.05f) + squatK * 1.48f;
-        float kneeR_rx = (moving ? MathF.Max(0f, -MathF.Cos(walkPhase)) * 0.68f : 0.05f) + squatK * 1.48f;
+        float tgtThighL = -stride * 0.60f - squatK * 0.90f;
+        float tgtThighR = stride * 0.60f - squatK * 0.90f;
+        float tgtKneeL = (moving ? MathF.Max(0f, MathF.Cos(walkPhase)) * 0.66f : 0.05f) + squatK * 1.45f;
+        float tgtKneeR = (moving ? MathF.Max(0f, -MathF.Cos(walkPhase)) * 0.66f : 0.05f) + squatK * 1.45f;
 
-        var hipRoot = Mat4Utils.BoneMat.TRS(x, y + 0.88f + bob - hipDrop, z, ry: yaw);
-        var torsoMat = hipRoot.Child(0f, 0f, 0f, rx: torsoLeanX);
-        var headMat = torsoMat.Child(
-            0f, 0.56f + breath * 0.4f, 0.01f,
-            rx: -torsoLeanX * 0.45f + MathF.Sin(breathPhase * 0.6f) * 0.03f,
-            ry: moving ? 0f : MathF.Sin(breathPhase * 0.45f) * 0.09f);
-
-        var thighL = hipRoot.Child(-0.115f, 0f, 0f, rx: thighL_rx);
-        var calfL = thighL.Child(0f, -0.43f, 0f, rx: kneeL_rx);
-        var thighR = hipRoot.Child(0.115f, 0f, 0f, rx: thighR_rx);
-        var calfR = thighR.Child(0f, -0.43f, 0f, rx: kneeR_rx);
-
-        // 2. Compute Arm & 5-Finger Hand Kinematics per Active Hold Stance & Action Timer!
-        float uaL_rx, uaL_rz, faL_rx, faL_ry;
-        float uaR_rx, uaR_rz, faR_rx, faR_ry;
+        float tgtUaLRx, tgtUaLRz, tgtFaLRx, tgtFaLRy;
+        float tgtUaRRx, tgtUaRRz, tgtFaRRx, tgtFaRRy;
 
         if (pickupTimer > 0.001f)
         {
-            // Reaching both 5-finger hands down toward the fallen spiky TBS on the ground!
-            uaL_rx = -0.35f - squatK * 0.98f; uaL_rz = -0.16f;
-            faL_rx = -0.35f - squatK * 0.25f; faL_ry = 0.20f;
-            uaR_rx = -0.35f - squatK * 0.98f; uaR_rz = 0.16f;
-            faR_rx = -0.35f - squatK * 0.25f; faR_ry = -0.20f;
+            tgtUaLRx = -0.35f - squatK * 0.96f; tgtUaLRz = -0.15f;
+            tgtFaLRx = -0.34f - squatK * 0.24f; tgtFaLRy = 0.20f;
+            tgtUaRRx = -0.35f - squatK * 0.96f; tgtUaRRz = 0.15f;
+            tgtFaRRx = -0.34f - squatK * 0.24f; tgtFaRRy = -0.20f;
         }
         else if (throwTimer > 0.001f)
         {
-            // Powerful two-handed chest-to-overhead heave into Truck Bed / Angkong!
             float tk = 1f - System.Math.Clamp(throwTimer / 0.48f, 0f, 1f);
             float heave = MathF.Sin(tk * MathF.PI);
-            uaL_rx = -0.82f - heave * 1.15f; uaL_rz = -0.18f;
-            faL_rx = -0.68f + heave * 0.48f; faL_ry = 0.20f;
-            uaR_rx = -0.82f - heave * 1.15f; uaR_rz = 0.18f;
-            faR_rx = -0.68f + heave * 0.48f; faR_ry = -0.20f;
+            tgtUaLRx = -0.80f - heave * 1.12f; tgtUaLRz = -0.18f;
+            tgtFaLRx = -0.68f + heave * 0.48f; tgtFaLRy = 0.22f;
+            tgtUaRRx = -0.80f - heave * 1.12f; tgtUaRRz = 0.18f;
+            tgtFaRRx = -0.68f + heave * 0.48f; tgtFaRRy = -0.22f;
         }
         else if (slashTimer > 0.001f)
         {
-            // High-energy two-handed Egrek pull-slash!
             float sk = 1f - System.Math.Clamp(slashTimer / 0.46f, 0f, 1f);
             float swing = MathF.Sin(sk * MathF.PI);
-            uaL_rx = -0.88f - swing * 1.15f; uaL_rz = -0.30f;
-            faL_rx = -0.45f + swing * 0.25f; faL_ry = 0.28f;
-            uaR_rx = -0.70f - swing * 1.25f; uaR_rz = 0.22f;
-            faR_rx = -0.55f + swing * 0.25f; faR_ry = -0.18f;
+            tgtUaLRx = -0.84f - swing * 1.15f; tgtUaLRz = -0.28f;
+            tgtFaLRx = -0.44f + swing * 0.26f; tgtFaLRy = 0.28f;
+            tgtUaRRx = -0.68f - swing * 1.22f; tgtUaRRz = 0.20f;
+            tgtFaRRx = -0.54f + swing * 0.26f; tgtFaRRy = -0.18f;
         }
         else if (stance == HoldStance.CarryingTbs)
         {
-            // Two-handed TBS cradling hold right in front of chest!
-            float carryBob = moving ? MathF.Sin(walkPhase * 2f) * 0.05f : breath;
-            uaL_rx = -0.78f + carryBob; uaL_rz = -0.22f;
-            faL_rx = -0.72f;            faL_ry = 0.26f;
-            uaR_rx = -0.78f + carryBob; uaR_rz = 0.22f;
-            faR_rx = -0.72f;            faR_ry = -0.26f;
+            float carryBob = moving ? MathF.Sin(walkPhase * 2f) * 0.055f : breath;
+            tgtUaLRx = -0.74f + carryBob; tgtUaLRz = -0.20f;
+            tgtFaLRx = -0.74f;            tgtFaLRy = 0.28f;
+            tgtUaRRx = -0.74f + carryBob; tgtUaRRz = 0.20f;
+            tgtFaRRx = -0.74f;            tgtFaRRy = -0.28f;
         }
         else if (stance == HoldStance.PushingAngkong)
         {
-            // Both hands extended forward gripping the two red rubber Angkong handles!
-            uaL_rx = -0.72f; uaL_rz = 0.06f;
-            faL_rx = -0.42f; faL_ry = 0.04f;
-            uaR_rx = -0.72f; uaR_rz = -0.06f;
-            faR_rx = -0.42f; faR_ry = -0.04f;
+            tgtUaLRx = -0.70f; tgtUaLRz = 0.05f;
+            tgtFaLRx = -0.42f; tgtFaLRy = 0.04f;
+            tgtUaRRx = -0.70f; tgtUaRRz = -0.05f;
+            tgtFaRRx = -0.42f; tgtFaRRy = -0.04f;
         }
         else
         {
-            // Ready Two-Handed Egrek / Dodos Hold Pose (never empty stiff arms!)
-            float sw = moving ? stride * 0.16f : breath;
-            uaL_rx = -0.88f + sw; uaL_rz = -0.32f;
-            faL_rx = -0.40f;      faL_ry = 0.28f;
-            uaR_rx = -0.64f - sw; uaR_rz = 0.24f;
-            faR_rx = -0.52f;      faR_ry = -0.18f;
+            float sw = moving ? stride * 0.18f : breath * 1.4f;
+            tgtUaLRx = -0.80f + sw; tgtUaLRz = -0.26f;
+            tgtFaLRx = -0.42f;      tgtFaLRy = 0.26f;
+            tgtUaRRx = -0.56f - sw; tgtUaRRz = 0.22f;
+            tgtFaRRx = -0.54f;      tgtFaRRy = -0.18f;
         }
 
-        var upperArmL = torsoMat.Child(-0.245f, 0.485f, 0.01f, rx: uaL_rx, rz: uaL_rz);
-        var forearmL = upperArmL.Child(0f, -0.27f, 0.01f, rx: faL_rx, ry: faL_ry);
-        var upperArmR = torsoMat.Child(0.245f, 0.485f, 0.01f, rx: uaR_rx, rz: uaR_rz);
-        var forearmR = upperArmR.Child(0f, -0.27f, 0.01f, rx: faR_rx, ry: faR_ry);
+        // Exponential spring-damping eliminates 100% of rigid state-snap pops ("0% kaku")!
+        if (useSmoothState)
+        {
+            float k = (!_localRigPose.Initialized) ? 1f : (1f - MathF.Exp(-dt * 15.5f));
+            _localRigPose.Initialized = true;
+            _localRigPose.HipOffsetY = SmoothDampValue(_localRigPose.HipOffsetY, tgtHipOffset, k);
+            _localRigPose.TorsoRx = SmoothDampValue(_localRigPose.TorsoRx, tgtTorsoRx, k);
+            _localRigPose.ThighLRx = SmoothDampValue(_localRigPose.ThighLRx, tgtThighL, k);
+            _localRigPose.KneeLRx = SmoothDampValue(_localRigPose.KneeLRx, tgtKneeL, k);
+            _localRigPose.ThighRRx = SmoothDampValue(_localRigPose.ThighRRx, tgtThighR, k);
+            _localRigPose.KneeRRx = SmoothDampValue(_localRigPose.KneeRRx, tgtKneeR, k);
+            _localRigPose.UaLRx = SmoothDampValue(_localRigPose.UaLRx, tgtUaLRx, k);
+            _localRigPose.UaLRz = SmoothDampValue(_localRigPose.UaLRz, tgtUaLRz, k);
+            _localRigPose.FaLRx = SmoothDampValue(_localRigPose.FaLRx, tgtFaLRx, k);
+            _localRigPose.FaLRy = SmoothDampValue(_localRigPose.FaLRy, tgtFaLRy, k);
+            _localRigPose.UaRRx = SmoothDampValue(_localRigPose.UaRRx, tgtUaRRx, k);
+            _localRigPose.UaRRz = SmoothDampValue(_localRigPose.UaRRz, tgtUaRRz, k);
+            _localRigPose.FaRRx = SmoothDampValue(_localRigPose.FaRRx, tgtFaRRx, k);
+            _localRigPose.FaRRy = SmoothDampValue(_localRigPose.FaRRy, tgtFaRRy, k);
 
-        // 3. Emit Batched GPU Draw Calls for All 11 Anatomical Segments + Cosmetics + Held Item!
+            tgtHipOffset = _localRigPose.HipOffsetY;
+            tgtTorsoRx = _localRigPose.TorsoRx;
+            tgtThighL = _localRigPose.ThighLRx;
+            tgtKneeL = _localRigPose.KneeLRx;
+            tgtThighR = _localRigPose.ThighRRx;
+            tgtKneeR = _localRigPose.KneeRRx;
+            tgtUaLRx = _localRigPose.UaLRx;
+            tgtUaLRz = _localRigPose.UaLRz;
+            tgtFaLRx = _localRigPose.FaLRx;
+            tgtFaLRy = _localRigPose.FaLRy;
+            tgtUaRRx = _localRigPose.UaRRx;
+            tgtUaRRz = _localRigPose.UaRRz;
+            tgtFaRRx = _localRigPose.FaRRx;
+            tgtFaRRy = _localRigPose.FaRRy;
+        }
+
+        float hipSwayRz = moving ? -stride * 0.045f : MathF.Sin(breathPhase * 0.5f) * 0.012f;
+        var hipRoot = Mat4Utils.BoneMat.TRS(x, y + tgtHipOffset, z, ry: yaw, rz: hipSwayRz);
+        var torsoMat = hipRoot.Child(0f, 0f, 0f, rx: tgtTorsoRx, ry: moving ? stride * 0.07f : 0f);
+        var headMat = torsoMat.Child(
+            0f, 0.58f + breath * 0.35f, 0.01f,
+            rx: -tgtTorsoRx * 0.45f + MathF.Sin(breathPhase * 0.6f) * 0.028f,
+            ry: moving ? -stride * 0.05f : MathF.Sin(breathPhase * 0.42f) * 0.095f);
+
+        var thighL = hipRoot.Child(-0.105f, 0f, 0f, rx: tgtThighL, rz: -0.025f);
+        var calfL = thighL.Child(0f, -0.43f, 0f, rx: tgtKneeL);
+        var thighR = hipRoot.Child(0.105f, 0f, 0f, rx: tgtThighR, rz: 0.025f);
+        var calfR = thighR.Child(0f, -0.43f, 0f, rx: tgtKneeR);
+
+        var upperArmL = torsoMat.Child(-0.215f, 0.46f, 0.01f, rx: tgtUaLRx, rz: tgtUaLRz);
+        var forearmL = upperArmL.Child(0f, -0.27f, 0.01f, rx: tgtFaLRx, ry: tgtFaLRy);
+        var upperArmR = torsoMat.Child(0.215f, 0.46f, 0.01f, rx: tgtUaRRx, rz: tgtUaRRz);
+        var forearmR = upperArmR.Child(0f, -0.27f, 0.01f, rx: tgtFaRRx, ry: tgtFaRRy);
+
         DrawNamed(MeshCatalog.CharTorsoHead, 0, _instStaging, torsoMat.Emit(_instStaging, 0, cr, cg, cb), ref drawCalls, ref tris);
         DrawNamed(MeshCatalog.CharHead, 0, _instStaging, headMat.Emit(_instStaging, 0), ref drawCalls, ref tris);
 
@@ -1311,39 +1988,44 @@ void main() {
         nHand = forearmR.Emit(_instStaging, nHand);
         DrawNamed(MeshCatalog.CharForearmHand, 0, _instStaging, nHand, ref drawCalls, ref tris);
 
+        // Complete Indonesian Harvester Accessories: Sunglasses, Waist Parang Sheath, Hats, Backpacks/Baskets & Tools!
+        if (av.Glasses)
+        {
+            DrawNamed(MeshCatalog.AccGlasses, 0, _instStaging, headMat.Emit(_instStaging, 0), ref drawCalls, ref tris);
+        }
+        if (av.WaistParang)
+        {
+            DrawNamed(MeshCatalog.AccParangWaist, 0, _instStaging, torsoMat.Child(0.175f, 0.10f, -0.02f).Emit(_instStaging, 0), ref drawCalls, ref tris);
+        }
         if (!string.IsNullOrEmpty(av.Hat) && av.Hat != "none")
         {
-            DrawNamed(av.Hat, 0, _instStaging, headMat.Child(0f, 0.255f, 0.01f).Emit(_instStaging, 0), ref drawCalls, ref tris);
+            DrawNamed(av.Hat, 0, _instStaging, headMat.Child(0f, 0.21f, 0f).Emit(_instStaging, 0, cr, cg, cb), ref drawCalls, ref tris);
         }
-
         if (!string.IsNullOrEmpty(av.Back) && av.Back != "none")
         {
-            float windBack = av.Back == MeshCatalog.BackCape ? 0.65f : 0.20f;
-            DrawNamed(av.Back, 0, _instStaging, torsoMat.Child(0f, 0.36f, -0.14f).Emit(_instStaging, 0, 1f, 1f, 1f, windBack), ref drawCalls, ref tris);
+            float windBack = av.Back == MeshCatalog.BackCape ? 0.65f : 0.18f;
+            DrawNamed(av.Back, 0, _instStaging, torsoMat.Child(0f, 0.34f, -0.14f).Emit(_instStaging, 0, cr, cg, cb, windBack), ref drawCalls, ref tris);
         }
 
         string toolMesh = string.IsNullOrEmpty(av.Tool) ? MeshCatalog.ToolEgrek : av.Tool;
         if (stance == HoldStance.CarryingTbs)
         {
-            // Render held spiky TBS bunch directly between both 5-finger hands + sling Egrek diagonally on back!
-            var heldFruit = torsoMat.Child(0f, 0.33f, 0.44f, rx: 0.35f, sx: 0.84f, sy: 0.84f, sz: 0.84f);
+            var heldFruit = torsoMat.Child(0f, 0.31f, 0.39f, rx: 0.35f, sx: 0.86f, sy: 0.86f, sz: 0.86f);
             DrawNamed(MeshCatalog.TbsBunch, 0, _instStaging,
-                heldFruit.Emit(_instStaging, 0, heldGold ? 2.35f : 1.06f, heldGold ? 1.80f : 1.05f, heldGold ? 0.45f : 1f),
+                heldFruit.Emit(_instStaging, 0, heldGold ? 2.35f : 1.04f, heldGold ? 1.80f : 1.02f, heldGold ? 0.45f : 1f),
                 ref drawCalls, ref tris);
             DrawNamed(toolMesh, 0, _instStaging, torsoMat.Child(-0.08f, 0.15f, -0.22f, rx: -0.18f, rz: -0.42f, sx: 0.72f, sy: 0.72f, sz: 0.72f).Emit(_instStaging, 0), ref drawCalls, ref tris);
         }
         else if (stance == HoldStance.PushingAngkong)
         {
-            // Sling Egrek neatly across back while gripping Angkong handles!
             DrawNamed(toolMesh, 0, _instStaging, torsoMat.Child(-0.08f, 0.15f, -0.22f, rx: -0.18f, rz: -0.42f, sx: 0.72f, sy: 0.72f, sz: 0.72f).Emit(_instStaging, 0), ref drawCalls, ref tris);
         }
         else
         {
-            // Held Egrek / Dodos in both hands with dynamic overhead slash pivot!
             float slashPitch = slashTimer > 0.001f
                 ? -0.55f + MathF.Sin((1f - slashTimer / 0.46f) * MathF.PI) * 1.35f
                 : 0.14f;
-            var toolMat = torsoMat.Child(0.04f, 0.24f, 0.38f, rx: slashPitch, rz: 0.10f);
+            var toolMat = torsoMat.Child(0.03f, 0.22f, 0.34f, rx: slashPitch, rz: 0.08f);
             DrawNamed(toolMesh, 0, _instStaging, toolMat.Emit(_instStaging, 0), ref drawCalls, ref tris);
         }
     }

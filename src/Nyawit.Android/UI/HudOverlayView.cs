@@ -7,6 +7,7 @@ using Android.Runtime;
 using Android.Views;
 using Nyawit.AndroidClient.Audio;
 using Nyawit.AndroidClient.Rendering;
+using NyawitEngine.Assets;
 using NyawitEngine.Core;
 using NyawitEngine.Network;
 using NyawitEngine.Physics;
@@ -34,14 +35,37 @@ public enum VectorIconKind : byte
     ShareNodes = 15,
     LobbyGrid = 16,
     PlayChevron = 17,
+    SettingsGear = 18,
+    CloseCross = 19,
+}
+
+public enum ActiveModalOverlay : byte
+{
+    None = 0,
+    Settings = 1,      // Pengaturan Sistem, Grafik, Frame Rate (30/60/90/120), Bayangan, Awan, Partikel & Audio!
+    Wardrobe = 2,      // Lemari Pakaian & Aksesoris Pemanen Lengkap!
+    SocialRoom = 3,    // Server Live, Room Kebun & Quick Chat!
+    Ranking = 4,       // Papan Peringkat & Turnamen Mingguan!
+    DailyReward = 5,   // Absensi & Bonus Harian!
 }
 
 /// <summary>
-/// 100% Sharp-Angled Tactical Cyber-Industrial HUD, 3D Main Lobby &amp; "MENYIAPKAN DUNIA" Loading View.
-/// Zero bubble circles, zero emojis anywhere — every button &amp; badge renders crisp vector paths!
+/// NyawitEngine v4.0 Precision Anti-Lag Custom Game UI &amp; Modal System:
+///   - ZERO stock Android widgets / AlertDialogs / ActionBars anywhere
+///   - Pre-allocated zero-GC Paint/Path/HitZone buffers + throttled 6 Hz passive UI refresh during gameplay (-> 60-120 FPS!)
+///   - Screen 0: Custom XyVerse + Nyawit Live Boot Splash Screen
+///   - Screen 1: Dedicated Separate 3D Garage Showroom Lobby UI + 360-deg Touch Orbit
+///   - Screen 2: Dedicated Full-Screen "MENYIAPKAN DUNIA" Loading Screen
+///   - Screen 3: Uncluttered Precision Gameplay HUD + Full Custom In-Game PENGATURAN Modal
 /// </summary>
 public sealed class HudOverlayView : View
 {
+    private struct HitZoneSlot
+    {
+        public float L, T, R, B;
+        public Action? Callback;
+    }
+
     private readonly Gles3InstancedRenderer? _renderer;
     private readonly LiveMultiplayerSession? _net;
     private readonly ProceduralSfxPlayer? _sfx;
@@ -49,6 +73,7 @@ public sealed class HudOverlayView : View
     private readonly Typeface _displayFont = Typeface.DefaultBold!;
     private readonly Typeface _uiBoldFont = Typeface.Create("sans-serif-condensed", TypefaceStyle.Bold) ?? Typeface.DefaultBold!;
     private readonly Bitmap? _brandSmallMark;
+    private readonly Bitmap? _brandWideLogo;
 
     private readonly Paint _fillPaint = new(PaintFlags.AntiAlias);
     private readonly Paint _strokePaint = new(PaintFlags.AntiAlias);
@@ -57,6 +82,11 @@ public sealed class HudOverlayView : View
     private readonly Paint _titlePaint = new(PaintFlags.AntiAlias);
     private readonly Path _tmpPath = new();
     private readonly Path _iconPath = new();
+    private readonly Rect _srcRect = new();
+    private readonly RectF _dstRect = new();
+
+    private readonly HitZoneSlot[] _hitZones = new HitZoneSlot[64];
+    private int _hitCount;
 
     private int _joyPointerId = -1;
     private float _joyOriginX, _joyOriginY, _joyKnobX, _joyKnobY;
@@ -66,9 +96,18 @@ public sealed class HudOverlayView : View
     private string _toastText = "";
     private long _toastUntilMs;
 
-    private readonly List<(RectF Rect, Action Tap)> _hitZones = new(32);
+    public ActiveModalOverlay ActiveModal { get; private set; } = ActiveModalOverlay.None;
+    public int SettingsTabIndex { get; set; } // 0 = GRAFIK & FPS, 1 = VISUAL & BAYANGAN, 2 = AUDIO & KONTROL
 
-    // Public screen coordinates exposed for deterministic automated emulator verification too!
+    private readonly List<LeaderboardRow> _leaderCache = new(16);
+    private readonly List<RoomDescriptor> _roomsCache = new(8);
+    private readonly List<RemotePeerState> _peersTmp = new(4);
+    private readonly List<BoarNetState> _boarsTmp = new(2);
+    private readonly List<ChatMessageEntry> _chatsTmp = new(32);
+
+    // Pre-allocated modal tab actions (zero closure allocation per frame!)
+    private Action[] _tabActions = [];
+
     public RectF LastEnterWorldButtonRect { get; private set; } = new();
     public RectF LastPickupOrLoadButtonRect { get; private set; } = new();
     public RectF LastHarvestButtonRect { get; private set; } = new();
@@ -77,17 +116,25 @@ public sealed class HudOverlayView : View
     public event Action? OnEnterWorldRequested;
     public event Action? OnReturnLobbyRequested;
     public event Action? OnToggleVoiceMic;
-    public event Action? OnOpenChat;
-    public event Action? OnOpenRankings;
-    public event Action? OnOpenAvatar;
-    public event Action? OnOpenDaily;
-    public event Action? OnOpenSocialShare;
+    public event Action<int>? OnTargetFpsSelected;
+    public event Action? OnCustomChatInputRequested;
+    public event Action? OnRenamePlayerRequested;
     public event Action? OnHarvestPressed;
     public event Action? OnPickupOrLoadPressed;
     public event Action? OnAngkongTogglePressed;
     public event Action? OnSellPressed;
     public event Action? OnTruckTogglePressed;
     public event Action? OnHornPressed;
+    public event Action? OnProfileModified;
+
+    private static readonly string[] HatCycle = [MeshCatalog.HatCaping, MeshCatalog.HatSafety, MeshCatalog.HatHeadband, MeshCatalog.HatCowboy, MeshCatalog.HatCrownGold];
+    private static readonly string[] HatLabels = ["CAPING BAMBU", "HELM PROYEK", "IKAT KEPALA", "TOPI MANDOR", "MAHKOTA SULTAN"];
+    private static readonly string[] BackCycle = [MeshCatalog.BackBasket, MeshCatalog.BackPack, MeshCatalog.BackCape, MeshCatalog.BackWingsGold, "none"];
+    private static readonly string[] BackLabels = ["KERANJANG ROTAN", "RANSEL TAKTIS", "JUBAH SAWIT", "SAYAP EMAS", "TANPA TAS"];
+    private static readonly string[] ToolCycle = [MeshCatalog.ToolEgrek, MeshCatalog.ToolDodos, MeshCatalog.ToolTojok, MeshCatalog.ToolEgrekDragon];
+    private static readonly string[] ToolLabels = ["EGREK BAJA", "DODOS LEBAR", "TOJOK SAWIT", "EGREK NAGA"];
+    private static readonly string[] ColorHexCycle = ["#27AE60", "#2563EB", "#DC2626", "#D97706", "#1E293B"];
+    private static readonly string[] ColorNameCycle = ["HIJAU KEBUN", "BIRU PROYEK", "MERAH BERANI", "EMAS MANDOR", "HITAM TAKTIS"];
 
     public HudOverlayView(IntPtr javaReference, JniHandleOwnership transfer)
         : base(javaReference, transfer)
@@ -101,1016 +148,1304 @@ public sealed class HudOverlayView : View
         ProceduralSfxPlayer sfx,
         VoiceChatManager voice,
         Typeface displayFont,
-        Bitmap? brandSmallMark) : base(context)
+        Bitmap? brandSmallMark,
+        Bitmap? brandWideLogo = null)
+        : base(context)
     {
         _renderer = renderer;
         _net = net;
         _sfx = sfx;
         _voice = voice;
-        _displayFont = displayFont ?? Typeface.DefaultBold!;
+        _displayFont = displayFont;
         _brandSmallMark = brandSmallMark;
-        SetWillNotDraw(false);
+        _brandWideLogo = brandWideLogo;
 
         _strokePaint.SetStyle(Paint.Style.Stroke);
         _iconPaint.SetStyle(Paint.Style.Stroke);
         _iconPaint.StrokeCap = Paint.Cap.Square;
         _iconPaint.StrokeJoin = Paint.Join.Miter;
-
-        // XyVerse Brand Rule: XyVerseDisplay strictly for pure A-Z uppercase display headlines;
-        // _uiBoldFont handles numbers, stats, percentages & labels cleanly with zero missing glyphs!
-        _titlePaint.SetTypeface(_displayFont);
         _textPaint.SetTypeface(_uiBoldFont);
-    }
+        _titlePaint.SetTypeface(_displayFont);
 
-    public void ShowToast(string msg)
-    {
-        _toastText = msg.ToUpperInvariant();
-        _toastUntilMs = Java.Lang.JavaSystem.CurrentTimeMillis() + 3100;
-    }
-
-    protected override void OnDraw(Canvas canvas)
-    {
-        base.OnDraw(canvas);
-        if (_renderer == null || _net == null) return;
-
-        float w = Width, h = Height;
-        if (w <= 1f || h <= 1f) return;
-        float dp = Resources?.DisplayMetrics?.Density ?? 2.5f;
-
-        _hitZones.Clear();
-
-        float pad = 12 * dp;
-        float cutoutLeft = 0f;
-        if (OperatingSystem.IsAndroidVersionAtLeast(28))
-            cutoutLeft = RootWindowInsets?.DisplayCutout?.SafeInsetLeft ?? 0f;
-        float leftPad = System.Math.Max(pad, cutoutLeft + 8 * dp);
-
-        if (_renderer.Stage == AppSceneStage.Lobby)
-        {
-            DrawMainLobbyOverlay(canvas, w, h, leftPad, pad, dp);
-        }
-        else if (_renderer.Stage == AppSceneStage.PreparingWorld)
-        {
-            DrawPreparingWorldScreen(canvas, w, h, leftPad, pad, dp);
-        }
-        else
-        {
-            DrawGameplayHud(canvas, w, h, leftPad, pad, dp);
-        }
-
-        DrawToastBanner(canvas, w, h, dp);
-        PostInvalidateOnAnimation();
-    }
-
-    // =========================================================================
-    //  SCREEN 1: INTERACTIVE 3D MAIN LOBBY SHOWCASE SCREEN
-    // =========================================================================
-    private void DrawMainLobbyOverlay(Canvas canvas, float w, float h, float leftPad, float pad, float dp)
-    {
-        if (_renderer == null || _net == null) return;
-
-        // Subtle left & right tactical gradient vignette while keeping center 3D Avatar + Canter crystal clear!
-        _fillPaint.Color = new Color(7, 11, 13, 128);
-        canvas.DrawRect(0, 0, leftPad + 272 * dp, h, _fillPaint);
-        canvas.DrawRect(w - pad - 248 * dp, 0, w, h, _fillPaint);
-
-        // 1. Left Column: Brand Header + Player Profile Card + Multi-Room Server Selector
-        var hdr = new RectF(leftPad, pad, leftPad + 258 * dp, pad + 78 * dp);
-        DrawChamferedPanel(canvas, hdr, new Color(11, 15, 18, 232), new Color(48, 232, 138, 225), 9 * dp, accentLeft: true);
-
-        float tx = hdr.Left + 12 * dp;
-        if (_brandSmallMark != null && !_brandSmallMark.IsRecycled)
-        {
-            float ms = 26 * dp;
-            canvas.DrawBitmap(_brandSmallMark, null, new RectF(tx, hdr.Top + 11 * dp, tx + ms, hdr.Top + 11 * dp + ms), null);
-            tx += ms + 9 * dp;
-        }
-        _titlePaint.TextSize = 14.5f * dp;
-        _titlePaint.Color = Color.White;
-        canvas.DrawText("NYAWIT LIVE", tx, hdr.Top + 27 * dp, _titlePaint);
-
-        _textPaint.TextSize = 9.5f * dp;
-        _textPaint.Color = new Color(48, 232, 138);
-        canvas.DrawText($"SERVER API: {(_net.IsConnected ? "ONLINE TERHUBUNG" : "MENGHUBUNGKAN...")}  //  {_net.PingMs} MS", hdr.Left + 12 * dp, hdr.Top + 47 * dp, _textPaint);
-
-        _textPaint.Color = new Color(246, 195, 56);
-        canvas.DrawText($"RP {_net.Profile.Coins:N0}   //   {_net.Profile.Gems} GEM   //   {_net.Profile.TotalKg:N0} KG", hdr.Left + 12 * dp, hdr.Top + 66 * dp, _textPaint);
-
-        // Player Call-Sign Card
-        var profRect = new RectF(leftPad, hdr.Bottom + 8 * dp, leftPad + 258 * dp, hdr.Bottom + 54 * dp);
-        DrawChamferedPanel(canvas, profRect, new Color(14, 21, 24, 226), new Color(255, 255, 255, 68), 7 * dp);
-        DrawVectorIcon(canvas, VectorIconKind.AvatarHelm, profRect.Left + 22 * dp, profRect.CenterY(), 11 * dp, new Color(48, 232, 138), dp);
-        _textPaint.TextSize = 11.2f * dp;
-        _textPaint.Color = Color.White;
-        canvas.DrawText(_net.Profile.Name.ToUpperInvariant(), profRect.Left + 40 * dp, profRect.Top + 20 * dp, _textPaint);
-        _textPaint.TextSize = 9.2f * dp;
-        _textPaint.Color = new Color(168, 196, 184);
-        canvas.DrawText($"{_net.Profile.Avatar.Title.ToUpperInvariant()}  //  SKOR {_net.Profile.AllTimeScore:N0}", profRect.Left + 40 * dp, profRect.Top + 37 * dp, _textPaint);
-
-        // Multi-Room Server Selector
-        _textPaint.TextSize = 9.5f * dp;
-        _textPaint.Color = new Color(152, 178, 168);
-        canvas.DrawText("PILIH SERVER KEBUN MULTIPLAYER", leftPad + 2 * dp, profRect.Bottom + 18 * dp, _textPaint);
-
-        var rooms = _net.GetRoomsSnapshot();
-        float ry = profRect.Bottom + 24 * dp;
-        float rh = 38 * dp;
-        for (int i = 0; i < rooms.Count && i < 3; i++)
-        {
-            var rm = rooms[i];
-            bool selected = rm.Id == _net.CurrentRoomId;
-            var rr = new RectF(leftPad, ry, leftPad + 258 * dp, ry + rh);
-            DrawChamferedPanel(
-                canvas, rr,
-                selected ? new Color(22, 68, 46, 238) : new Color(12, 17, 20, 216),
-                selected ? new Color(48, 232, 138, 245) : new Color(255, 255, 255, 52),
-                6 * dp, accentLeft: selected);
-
-            _fillPaint.Color = selected ? new Color(48, 232, 138) : new Color(246, 195, 56);
-            canvas.DrawRect(rr.Left + 11 * dp, rr.CenterY() - 3 * dp, rr.Left + 17 * dp, rr.CenterY() + 3 * dp, _fillPaint);
-
-            _textPaint.TextSize = 10.0f * dp;
-            _textPaint.Color = Color.White;
-            canvas.DrawText(rm.Label, rr.Left + 25 * dp, rr.Top + 16 * dp, _textPaint);
-            _textPaint.TextSize = 8.6f * dp;
-            _textPaint.Color = selected ? new Color(138, 250, 192) : new Color(160, 175, 170);
-            int liveCount = selected ? System.Math.Max(rm.Online, 1 + _net.RemotePeerCount) : rm.Online;
-            canvas.DrawText($"{rm.Region}  //  {liveCount}/{rm.Capacity} AKTIF", rr.Left + 25 * dp, rr.Top + 31 * dp, _textPaint);
-
-            string capturedRoom = rm.Id;
-            string capturedLabel = rm.Label;
-            RegisterButton(rr, () =>
-            {
-                _net.SelectRoom(capturedRoom);
-                ShowToast($"TERHUBUNG KE ROOM {capturedLabel}");
-            });
-            ry += rh + 6 * dp;
-        }
-
-        // Center Showcase Hint Badge
-        var rotHint = new RectF(w * 0.5f - 118 * dp, h - pad - 28 * dp, w * 0.5f + 118 * dp, h - pad);
-        DrawChamferedPanel(canvas, rotHint, new Color(10, 14, 16, 196), new Color(255, 255, 255, 64), 5 * dp);
-        _textPaint.TextAlign = Paint.Align.Center;
-        _textPaint.TextSize = 9.0f * dp;
-        _textPaint.Color = new Color(210, 228, 220);
-        canvas.DrawText("GESER LAYAR TENGAH: PUTAR 3D AVATAR & CANTER", rotHint.CenterX(), rotHint.CenterY() + 3.2f * dp, _textPaint);
-        _textPaint.TextAlign = Paint.Align.Left;
-
-        // 2. Right Column: Sharp Tactical Feature Modules + Quality Preset Bar + Giant "MASUK KEBUN" Launch Button
-        float rx0 = w - pad - 232 * dp;
-        float rw = 232 * dp;
-        (string label, VectorIconKind icon, Action act, bool highlight)[] lobbyMenus =
+        _tabActions =
         [
-            ("KUSTOMISASI AVATAR 3D", VectorIconKind.AvatarHelm, () => OnOpenAvatar?.Invoke(), false),
-            ("RANKING & TURNAMEN", VectorIconKind.Trophy, () => OnOpenRankings?.Invoke(), false),
-            ("REWARD HARIAN 7-HARI", VectorIconKind.DailyCrate, () => OnOpenDaily?.Invoke(), _net.Profile.CanClaimDaily),
-            ("GLOBAL CHAT & SUARA", VectorIconKind.ChatBox, () => OnOpenChat?.Invoke(), false),
-            ("AKUN SOSMED & SHARE", VectorIconKind.ShareNodes, () => OnOpenSocialShare?.Invoke(), false),
+            () => { _sfx?.Play("ui_click"); SettingsTabIndex = 0; PostInvalidate(); },
+            () => { _sfx?.Play("ui_click"); SettingsTabIndex = 1; PostInvalidate(); },
+            () => { _sfx?.Play("ui_click"); SettingsTabIndex = 2; PostInvalidate(); },
         ];
 
-        float my = pad;
-        float mh = 33 * dp;
-        for (int i = 0; i < lobbyMenus.Length; i++)
-        {
-            var mr = new RectF(rx0, my, rx0 + rw, my + mh);
-            bool hi = lobbyMenus[i].highlight;
-            DrawChamferedPanel(
-                canvas, mr,
-                hi ? new Color(84, 52, 12, 232) : new Color(12, 17, 21, 224),
-                hi ? new Color(246, 195, 56, 235) : new Color(255, 255, 255, 68),
-                6 * dp);
-            DrawVectorIcon(canvas, lobbyMenus[i].icon, mr.Left + 18 * dp, mr.CenterY(), 8.5f * dp, hi ? new Color(246, 195, 56) : new Color(48, 232, 138), dp);
-            _textPaint.TextSize = 9.8f * dp;
-            _textPaint.Color = Color.White;
-            canvas.DrawText(lobbyMenus[i].label, mr.Left + 34 * dp, mr.CenterY() + 3.5f * dp, _textPaint);
-            RegisterButton(mr, lobbyMenus[i].act);
-            my += mh + 5 * dp;
-        }
-
-        // Graphics Preset Strip in Lobby
-        string[] qNames = ["SMOOTH", "STD", "ULTRA", "MAX HD"];
-        float qw = (rw - 12 * dp) / 4f;
-        for (int i = 0; i < 4; i++)
-        {
-            var qr = new RectF(rx0 + i * (qw + 4 * dp), my + 2 * dp, rx0 + i * (qw + 4 * dp) + qw, my + 26 * dp);
-            bool active = (int)_renderer.Quality.CurrentPreset == i;
-            DrawChamferedPanel(canvas, qr, active ? new Color(48, 232, 138, 240) : new Color(12, 17, 21, 215), new Color(255, 255, 255, 65), 4 * dp);
-            _textPaint.TextAlign = Paint.Align.Center;
-            _textPaint.TextSize = 8.4f * dp;
-            _textPaint.Color = active ? Color.Black : Color.White;
-            canvas.DrawText(qNames[i], qr.CenterX(), qr.CenterY() + 3 * dp, _textPaint);
-            _textPaint.TextAlign = Paint.Align.Left;
-            int qi = i;
-            RegisterButton(qr, () =>
-            {
-                _renderer.RequestPresetChange((GraphicsPreset)qi);
-                ShowToast($"GRAFIK {qNames[qi]} AKTIF");
-            });
-        }
-
-        // Primary Sharp Chamfered Launch Button: "MASUK KEBUN"
-        var playRect = new RectF(rx0, h - pad - 62 * dp, rx0 + rw, h - pad);
-        LastEnterWorldButtonRect = playRect;
-        DrawChamferedPanel(canvas, playRect, new Color(38, 206, 118, 248), new Color(246, 214, 88, 255), 11 * dp, accentLeft: true);
-        DrawVectorIcon(canvas, VectorIconKind.PlayChevron, playRect.Left + 26 * dp, playRect.CenterY(), 13 * dp, new Color(8, 14, 12), dp);
-        _titlePaint.TextSize = 15.5f * dp;
-        _titlePaint.Color = new Color(8, 14, 12);
-        canvas.DrawText("MASUK KEBUN", playRect.Left + 46 * dp, playRect.Top + 31 * dp, _titlePaint);
-        _textPaint.TextSize = 8.8f * dp;
-        _textPaint.Color = new Color(10, 32, 22);
-        canvas.DrawText("MULAI PANEN & TRUK CANTER LIVE", playRect.Left + 46 * dp, playRect.Top + 49 * dp, _textPaint);
-        RegisterButton(playRect, () => OnEnterWorldRequested?.Invoke());
+        _renderer.OnStageChanged += () => PostInvalidate();
     }
 
-    // =========================================================================
-    //  SCREEN 2: "MENYIAPKAN DUNIA..." TACTICAL WORLD PREPARATION LOADING SCREEN
-    // =========================================================================
-    private void DrawPreparingWorldScreen(Canvas canvas, float w, float h, float leftPad, float pad, float dp)
+    public void OpenModal(ActiveModalOverlay modal)
     {
-        if (_renderer == null || _net == null) return;
-
-        // Atmospheric dark tactical letterbox bars so the live 3D aerial plantation fly-in shines!
-        _fillPaint.Color = new Color(6, 10, 12, 168);
-        canvas.DrawRect(0, 0, w, 62 * dp, _fillPaint);
-        canvas.DrawRect(0, h - 134 * dp, w, h, _fillPaint);
-
-        // Top Bar Brand Stamp
-        float tx = leftPad;
-        if (_brandSmallMark != null && !_brandSmallMark.IsRecycled)
+        ActiveModal = modal;
+        if (modal == ActiveModalOverlay.Ranking && _net != null)
         {
-            float ms = 24 * dp;
-            canvas.DrawBitmap(_brandSmallMark, null, new RectF(tx, 18 * dp, tx + ms, 18 * dp + ms), null);
-            tx += ms + 10 * dp;
-        }
-        _titlePaint.TextSize = 14 * dp;
-        _titlePaint.Color = Color.White;
-        canvas.DrawText("NYAWIT LIVE", tx, 36 * dp, _titlePaint);
-
-        _textPaint.TextAlign = Paint.Align.Right;
-        _textPaint.TextSize = 9.8f * dp;
-        _textPaint.Color = new Color(48, 232, 138);
-        canvas.DrawText($"ROOM AKTIF: {_net.CurrentRoomId.ToUpperInvariant()}  //  FISIKA 60HZ", w - pad, 35 * dp, _textPaint);
-        _textPaint.TextAlign = Paint.Align.Left;
-
-        // Bottom Sharp Loading Telemetry Frame
-        var box = new RectF(leftPad + 36 * dp, h - 118 * dp, w - pad - 36 * dp, h - 22 * dp);
-        DrawChamferedPanel(canvas, box, new Color(10, 15, 18, 240), new Color(48, 232, 138, 235), 10 * dp, accentLeft: true);
-
-        _titlePaint.TextSize = 16.5f * dp;
-        _titlePaint.Color = Color.White;
-        canvas.DrawText("MENYIAPKAN DUNIA", box.Left + 18 * dp, box.Top + 28 * dp, _titlePaint);
-
-        int pct = System.Math.Clamp((int)MathF.Round(_renderer.WorldPrepProgress * 100f), 0, 100);
-        _textPaint.TextAlign = Paint.Align.Right;
-        _textPaint.TextSize = 15.0f * dp;
-        _textPaint.Color = new Color(246, 195, 56);
-        canvas.DrawText($"{pct}%", box.Right - 18 * dp, box.Top + 28 * dp, _textPaint);
-        _textPaint.TextAlign = Paint.Align.Left;
-
-        _textPaint.TextSize = 9.8f * dp;
-        _textPaint.Color = new Color(148, 240, 192);
-        canvas.DrawText(_renderer.WorldPrepStatus, box.Left + 18 * dp, box.Top + 47 * dp, _textPaint);
-
-        // Sharp Segmented Progress Bar
-        var barBg = new RectF(box.Left + 18 * dp, box.Top + 56 * dp, box.Right - 18 * dp, box.Top + 70 * dp);
-        _fillPaint.Color = new Color(26, 38, 42, 255);
-        canvas.DrawRect(barBg, _fillPaint);
-        _strokePaint.StrokeWidth = 1.2f * dp;
-        _strokePaint.Color = new Color(255, 255, 255, 65);
-        canvas.DrawRect(barBg, _strokePaint);
-
-        float fillW = (barBg.Width() - 4 * dp) * System.Math.Clamp(_renderer.WorldPrepProgress, 0f, 1f);
-        if (fillW > 1f)
-        {
-            _fillPaint.Color = new Color(48, 232, 138, 255);
-            canvas.DrawRect(barBg.Left + 2 * dp, barBg.Top + 2 * dp, barBg.Left + 2 * dp + fillW, barBg.Bottom - 2 * dp, _fillPaint);
-        }
-
-        _textPaint.TextSize = 8.6f * dp;
-        _textPaint.Color = new Color(178, 196, 190);
-        canvas.DrawText("PANDUAN: TEBANG SAWIT -> AMBIL TBS DI TANAH -> MUAT KE BAK TRUK CANTER / ANGKONG -> SETOR DI RAM PKS", box.Left + 18 * dp, box.Top + 86 * dp, _textPaint);
-    }
-
-    // =========================================================================
-    //  SCREEN 3: SHARP-ANGLED TACTICAL GAMEPLAY HUD + VECTOR ICONS + VOICE + PHYSICS TELEMETRY
-    // =========================================================================
-    private void DrawGameplayHud(Canvas canvas, float w, float h, float leftPad, float pad, float dp)
-    {
-        if (_renderer == null || _net == null) return;
-        var player = _renderer.Physics.Player;
-        var truck = _renderer.Physics.MainTruck;
-
-        // 1. Projected 3D Player Nameplates, Voice Indicators & Sharp Speech Boxes
-        lock (_renderer.HudLock)
-        {
-            foreach (var lbl in _renderer.ProjectedLabels)
+            _net.RefreshBoards();
+            var snap = _net.GetBoardsSnapshot();
+            lock (_leaderCache)
             {
-                DrawProjectedNameplate(canvas, lbl.ScreenX * w, lbl.ScreenY * h, lbl.Name, lbl.BubbleText, lbl.IsSelf, lbl.IsSpeaking, dp);
+                _leaderCache.Clear();
+                _leaderCache.AddRange(snap.Weekly.Count > 0 ? snap.Weekly : snap.Global);
             }
         }
-
-        // 2. Top-Left Sharp Tactical Status & Economy Card
-        var card = new RectF(leftPad, pad, leftPad + 246 * dp, pad + 74 * dp);
-        DrawChamferedPanel(canvas, card, new Color(10, 14, 17, 224), new Color(48, 232, 138, 185), 8 * dp, accentLeft: true);
-
-        float textX = card.Left + 10 * dp;
-        if (_brandSmallMark != null && !_brandSmallMark.IsRecycled)
+        else if (modal == ActiveModalOverlay.SocialRoom && _net != null)
         {
-            float ms = 21 * dp;
-            canvas.DrawBitmap(_brandSmallMark, null, new RectF(textX, card.Top + 8 * dp, textX + ms, card.Top + 8 * dp + ms), null);
-            textX += ms + 7 * dp;
-        }
-
-        _titlePaint.TextSize = 12.6f * dp;
-        _titlePaint.Color = Color.White;
-        canvas.DrawText("NYAWIT LIVE", textX, card.Top + 23 * dp, _titlePaint);
-
-        _textPaint.TextSize = 8.9f * dp;
-        _textPaint.Color = _net.IsConnected ? new Color(48, 232, 138) : new Color(246, 195, 56);
-        int onlineCount = 1 + _net.RemotePeerCount;
-        canvas.DrawText(
-            $"{(_net.IsConnected ? "ONLINE" : "OFFLINE")}  //  {onlineCount} PEMAIN  //  {_renderer.Quality.CurrentFps} FPS  //  {_renderer.LastDrawCalls} DC",
-            card.Left + 10 * dp, card.Top + 43 * dp, _textPaint);
-
-        int shownTruckCargo = System.Math.Max(_net.LocalCargo, truck.VisualCargoUnits);
-        _textPaint.Color = new Color(246, 195, 56);
-        canvas.DrawText(
-            $"RP {_net.Profile.Coins:N0}  //  TANGAN {player.HeldTbsUnits}/6  //  BAK {shownTruckCargo}/24",
-            card.Left + 10 * dp, card.Top + 61 * dp, _textPaint);
-
-        // 3. Top-Center Event Banner + Graphics Bar + Live Canter Speed / Suspension Telemetry
-        float cxTop = w * 0.545f;
-        var evRect = new RectF(cxTop - 116 * dp, pad, cxTop + 116 * dp, pad + 26 * dp);
-        DrawChamferedPanel(canvas, evRect, new Color(18, 26, 22, 218), new Color(246, 195, 56, 200), 6 * dp);
-        _textPaint.TextSize = 9.4f * dp;
-        _textPaint.Color = new Color(246, 195, 56);
-        _textPaint.TextAlign = Paint.Align.Center;
-        canvas.DrawText(_net.EventTitle.ToUpperInvariant(), evRect.CenterX(), evRect.CenterY() + 3.5f * dp, _textPaint);
-
-        string[] qNames = ["SMOOTH", "STD", "ULTRA", "MAX HD"];
-        float qW = 55 * dp, qGap = 4 * dp;
-        float qStartX = cxTop - (qW * 4 + qGap * 3) * 0.5f;
-        for (int i = 0; i < 4; i++)
-        {
-            var qr = new RectF(qStartX + i * (qW + qGap), pad + 30 * dp, qStartX + i * (qW + qGap) + qW, pad + 52 * dp);
-            bool active = (int)_renderer.Quality.CurrentPreset == i;
-            DrawChamferedPanel(canvas, qr, active ? new Color(48, 232, 138, 240) : new Color(10, 14, 17, 204), new Color(255, 255, 255, 62), 4 * dp);
-            _textPaint.TextSize = 8.6f * dp;
-            _textPaint.Color = active ? Color.Black : Color.White;
-            canvas.DrawText(qNames[i], qr.CenterX(), qr.CenterY() + 3.2f * dp, _textPaint);
-            int presetIdx = i;
-            RegisterButton(qr, () =>
+            _ = _net.RefreshRoomsFromServerAsync().ContinueWith(_ =>
             {
-                _renderer.RequestPresetChange((GraphicsPreset)presetIdx);
-                ShowToast($"GRAFIK {qNames[presetIdx]} AKTIF");
+                lock (_roomsCache) { _roomsCache.Clear(); _roomsCache.AddRange(_net.GetRoomsSnapshot()); }
+                PostInvalidate();
             });
         }
-
-        if (_renderer.InTruck)
-        {
-            int kmh = (int)MathF.Round(MathF.Abs(truck.SpeedMs) * 3.6f);
-            int steerDeg = (int)MathF.Round(truck.SteerAngle * 180f / MathF.PI);
-            int rollDeg = (int)MathF.Round(truck.RollRad * 180f / MathF.PI);
-            var telRect = new RectF(cxTop - 118 * dp, pad + 56 * dp, cxTop + 118 * dp, pad + 79 * dp);
-            DrawChamferedPanel(canvas, telRect, new Color(10, 18, 26, 224), new Color(44, 196, 248, 200), 5 * dp);
-            _textPaint.TextSize = 9.0f * dp;
-            _textPaint.Color = new Color(118, 224, 255);
-            canvas.DrawText($"{kmh} KM/J  //  BELOK {steerDeg} DEG  //  OLENG {rollDeg} DEG", telRect.CenterX(), telRect.CenterY() + 3.2f * dp, _textPaint);
-        }
-        _textPaint.TextAlign = Paint.Align.Left;
-
-        // 4. Top-Right Sharp Square Tactical Minimap + Vector-Icon Menu Strip
-        float mapSize = 104 * dp;
-        var mapRect = new RectF(w - pad - mapSize, pad, w - pad, pad + mapSize);
-        DrawSharpMinimap(canvas, mapRect, dp);
-
-        bool micOn = _voice?.IsMicTransmitting == true;
-        (string label, VectorIconKind icon, Action act, bool accent)[] menus =
-        [
-            ("LOBBY", VectorIconKind.LobbyGrid, () => OnReturnLobbyRequested?.Invoke(), false),
-            (micOn ? "MIC AKTIF" : "VOICE OFF", micOn ? VectorIconKind.MicOn : VectorIconKind.MicMuted, () => OnToggleVoiceMic?.Invoke(), micOn),
-            ("CHAT", VectorIconKind.ChatBox, () => OnOpenChat?.Invoke(), false),
-            ("RANKING", VectorIconKind.Trophy, () => OnOpenRankings?.Invoke(), false),
-            ("AVATAR", VectorIconKind.AvatarHelm, () => OnOpenAvatar?.Invoke(), false),
-            ("REWARD", VectorIconKind.DailyCrate, () => OnOpenDaily?.Invoke(), _net.Profile.CanClaimDaily),
-        ];
-        float btnW = 102 * dp, btnH = 26 * dp;
-        for (int i = 0; i < menus.Length; i++)
-        {
-            float bx = mapRect.Left - 7 * dp - btnW;
-            float by = pad + i * (btnH + 4 * dp);
-            var mr = new RectF(bx, by, bx + btnW, by + btnH);
-            bool hi = menus[i].accent;
-            DrawChamferedPanel(
-                canvas, mr,
-                hi ? new Color(24, 92, 62, 236) : new Color(10, 14, 17, 214),
-                hi ? new Color(48, 232, 138, 240) : new Color(255, 255, 255, 62),
-                5 * dp);
-            DrawVectorIcon(canvas, menus[i].icon, mr.Left + 14 * dp, mr.CenterY(), 7.2f * dp, hi ? new Color(110, 255, 180) : new Color(246, 195, 56), dp);
-            _textPaint.TextSize = 8.8f * dp;
-            _textPaint.Color = Color.White;
-            canvas.DrawText(menus[i].label, mr.Left + 27 * dp, mr.CenterY() + 3.2f * dp, _textPaint);
-            RegisterButton(mr, menus[i].act);
-        }
-
-        // 5. Bottom-Left Sharp Octagonal Tactical Analog Pad (ZERO circular bubbles!)
-        float joyR = 52 * dp;
-        float baseCx = _joyPointerId != -1 ? _joyOriginX : 96 * dp;
-        float baseCy = _joyPointerId != -1 ? _joyOriginY : h - 90 * dp;
-        float knobCx = _joyPointerId != -1 ? _joyKnobX : baseCx;
-        float knobCy = _joyPointerId != -1 ? _joyKnobY : baseCy;
-
-        DrawOctagonPad(canvas, baseCx, baseCy, joyR, knobCx, knobCy, dp);
-
-        // 6. Bottom-Right Sharp Chamfered Tactical Action Pad with Custom Vector Icons!
-        // Primary Action [PANEN]
-        var harvestRect = new RectF(w - pad - 102 * dp, h - pad - 92 * dp, w - pad, h - pad);
-        LastHarvestButtonRect = harvestRect;
-        DrawTacticalButton(
-            canvas, harvestRect,
-            active: _renderer.NearestRipeTreeId >= 0,
-            fillActive: new Color(36, 198, 112, 244),
-            fillIdle: new Color(18, 48, 34, 212),
-            border: new Color(88, 250, 162, 240),
-            icon: VectorIconKind.HarvestSickle,
-            label: "PANEN",
-            sub: _renderer.NearestRipeTreeId >= 0 ? "SIAP TEBANG" : "CARI POHON",
-            dp: dp,
-            onTap: () => OnHarvestPressed?.Invoke());
-
-        // Dynamic Pickup / Carry / Load Button [AMBIL TBS / MUAT TRUK / ISI ANGKONG]
-        string pickLabel = "AMBIL TBS";
-        string pickSub = _renderer.NearbyGroundFruitCount > 0 ? $"ADA {_renderer.NearbyGroundFruitCount} TBS" : "DEKATI TBS";
-        VectorIconKind pickIcon = VectorIconKind.PickupTbs;
-        bool pickReady = _renderer.NearbyGroundFruitCount > 0;
-        Color pickFill = new Color(36, 152, 224, 240);
-
-        if (_renderer.CanLoadIntoVehicleOrCart)
-        {
-            bool toTruck = _renderer.Physics.IsNearMainTruck(5.6f);
-            pickLabel = toTruck ? "MUAT TRUK" : "ISI ANGKONG";
-            pickSub = toTruck ? "LEMPAR KE BAK" : "TARUH GEROBAK";
-            pickIcon = VectorIconKind.LoadTruck;
-            pickReady = true;
-            pickFill = new Color(242, 168, 30, 246);
-        }
-        else if (player.HasHeldTbs && _renderer.NearbyGroundFruitCount == 0)
-        {
-            pickLabel = "PEGANG TBS";
-            pickSub = $"BAWA {player.HeldTbsUnits} KE TRUK";
-            pickIcon = VectorIconKind.LoadTruck;
-            pickReady = true;
-            pickFill = new Color(36, 152, 224, 232);
-        }
-
-        var pickupRect = new RectF(harvestRect.Left - 8 * dp - 100 * dp, h - pad - 76 * dp, harvestRect.Left - 8 * dp, h - pad);
-        LastPickupOrLoadButtonRect = pickupRect;
-        DrawTacticalButton(
-            canvas, pickupRect,
-            active: pickReady,
-            fillActive: pickFill,
-            fillIdle: new Color(16, 28, 38, 212),
-            border: new Color(96, 214, 255, 225),
-            icon: pickIcon,
-            label: pickLabel,
-            sub: pickSub,
-            dp: dp,
-            onTap: () => OnPickupOrLoadPressed?.Invoke());
-
-        // [SETOR PKS] Button
-        var sellRect = new RectF(pickupRect.Left - 8 * dp - 92 * dp, h - pad - 68 * dp, pickupRect.Left - 8 * dp, h - pad);
-        DrawTacticalButton(
-            canvas, sellRect,
-            active: _renderer.NearRamWeighbridge,
-            fillActive: new Color(244, 184, 34, 248),
-            fillIdle: new Color(46, 36, 16, 206),
-            border: new Color(250, 208, 78, 225),
-            icon: VectorIconKind.SellPks,
-            label: "SETOR PKS",
-            sub: _renderer.NearRamWeighbridge ? "JUAL SEKARANG" : "KE RAM PKS",
-            dp: dp,
-            onTap: () => OnSellPressed?.Invoke());
-
-        // Upper Row Action Buttons: [ANGKONG] + [NAIK CANTER / TURUN] + [BASURI]
-        var hornRect = new RectF(w - pad - 92 * dp, harvestRect.Top - 8 * dp - 58 * dp, w - pad, harvestRect.Top - 8 * dp);
-        DrawTacticalButton(
-            canvas, hornRect,
-            active: true,
-            fillActive: new Color(214, 96, 28, 232),
-            fillIdle: new Color(214, 96, 28, 232),
-            border: new Color(255, 166, 78, 220),
-            icon: VectorIconKind.BasuriHorn,
-            label: "BASURI",
-            sub: "KLAKSON + GAS",
-            dp: dp,
-            onTap: () => OnHornPressed?.Invoke());
-
-        var truckRect = new RectF(hornRect.Left - 8 * dp - 96 * dp, pickupRect.Top - 8 * dp - 58 * dp, hornRect.Left - 8 * dp, pickupRect.Top - 8 * dp);
-        LastTruckButtonRect = truckRect;
-        DrawTacticalButton(
-            canvas, truckRect,
-            active: true,
-            fillActive: _renderer.InTruck ? new Color(206, 58, 62, 236) : new Color(28, 128, 198, 236),
-            fillIdle: new Color(28, 128, 198, 236),
-            border: new Color(118, 216, 255, 225),
-            icon: _renderer.InTruck ? VectorIconKind.SteeringWheel : VectorIconKind.CanterTruck,
-            label: _renderer.InTruck ? "TURUN" : "CANTER",
-            sub: _renderer.InTruck ? "JALAN KAKI" : "KEMUDI TRUK",
-            dp: dp,
-            onTap: () => OnTruckTogglePressed?.Invoke());
-
-        bool pushingCart = player.ActiveAngkongIndex >= 0;
-        if (!_renderer.InTruck && (_renderer.NearbyAngkongId >= 0 || pushingCart))
-        {
-            var cartRect = new RectF(truckRect.Left - 8 * dp - 92 * dp, sellRect.Top - 8 * dp - 58 * dp, truckRect.Left - 8 * dp, sellRect.Top - 8 * dp);
-            DrawTacticalButton(
-                canvas, cartRect,
-                active: true,
-                fillActive: pushingCart ? new Color(206, 58, 62, 236) : new Color(24, 152, 168, 236),
-                fillIdle: new Color(24, 152, 168, 236),
-                border: new Color(96, 238, 245, 225),
-                icon: VectorIconKind.Angkong,
-                label: pushingCart ? "LEPAS" : "ANGKONG",
-                sub: pushingCart ? "PARKIR" : "DORONG",
-                dp: dp,
-                onTap: () => OnAngkongTogglePressed?.Invoke());
-        }
+        PostInvalidate();
     }
 
-    private void DrawToastBanner(Canvas canvas, float w, float h, float dp)
+    public void CloseModal()
     {
-        if (string.IsNullOrEmpty(_toastText) || Java.Lang.JavaSystem.CurrentTimeMillis() >= _toastUntilMs) return;
-        float tw = System.Math.Clamp(_textPaint.MeasureText(_toastText) + 42 * dp, 220 * dp, 430 * dp);
-        var tr = new RectF(w * 0.5f - tw * 0.5f, 88 * dp, w * 0.5f + tw * 0.5f, 118 * dp);
-        DrawChamferedPanel(canvas, tr, new Color(8, 13, 16, 238), new Color(246, 195, 56, 235), 6 * dp, accentLeft: true);
-        _textPaint.TextSize = 9.8f * dp;
-        _textPaint.Color = new Color(248, 206, 82);
-        _textPaint.TextAlign = Paint.Align.Center;
-        canvas.DrawText(_toastText, tr.CenterX(), tr.CenterY() + 3.5f * dp, _textPaint);
-        _textPaint.TextAlign = Paint.Align.Left;
+        if (ActiveModal == ActiveModalOverlay.None) return;
+        ActiveModal = ActiveModalOverlay.None;
+        PostInvalidate();
     }
 
-    private void DrawProjectedNameplate(Canvas canvas, float sx, float sy, string name, string bubble, bool isSelf, bool speaking, float dp)
+    public void ShowToast(string text)
     {
-        _textPaint.TextAlign = Paint.Align.Center;
-        _textPaint.TextSize = 9.8f * dp;
-        string tag = speaking ? $"[SUARA] {name.ToUpperInvariant()}" : name.ToUpperInvariant();
-        float tw = System.Math.Max(_textPaint.MeasureText(tag) + 20 * dp, 74 * dp);
-        var nr = new RectF(sx - tw * 0.5f, sy - 21 * dp, sx + tw * 0.5f, sy + 2 * dp);
-        DrawChamferedPanel(
-            canvas, nr,
-            new Color(8, 12, 16, 196),
-            speaking ? new Color(48, 255, 152, 245) : (isSelf ? new Color(48, 232, 138, 190) : new Color(255, 255, 255, 70)),
-            4 * dp);
-        _textPaint.Color = isSelf ? new Color(136, 255, 188) : Color.White;
-        canvas.DrawText(tag, sx, sy - 5.5f * dp, _textPaint);
-
-        if (!string.IsNullOrEmpty(bubble))
-        {
-            float bw = System.Math.Min(230 * dp, _textPaint.MeasureText(bubble) + 22 * dp);
-            var br = new RectF(sx - bw * 0.5f, sy - 49 * dp, sx + bw * 0.5f, sy - 25 * dp);
-            DrawChamferedPanel(canvas, br, new Color(246, 248, 250, 245), new Color(246, 195, 56, 230), 5 * dp);
-            _textPaint.Color = new Color(12, 16, 20);
-            canvas.DrawText(bubble, sx, sy - 33.5f * dp, _textPaint);
-        }
-        _textPaint.TextAlign = Paint.Align.Left;
+        _toastText = text;
+        _toastUntilMs = Java.Lang.JavaSystem.CurrentTimeMillis() + 2600L;
+        PostInvalidate();
     }
 
-    private void DrawSharpMinimap(Canvas canvas, RectF r, float dp)
+    private void RegisterHit(float l, float t, float r, float b, Action cb)
     {
-        if (_renderer == null) return;
-        DrawChamferedPanel(canvas, r, new Color(11, 26, 18, 234), new Color(48, 232, 138, 155), 7 * dp);
-        float scale = r.Width() / 215f;
-        float cx = r.CenterX(), cy = r.CenterY();
-
-        // Crosshair tactical grid lines
-        _strokePaint.StrokeWidth = 1f;
-        _strokePaint.Color = new Color(255, 255, 255, 24);
-        canvas.DrawLine(cx, r.Top + 4 * dp, cx, r.Bottom - 4 * dp, _strokePaint);
-        canvas.DrawLine(r.Left + 4 * dp, cy, r.Right - 4 * dp, cy, _strokePaint);
-
-        // Canal + 2 Wooden Bridges
-        _fillPaint.Color = new Color(34, 146, 168, 205);
-        float cz = cy + PlantationWorld.CanalZ * scale;
-        canvas.DrawRect(r.Left + 3 * dp, cz - 2 * dp, r.Right - 3 * dp, cz + 2 * dp, _fillPaint);
-        _fillPaint.Color = new Color(214, 154, 78);
-        canvas.DrawRect(cx - 28f * scale - 2.5f * dp, cz - 3.5f * dp, cx - 28f * scale + 2.5f * dp, cz + 3.5f * dp, _fillPaint);
-        canvas.DrawRect(cx + 28f * scale - 2.5f * dp, cz - 3.5f * dp, cx + 28f * scale + 2.5f * dp, cz + 3.5f * dp, _fillPaint);
-
-        // RAM Weighbridge Square
-        _fillPaint.Color = new Color(246, 195, 56);
-        canvas.DrawRect(cx - 4 * dp, cy + PlantationWorld.RamZ * scale - 4 * dp, cx + 4 * dp, cy + PlantationWorld.RamZ * scale + 4 * dp, _fillPaint);
-
-        // Golden Trees
-        for (int i = 0; i < _renderer.Trees.Count; i++)
-        {
-            var t = _renderer.Trees[i];
-            if (t.State != 2) continue;
-            float gx = cx + t.X * scale, gz = cy + t.Z * scale;
-            canvas.DrawRect(gx - 1.5f * dp, gz - 1.5f * dp, gx + 1.5f * dp, gz + 1.5f * dp, _fillPaint);
-        }
-
-        // Main Canter Marker (Amber Square)
-        _fillPaint.Color = new Color(255, 196, 36);
-        float txm = cx + _renderer.Physics.MainTruck.X * scale, tzm = cy + _renderer.Physics.MainTruck.Z * scale;
-        canvas.DrawRect(txm - 3 * dp, tzm - 3 * dp, txm + 3 * dp, tzm + 3 * dp, _fillPaint);
-
-        // Remote Peers (Cyan Diamonds)
-        _fillPaint.Color = new Color(76, 214, 255);
-        lock (_renderer.HudLock)
-        {
-            foreach (var p in _renderer.MinimapPeers)
-            {
-                float px = cx + p.X * scale, pz = cy + p.Z * scale;
-                canvas.DrawRect(px - 2.5f * dp, pz - 2.5f * dp, px + 2.5f * dp, pz + 2.5f * dp, _fillPaint);
-            }
-        }
-
-        // Local Player Marker (Bright Emerald Diamond)
-        _fillPaint.Color = new Color(48, 255, 148);
-        float lx = cx + _renderer.PlayerX * scale, lz = cy + _renderer.PlayerZ * scale;
-        _tmpPath.Reset();
-        _tmpPath.MoveTo(lx, lz - 4.5f * dp);
-        _tmpPath.LineTo(lx + 4.5f * dp, lz);
-        _tmpPath.LineTo(lx, lz + 4.5f * dp);
-        _tmpPath.LineTo(lx - 4.5f * dp, lz);
-        _tmpPath.Close();
-        canvas.DrawPath(_tmpPath, _fillPaint);
+        if (_hitCount >= _hitZones.Length) return;
+        _hitZones[_hitCount].L = l;
+        _hitZones[_hitCount].T = t;
+        _hitZones[_hitCount].R = r;
+        _hitZones[_hitCount].B = b;
+        _hitZones[_hitCount].Callback = cb;
+        _hitCount++;
     }
 
-    private void DrawOctagonPad(Canvas canvas, float cx, float cy, float r, float kx, float ky, float dp)
-    {
-        BuildOctagonPath(_tmpPath, cx, cy, r);
-        _fillPaint.Color = new Color(10, 16, 20, 164);
-        canvas.DrawPath(_tmpPath, _fillPaint);
-        _strokePaint.StrokeWidth = 2.0f * dp;
-        _strokePaint.Color = new Color(48, 232, 138, 165);
-        canvas.DrawPath(_tmpPath, _strokePaint);
+    private float Dp(float v) => v * (Resources?.DisplayMetrics?.Density ?? 2.5f);
 
-        // Tactical crosshair ticks inside joystick pad
-        _strokePaint.StrokeWidth = 1.2f * dp;
-        _strokePaint.Color = new Color(255, 255, 255, 65);
-        canvas.DrawLine(cx - r * 0.72f, cy, cx + r * 0.72f, cy, _strokePaint);
-        canvas.DrawLine(cx, cy - r * 0.72f, cx, cy + r * 0.72f, _strokePaint);
-
-        // Sharp Beveled Octagon Thumb Knob
-        BuildOctagonPath(_tmpPath, kx, ky, 21 * dp);
-        _fillPaint.Color = new Color(246, 195, 56, 238);
-        canvas.DrawPath(_tmpPath, _fillPaint);
-        _strokePaint.StrokeWidth = 1.8f * dp;
-        _strokePaint.Color = Color.White;
-        canvas.DrawPath(_tmpPath, _strokePaint);
-    }
-
-    private static void BuildOctagonPath(Path p, float cx, float cy, float r)
+    private void BuildChamferRectPath(Path p, float l, float t, float r, float b, float cut)
     {
         p.Reset();
-        float k = r * 0.4142f;
-        p.MoveTo(cx - k, cy - r);
-        p.LineTo(cx + k, cy - r);
-        p.LineTo(cx + r, cy - k);
-        p.LineTo(cx + r, cy + k);
-        p.LineTo(cx + k, cy + r);
-        p.LineTo(cx - k, cy + r);
-        p.LineTo(cx - r, cy + k);
-        p.LineTo(cx - r, cy - k);
+        float c = System.Math.Min(cut, System.Math.Min((r - l) * 0.25f, (b - t) * 0.25f));
+        p.MoveTo(l + c, t);
+        p.LineTo(r - c, t);
+        p.LineTo(r, t + c);
+        p.LineTo(r, b - c);
+        p.LineTo(r - c, b);
+        p.LineTo(l + c, b);
+        p.LineTo(l, b - c);
+        p.LineTo(l, t + c);
         p.Close();
     }
 
-    private void DrawTacticalButton(
-        Canvas canvas,
-        RectF rect,
-        bool active,
-        Color fillActive,
-        Color fillIdle,
-        Color border,
-        VectorIconKind icon,
-        string label,
-        string sub,
-        float dp,
-        Action onTap)
+    private void DrawSharpPanel(Canvas canvas, float l, float t, float r, float b, Color fill, Color border, float cutDp = 7f, float strokeDp = 1.5f)
     {
-        DrawChamferedPanel(canvas, rect, active ? fillActive : fillIdle, active ? border : new Color(255, 255, 255, 72), 7 * dp);
-
-        bool darkInk = active && (fillActive.R > 210 && fillActive.G > 165);
-        Color fg = darkInk ? new Color(10, 14, 16) : Color.White;
-        Color subCol = darkInk ? new Color(24, 34, 28) : new Color(210, 232, 224);
-
-        DrawVectorIcon(canvas, icon, rect.CenterX(), rect.Top + rect.Height() * 0.34f, 10.5f * dp, fg, dp);
-
-        _textPaint.TextAlign = Paint.Align.Center;
-        _textPaint.TextSize = 9.8f * dp;
-        _textPaint.Color = fg;
-        canvas.DrawText(label, rect.CenterX(), rect.Bottom - 17 * dp, _textPaint);
-
-        _textPaint.TextSize = 7.4f * dp;
-        _textPaint.Color = subCol;
-        canvas.DrawText(sub, rect.CenterX(), rect.Bottom - 6.5f * dp, _textPaint);
-        _textPaint.TextAlign = Paint.Align.Left;
-
-        RegisterButton(rect, onTap);
-    }
-
-    /// <summary>
-    /// Draws a sharp chamfered polygon card with 45-degree diagonal cut corners (0 rounded bubble radius!).
-    /// </summary>
-    private void DrawChamferedPanel(Canvas canvas, RectF r, Color bg, Color border, float cut, bool accentLeft = false)
-    {
-        float c = System.Math.Min(cut, System.Math.Min(r.Width(), r.Height()) * 0.28f);
-        _tmpPath.Reset();
-        _tmpPath.MoveTo(r.Left + c, r.Top);
-        _tmpPath.LineTo(r.Right, r.Top);
-        _tmpPath.LineTo(r.Right, r.Bottom - c);
-        _tmpPath.LineTo(r.Right - c, r.Bottom);
-        _tmpPath.LineTo(r.Left, r.Bottom);
-        _tmpPath.LineTo(r.Left, r.Top + c);
-        _tmpPath.Close();
-
-        _fillPaint.Color = bg;
+        BuildChamferRectPath(_tmpPath, l, t, r, b, Dp(cutDp));
+        _fillPaint.Color = fill;
         canvas.DrawPath(_tmpPath, _fillPaint);
-        _strokePaint.StrokeWidth = 1.6f;
         _strokePaint.Color = border;
+        _strokePaint.StrokeWidth = Dp(strokeDp);
         canvas.DrawPath(_tmpPath, _strokePaint);
-
-        if (accentLeft)
-        {
-            _fillPaint.Color = border;
-            canvas.DrawRect(r.Left, r.Top + c, r.Left + 3.5f, r.Bottom, _fillPaint);
-        }
     }
 
-    /// <summary>
-    /// Pure procedural geometric vector icon renderer — ZERO emojis anywhere!
-    /// </summary>
-    private void DrawVectorIcon(Canvas canvas, VectorIconKind kind, float cx, float cy, float s, Color col, float dp)
+    private void DrawSharpButton(
+        Canvas canvas, float l, float t, float r, float b,
+        string label, VectorIconKind icon,
+        Color fill, Color border, Color textCol,
+        Action onTap, float textSp = 10.5f, float cutDp = 7f)
+    {
+        DrawSharpPanel(canvas, l, t, r, b, fill, border, cutDp, 1.5f);
+        float cx = (l + r) * 0.5f;
+        float cy = (t + b) * 0.5f;
+        float h = b - t;
+
+        if (icon != VectorIconKind.None && string.IsNullOrEmpty(label))
+        {
+            DrawVectorIcon(canvas, icon, cx, cy, System.Math.Min(r - l, h) * 0.29f, textCol);
+        }
+        else if (icon != VectorIconKind.None && h >= Dp(50f))
+        {
+            DrawVectorIcon(canvas, icon, cx, t + h * 0.37f, System.Math.Min(r - l, h) * 0.21f, textCol);
+            _textPaint.Color = textCol;
+            _textPaint.TextSize = Dp(textSp);
+            _textPaint.TextAlign = Paint.Align.Center;
+            canvas.DrawText(label, cx, b - h * 0.16f, _textPaint);
+        }
+        else if (icon != VectorIconKind.None)
+        {
+            float iconR = h * 0.25f;
+            DrawVectorIcon(canvas, icon, l + Dp(15f) + iconR * 0.45f, cy, iconR, textCol);
+            _textPaint.Color = textCol;
+            _textPaint.TextSize = Dp(textSp);
+            _textPaint.TextAlign = Paint.Align.Left;
+            canvas.DrawText(label, l + Dp(24f) + iconR * 1.15f, cy + Dp(textSp * 0.36f), _textPaint);
+        }
+        else
+        {
+            _textPaint.Color = textCol;
+            _textPaint.TextSize = Dp(textSp);
+            _textPaint.TextAlign = Paint.Align.Center;
+            canvas.DrawText(label, cx, cy + Dp(textSp * 0.36f), _textPaint);
+        }
+
+        RegisterHit(l, t, r, b, onTap);
+    }
+
+    private void DrawVectorIcon(Canvas canvas, VectorIconKind kind, float cx, float cy, float r, Color col)
     {
         _iconPaint.Color = col;
-        _iconPaint.StrokeWidth = System.Math.Max(2.0f, 1.85f * dp);
+        _iconPaint.StrokeWidth = System.Math.Max(Dp(1.75f), r * 0.14f);
         _iconPath.Reset();
 
         switch (kind)
         {
             case VectorIconKind.HarvestSickle:
-                // Angled pole + curved steel Egrek sickle blade
-                canvas.DrawLine(cx - s * 0.65f, cy + s * 0.75f, cx + s * 0.15f, cy - s * 0.25f, _iconPaint);
-                _iconPath.MoveTo(cx + s * 0.15f, cy - s * 0.25f);
-                _iconPath.LineTo(cx + s * 0.72f, cy - s * 0.72f);
-                _iconPath.LineTo(cx + s * 0.15f, cy - s * 0.82f);
-                _iconPath.LineTo(cx - s * 0.35f, cy - s * 0.45f);
+                _iconPath.MoveTo(cx - r * 0.7f, cy + r * 0.8f);
+                _iconPath.LineTo(cx + r * 0.15f, cy - r * 0.15f);
+                _iconPath.QuadTo(cx + r * 0.85f, cy - r * 0.85f, cx - r * 0.1f, cy - r * 0.85f);
                 canvas.DrawPath(_iconPath, _iconPaint);
                 break;
 
             case VectorIconKind.PickupTbs:
-                // Spiky diamond TBS + upward grab arrows
-                _iconPath.MoveTo(cx, cy - s * 0.25f);
-                _iconPath.LineTo(cx + s * 0.55f, cy + s * 0.28f);
-                _iconPath.LineTo(cx, cy + s * 0.78f);
-                _iconPath.LineTo(cx - s * 0.55f, cy + s * 0.28f);
+                _iconPath.MoveTo(cx, cy - r * 0.8f);
+                _iconPath.LineTo(cx + r * 0.7f, cy);
+                _iconPath.LineTo(cx, cy + r * 0.8f);
+                _iconPath.LineTo(cx - r * 0.7f, cy);
                 _iconPath.Close();
                 canvas.DrawPath(_iconPath, _iconPaint);
-                canvas.DrawLine(cx, cy - s * 0.85f, cx, cy - s * 0.32f, _iconPaint);
-                canvas.DrawLine(cx - s * 0.32f, cy - s * 0.56f, cx, cy - s * 0.85f, _iconPaint);
-                canvas.DrawLine(cx + s * 0.32f, cy - s * 0.56f, cx, cy - s * 0.85f, _iconPaint);
+                canvas.DrawLine(cx, cy + r * 0.8f, cx, cy - r * 0.25f, _iconPaint);
                 break;
 
             case VectorIconKind.LoadTruck:
-                // Open truck bed box + curved throw arrow landing inside!
-                canvas.DrawLine(cx - s * 0.75f, cy + s * 0.15f, cx - s * 0.75f, cy + s * 0.70f, _iconPaint);
-                canvas.DrawLine(cx - s * 0.75f, cy + s * 0.70f, cx + s * 0.75f, cy + s * 0.70f, _iconPaint);
-                canvas.DrawLine(cx + s * 0.75f, cy + s * 0.70f, cx + s * 0.75f, cy + s * 0.15f, _iconPaint);
-                _iconPath.MoveTo(cx - s * 0.65f, cy - s * 0.20f);
-                _iconPath.QuadTo(cx, cy - s * 0.95f, cx + s * 0.28f, cy + s * 0.22f);
-                canvas.DrawPath(_iconPath, _iconPaint);
+                canvas.DrawRect(cx - r * 0.8f, cy + r * 0.15f, cx + r * 0.8f, cy + r * 0.75f, _iconPaint);
+                canvas.DrawLine(cx, cy + r * 0.3f, cx, cy - r * 0.75f, _iconPaint);
+                canvas.DrawLine(cx - r * 0.42f, cy - r * 0.32f, cx, cy - r * 0.75f, _iconPaint);
+                canvas.DrawLine(cx + r * 0.42f, cy - r * 0.32f, cx, cy - r * 0.75f, _iconPaint);
                 break;
 
             case VectorIconKind.Angkong:
-                // Wheelbarrow hopper + front wheel + handle
-                _iconPath.MoveTo(cx - s * 0.75f, cy - s * 0.25f);
-                _iconPath.LineTo(cx + s * 0.45f, cy - s * 0.25f);
-                _iconPath.LineTo(cx + s * 0.22f, cy + s * 0.30f);
-                _iconPath.LineTo(cx - s * 0.45f, cy + s * 0.30f);
+                _iconPath.MoveTo(cx - r * 0.8f, cy - r * 0.3f);
+                _iconPath.LineTo(cx + r * 0.35f, cy - r * 0.3f);
+                _iconPath.LineTo(cx + r * 0.55f, cy + r * 0.25f);
+                _iconPath.LineTo(cx - r * 0.5f, cy + r * 0.25f);
                 _iconPath.Close();
                 canvas.DrawPath(_iconPath, _iconPaint);
-                canvas.DrawLine(cx - s * 0.85f, cy - s * 0.45f, cx - s * 0.45f, cy + s * 0.30f, _iconPaint);
-                canvas.DrawRect(cx + s * 0.32f, cy + s * 0.25f, cx + s * 0.72f, cy + s * 0.65f, _iconPaint);
+                canvas.DrawCircle(cx + r * 0.62f, cy + r * 0.52f, r * 0.24f, _iconPaint);
+                canvas.DrawLine(cx - r * 0.5f, cy + r * 0.25f, cx - r * 0.9f, cy + r * 0.6f, _iconPaint);
                 break;
 
             case VectorIconKind.CanterTruck:
-                // Sharp Canter cab + cargo bed + 2 wheels
-                canvas.DrawRect(cx - s * 0.82f, cy - s * 0.32f, cx + s * 0.15f, cy + s * 0.38f, _iconPaint);
-                _iconPath.MoveTo(cx + s * 0.15f, cy - s * 0.15f);
-                _iconPath.LineTo(cx + s * 0.62f, cy - s * 0.15f);
-                _iconPath.LineTo(cx + s * 0.80f, cy + s * 0.38f);
-                _iconPath.LineTo(cx + s * 0.15f, cy + s * 0.38f);
+                canvas.DrawRect(cx - r * 0.85f, cy - r * 0.35f, cx + r * 0.18f, cy + r * 0.35f, _iconPaint);
+                _iconPath.MoveTo(cx + r * 0.18f, cy - r * 0.32f);
+                _iconPath.LineTo(cx + r * 0.78f, cy - r * 0.28f);
+                _iconPath.LineTo(cx + r * 0.85f, cy + r * 0.35f);
+                _iconPath.LineTo(cx + r * 0.18f, cy + r * 0.35f);
+                _iconPath.Close();
                 canvas.DrawPath(_iconPath, _iconPaint);
-                canvas.DrawRect(cx - s * 0.58f, cy + s * 0.38f, cx - s * 0.28f, cy + s * 0.68f, _iconPaint);
-                canvas.DrawRect(cx + s * 0.32f, cy + s * 0.38f, cx + s * 0.62f, cy + s * 0.68f, _iconPaint);
+                canvas.DrawCircle(cx - r * 0.45f, cy + r * 0.55f, r * 0.22f, _iconPaint);
+                canvas.DrawCircle(cx + r * 0.50f, cy + r * 0.55f, r * 0.22f, _iconPaint);
                 break;
 
             case VectorIconKind.SteeringWheel:
-                BuildOctagonPath(_iconPath, cx, cy, s * 0.72f);
-                canvas.DrawPath(_iconPath, _iconPaint);
-                canvas.DrawLine(cx - s * 0.65f, cy, cx + s * 0.65f, cy, _iconPaint);
-                canvas.DrawLine(cx, cy, cx, cy + s * 0.68f, _iconPaint);
+                canvas.DrawCircle(cx, cy, r * 0.78f, _iconPaint);
+                canvas.DrawCircle(cx, cy, r * 0.22f, _iconPaint);
+                canvas.DrawLine(cx - r * 0.75f, cy, cx + r * 0.75f, cy, _iconPaint);
+                canvas.DrawLine(cx, cy + r * 0.22f, cx, cy + r * 0.78f, _iconPaint);
                 break;
 
             case VectorIconKind.SellPks:
-                // Factory sawtooth roof + chimney + upward value arrow
-                _iconPath.MoveTo(cx - s * 0.75f, cy + s * 0.70f);
-                _iconPath.LineTo(cx - s * 0.75f, cy - s * 0.10f);
-                _iconPath.LineTo(cx - s * 0.25f, cy - s * 0.45f);
-                _iconPath.LineTo(cx - s * 0.25f, cy - s * 0.10f);
-                _iconPath.LineTo(cx + s * 0.25f, cy - s * 0.45f);
-                _iconPath.LineTo(cx + s * 0.25f, cy + s * 0.70f);
+                _iconPath.MoveTo(cx - r * 0.75f, cy + r * 0.7f);
+                _iconPath.LineTo(cx - r * 0.75f, cy - r * 0.15f);
+                _iconPath.LineTo(cx - r * 0.15f, cy - r * 0.65f);
+                _iconPath.LineTo(cx + r * 0.45f, cy - r * 0.15f);
+                _iconPath.LineTo(cx + r * 0.45f, cy + r * 0.7f);
                 _iconPath.Close();
                 canvas.DrawPath(_iconPath, _iconPaint);
-                canvas.DrawLine(cx + s * 0.62f, cy + s * 0.65f, cx + s * 0.62f, cy - s * 0.65f, _iconPaint);
-                canvas.DrawLine(cx + s * 0.38f, cy - s * 0.35f, cx + s * 0.62f, cy - s * 0.65f, _iconPaint);
+                canvas.DrawLine(cx + r * 0.68f, cy + r * 0.7f, cx + r * 0.68f, cy - r * 0.8f, _iconPaint);
                 break;
 
             case VectorIconKind.BasuriHorn:
-                _iconPath.MoveTo(cx - s * 0.70f, cy - s * 0.20f);
-                _iconPath.LineTo(cx - s * 0.15f, cy - s * 0.20f);
-                _iconPath.LineTo(cx + s * 0.42f, cy - s * 0.65f);
-                _iconPath.LineTo(cx + s * 0.42f, cy + s * 0.65f);
-                _iconPath.LineTo(cx - s * 0.15f, cy + s * 0.20f);
-                _iconPath.LineTo(cx - s * 0.70f, cy + s * 0.20f);
+                _iconPath.MoveTo(cx - r * 0.75f, cy - r * 0.2f);
+                _iconPath.LineTo(cx - r * 0.15f, cy - r * 0.2f);
+                _iconPath.LineTo(cx + r * 0.55f, cy - r * 0.65f);
+                _iconPath.LineTo(cx + r * 0.55f, cy + r * 0.65f);
+                _iconPath.LineTo(cx - r * 0.15f, cy + r * 0.2f);
+                _iconPath.LineTo(cx - r * 0.75f, cy + r * 0.2f);
                 _iconPath.Close();
                 canvas.DrawPath(_iconPath, _iconPaint);
-                canvas.DrawLine(cx + s * 0.72f, cy - s * 0.42f, cx + s * 0.72f, cy + s * 0.42f, _iconPaint);
                 break;
 
             case VectorIconKind.MicOn:
             case VectorIconKind.MicMuted:
-                canvas.DrawRect(cx - s * 0.32f, cy - s * 0.72f, cx + s * 0.32f, cy + s * 0.12f, _iconPaint);
-                canvas.DrawLine(cx - s * 0.58f, cy + s * 0.35f, cx + s * 0.58f, cy + s * 0.35f, _iconPaint);
-                canvas.DrawLine(cx, cy + s * 0.35f, cx, cy + s * 0.75f, _iconPaint);
+                canvas.DrawRect(cx - r * 0.28f, cy - r * 0.75f, cx + r * 0.28f, cy + r * 0.12f, _iconPaint);
+                canvas.DrawLine(cx - r * 0.58f, cy, cx + r * 0.58f, cy, _iconPaint);
+                canvas.DrawLine(cx, cy + r * 0.12f, cx, cy + r * 0.78f, _iconPaint);
                 if (kind == VectorIconKind.MicMuted)
-                    canvas.DrawLine(cx - s * 0.75f, cy - s * 0.75f, cx + s * 0.75f, cy + s * 0.75f, _iconPaint);
+                    canvas.DrawLine(cx - r * 0.75f, cy - r * 0.75f, cx + r * 0.75f, cy + r * 0.75f, _iconPaint);
                 break;
 
             case VectorIconKind.ChatBox:
-                _iconPath.MoveTo(cx - s * 0.72f, cy - s * 0.58f);
-                _iconPath.LineTo(cx + s * 0.72f, cy - s * 0.58f);
-                _iconPath.LineTo(cx + s * 0.72f, cy + s * 0.32f);
-                _iconPath.LineTo(cx - s * 0.12f, cy + s * 0.32f);
-                _iconPath.LineTo(cx - s * 0.48f, cy + s * 0.72f);
-                _iconPath.LineTo(cx - s * 0.48f, cy + s * 0.32f);
-                _iconPath.LineTo(cx - s * 0.72f, cy + s * 0.32f);
-                _iconPath.Close();
-                canvas.DrawPath(_iconPath, _iconPaint);
+                canvas.DrawRect(cx - r * 0.8f, cy - r * 0.65f, cx + r * 0.8f, cy + r * 0.35f, _iconPaint);
+                canvas.DrawLine(cx - r * 0.45f, cy - r * 0.25f, cx + r * 0.45f, cy - r * 0.25f, _iconPaint);
+                canvas.DrawLine(cx - r * 0.45f, cy + r * 0.05f, cx + r * 0.2f, cy + r * 0.05f, _iconPaint);
                 break;
 
             case VectorIconKind.Trophy:
-                _iconPath.MoveTo(cx - s * 0.55f, cy - s * 0.68f);
-                _iconPath.LineTo(cx + s * 0.55f, cy - s * 0.68f);
-                _iconPath.LineTo(cx + s * 0.32f, cy + s * 0.12f);
-                _iconPath.LineTo(cx - s * 0.32f, cy + s * 0.12f);
-                _iconPath.Close();
-                canvas.DrawPath(_iconPath, _iconPaint);
-                canvas.DrawLine(cx, cy + s * 0.12f, cx, cy + s * 0.68f, _iconPaint);
-                canvas.DrawLine(cx - s * 0.45f, cy + s * 0.68f, cx + s * 0.45f, cy + s * 0.68f, _iconPaint);
+                canvas.DrawRect(cx - r * 0.5f, cy - r * 0.7f, cx + r * 0.5f, cy + r * 0.08f, _iconPaint);
+                canvas.DrawLine(cx, cy + r * 0.08f, cx, cy + r * 0.68f, _iconPaint);
+                canvas.DrawLine(cx - r * 0.48f, cy + r * 0.68f, cx + r * 0.48f, cy + r * 0.68f, _iconPaint);
                 break;
 
             case VectorIconKind.AvatarHelm:
-                _iconPath.MoveTo(cx, cy - s * 0.75f);
-                _iconPath.LineTo(cx + s * 0.65f, cy - s * 0.25f);
-                _iconPath.LineTo(cx + s * 0.50f, cy + s * 0.68f);
-                _iconPath.LineTo(cx - s * 0.50f, cy + s * 0.68f);
-                _iconPath.LineTo(cx - s * 0.65f, cy - s * 0.25f);
+                _iconPath.MoveTo(cx - r * 0.85f, cy + r * 0.35f);
+                _iconPath.LineTo(cx, cy - r * 0.65f);
+                _iconPath.LineTo(cx + r * 0.85f, cy + r * 0.35f);
                 _iconPath.Close();
                 canvas.DrawPath(_iconPath, _iconPaint);
-                canvas.DrawLine(cx - s * 0.38f, cy - s * 0.05f, cx + s * 0.38f, cy - s * 0.05f, _iconPaint);
                 break;
 
             case VectorIconKind.DailyCrate:
-                canvas.DrawRect(cx - s * 0.65f, cy - s * 0.52f, cx + s * 0.65f, cy + s * 0.68f, _iconPaint);
-                canvas.DrawLine(cx, cy - s * 0.52f, cx, cy + s * 0.68f, _iconPaint);
-                canvas.DrawLine(cx - s * 0.65f, cy + s * 0.05f, cx + s * 0.65f, cy + s * 0.05f, _iconPaint);
-                break;
-
-            case VectorIconKind.ShareNodes:
-                canvas.DrawLine(cx + s * 0.52f, cy - s * 0.55f, cx - s * 0.52f, cy, _iconPaint);
-                canvas.DrawLine(cx - s * 0.52f, cy, cx + s * 0.52f, cy + s * 0.55f, _iconPaint);
-                canvas.DrawRect(cx + s * 0.35f, cy - s * 0.72f, cx + s * 0.70f, cy - s * 0.38f, _iconPaint);
-                canvas.DrawRect(cx - s * 0.70f, cy - s * 0.18f, cx - s * 0.35f, cy + s * 0.18f, _iconPaint);
-                canvas.DrawRect(cx + s * 0.35f, cy + s * 0.38f, cx + s * 0.70f, cy + s * 0.72f, _iconPaint);
+                canvas.DrawRect(cx - r * 0.72f, cy - r * 0.55f, cx + r * 0.72f, cy + r * 0.72f, _iconPaint);
+                canvas.DrawLine(cx, cy - r * 0.55f, cx, cy + r * 0.72f, _iconPaint);
+                canvas.DrawLine(cx - r * 0.72f, cy, cx + r * 0.72f, cy, _iconPaint);
                 break;
 
             case VectorIconKind.LobbyGrid:
-                canvas.DrawRect(cx - s * 0.65f, cy - s * 0.65f, cx - s * 0.12f, cy - s * 0.12f, _iconPaint);
-                canvas.DrawRect(cx + s * 0.12f, cy - s * 0.65f, cx + s * 0.65f, cy - s * 0.12f, _iconPaint);
-                canvas.DrawRect(cx - s * 0.65f, cy + s * 0.12f, cx - s * 0.12f, cy + s * 0.65f, _iconPaint);
-                canvas.DrawRect(cx + s * 0.12f, cy + s * 0.12f, cx + s * 0.65f, cy + s * 0.65f, _iconPaint);
+                canvas.DrawRect(cx - r * 0.72f, cy - r * 0.72f, cx - r * 0.1f, cy - r * 0.1f, _iconPaint);
+                canvas.DrawRect(cx + r * 0.1f, cy - r * 0.72f, cx + r * 0.72f, cy - r * 0.1f, _iconPaint);
+                canvas.DrawRect(cx - r * 0.72f, cy + r * 0.1f, cx - r * 0.1f, cy + r * 0.72f, _iconPaint);
+                canvas.DrawRect(cx + r * 0.1f, cy + r * 0.1f, cx + r * 0.72f, cy + r * 0.72f, _iconPaint);
                 break;
 
             case VectorIconKind.PlayChevron:
-                _fillPaint.Color = col;
-                _iconPath.MoveTo(cx - s * 0.55f, cy - s * 0.75f);
-                _iconPath.LineTo(cx + s * 0.72f, cy);
-                _iconPath.LineTo(cx - s * 0.55f, cy + s * 0.75f);
+                _iconPath.MoveTo(cx - r * 0.45f, cy - r * 0.72f);
+                _iconPath.LineTo(cx + r * 0.68f, cy);
+                _iconPath.LineTo(cx - r * 0.45f, cy + r * 0.72f);
                 _iconPath.Close();
-                canvas.DrawPath(_iconPath, _fillPaint);
+                canvas.DrawPath(_iconPath, _iconPaint);
+                break;
+
+            case VectorIconKind.SettingsGear:
+                canvas.DrawCircle(cx, cy, r * 0.38f, _iconPaint);
+                for (int k = 0; k < 8; k++)
+                {
+                    float a = k * 0.785398f;
+                    float ca = MathF.Cos(a), sa = MathF.Sin(a);
+                    canvas.DrawLine(cx + ca * r * 0.50f, cy + sa * r * 0.50f, cx + ca * r * 0.86f, cy + sa * r * 0.86f, _iconPaint);
+                }
+                break;
+
+            case VectorIconKind.CloseCross:
+                canvas.DrawLine(cx - r * 0.65f, cy - r * 0.65f, cx + r * 0.65f, cy + r * 0.65f, _iconPaint);
+                canvas.DrawLine(cx + r * 0.65f, cy - r * 0.65f, cx - r * 0.65f, cy + r * 0.65f, _iconPaint);
                 break;
         }
     }
 
-    private void RegisterButton(RectF rect, Action onTap)
+    protected override void OnDraw(Canvas? canvas)
     {
-        _hitZones.Add((rect, onTap));
+        if (canvas == null) return;
+        base.OnDraw(canvas);
+        if (_renderer == null || _net == null) return;
+
+        _hitCount = 0;
+        int w = Width, h = Height;
+        if (w <= 0 || h <= 0) return;
+
+        if (_renderer.Stage == AppSceneStage.Splash)
+        {
+            DrawBootSplashScreen(canvas, w, h);
+            PostInvalidateDelayed(33);
+            return;
+        }
+
+        if (_renderer.Stage == AppSceneStage.PreparingWorld)
+        {
+            DrawWorldLoadingScreen(canvas, w, h);
+            PostInvalidateDelayed(33);
+            return;
+        }
+
+        if (_renderer.Stage == AppSceneStage.Lobby)
+        {
+            DrawSeparateGarageLobbyUi(canvas, w, h);
+        }
+        else
+        {
+            DrawGameplayHud(canvas, w, h);
+        }
+
+        if (ActiveModal != ActiveModalOverlay.None)
+        {
+            DrawActiveModalOverlay(canvas, w, h);
+        }
+
+        long nowMs = Java.Lang.JavaSystem.CurrentTimeMillis();
+        if (nowMs < _toastUntilMs && !string.IsNullOrEmpty(_toastText))
+        {
+            float tw = System.Math.Min(w * 0.58f, Dp(460f));
+            float tl = (w - tw) * 0.5f, tt = Dp(58f);
+            DrawSharpPanel(canvas, tl, tt, tl + tw, tt + Dp(34f),
+                Color.Argb(232, 10, 20, 18), Color.Argb(245, 74, 222, 128), 6f, 1.5f);
+            _textPaint.Color = Color.White;
+            _textPaint.TextSize = Dp(10.5f);
+            _textPaint.TextAlign = Paint.Align.Center;
+            canvas.DrawText(_toastText, w * 0.5f, tt + Dp(21f), _textPaint);
+        }
+
+        // Anti-Lag UI Refresh Governor:
+        // Active joystick/toast refreshes smoothly at 20 Hz; idle HUD refreshes passively at 6 Hz (zero GPU overdraw choke!)
+        long nextDelay = (_joyPointerId != -1 || nowMs < _toastUntilMs) ? 50L : 170L;
+        PostInvalidateDelayed(nextDelay);
+    }
+
+    private void DrawBootSplashScreen(Canvas canvas, int w, int h)
+    {
+        _fillPaint.Color = Color.Argb(255, 9, 11, 13);
+        canvas.DrawRect(0, 0, w, h, _fillPaint);
+
+        // Crisp subtle architectural border lines
+        _strokePaint.Color = Color.Argb(70, 52, 211, 153);
+        _strokePaint.StrokeWidth = Dp(1.2f);
+        canvas.DrawRect(Dp(20f), Dp(18f), w - Dp(20f), h - Dp(18f), _strokePaint);
+
+        float centerY = h * 0.44f;
+        if (_brandWideLogo != null)
+        {
+            float logoH = Dp(44f);
+            float logoW = _brandWideLogo.Width * (logoH / _brandWideLogo.Height);
+            _srcRect.Set(0, 0, _brandWideLogo.Width, _brandWideLogo.Height);
+            _dstRect.Set((w - logoW) * 0.5f, centerY - Dp(82f), (w + logoW) * 0.5f, centerY - Dp(82f) + logoH);
+            canvas.DrawBitmap(_brandWideLogo, _srcRect, _dstRect, null);
+        }
+
+        _titlePaint.Color = Color.White;
+        _titlePaint.TextSize = Dp(38f);
+        _titlePaint.TextAlign = Paint.Align.Center;
+        canvas.DrawText("NYAWIT LIVE", w * 0.5f, centerY + Dp(6f), _titlePaint);
+
+        _textPaint.Color = Color.Argb(235, 74, 222, 128);
+        _textPaint.TextSize = Dp(11.5f);
+        _textPaint.TextAlign = Paint.Align.Center;
+        canvas.DrawText("SIMULASI KEBUN SAWIT & TRUK CANTER PBR MULTIPLAYER", w * 0.5f, centerY + Dp(32f), _textPaint);
+
+        // Precision chamfered progress bar
+        float barW = System.Math.Min(w * 0.46f, Dp(410f));
+        float bl = (w - barW) * 0.5f, bt = h * 0.72f, bb = bt + Dp(12f);
+        DrawSharpPanel(canvas, bl, bt, bl + barW, bb, Color.Argb(255, 18, 25, 30), Color.Argb(180, 52, 211, 153), 4f, 1.2f);
+
+        float fillW = System.Math.Max(Dp(12f), (barW - Dp(4f)) * System.Math.Clamp(_renderer!.SplashProgress, 0.04f, 1f));
+        _fillPaint.Color = Color.Argb(255, 34, 197, 94);
+        canvas.DrawRect(bl + Dp(2f), bt + Dp(2f), bl + Dp(2f) + fillW, bb - Dp(2f), _fillPaint);
+
+        _textPaint.Color = Color.Argb(205, 190, 210, 218);
+        _textPaint.TextSize = Dp(10f);
+        canvas.DrawText(_renderer.SplashStatus, w * 0.5f, bt + Dp(30f), _textPaint);
+    }
+
+    private void DrawSeparateGarageLobbyUi(Canvas canvas, int w, int h)
+    {
+        float pad = Dp(16f);
+
+        // Top-Left: Brand + Dedicated Garage Showroom Title + Player Economy Card
+        float topH = Dp(50f);
+        float brandW = Dp(248f);
+        DrawSharpPanel(canvas, pad, pad, pad + brandW, pad + topH,
+            Color.Argb(224, 10, 16, 20), Color.Argb(215, 52, 211, 153), 7f, 1.5f);
+
+        float textX = pad + Dp(14f);
+        if (_brandSmallMark != null)
+        {
+            float ms = Dp(28f);
+            _srcRect.Set(0, 0, _brandSmallMark.Width, _brandSmallMark.Height);
+            _dstRect.Set(pad + Dp(11f), pad + (topH - ms) * 0.5f, pad + Dp(11f) + ms, pad + (topH + ms) * 0.5f);
+            canvas.DrawBitmap(_brandSmallMark, _srcRect, _dstRect, null);
+            textX = pad + Dp(48f);
+        }
+        _titlePaint.Color = Color.White;
+        _titlePaint.TextSize = Dp(16.5f);
+        _titlePaint.TextAlign = Paint.Align.Left;
+        canvas.DrawText("GARASI SAWIT", textX, pad + Dp(24f), _titlePaint);
+
+        _textPaint.Color = Color.Argb(230, 74, 222, 128);
+        _textPaint.TextSize = Dp(9.5f);
+        _textPaint.TextAlign = Paint.Align.Left;
+        canvas.DrawText($"ROOM {_net!.CurrentRoomId.ToUpperInvariant()}  •  {_renderer!.Quality.CurrentFps} FPS", textX, pad + Dp(40f), _textPaint);
+
+        // Player Wallet & Identity Strip (tapping allows renaming player cleanly!)
+        float profL = pad + brandW + Dp(10f);
+        float profR = profL + Dp(250f);
+        DrawSharpButton(
+            canvas, profL, pad, profR, pad + topH,
+            $"{_net.Profile.Name.ToUpperInvariant()}  |  RP {_net.Profile.Coins:N0}  |  {_net.Profile.Gems} EMAS",
+            VectorIconKind.AvatarHelm,
+            Color.Argb(220, 14, 22, 28), Color.Argb(190, 245, 196, 66), Color.Argb(255, 250, 232, 175),
+            () => { _sfx?.Play("ui_click"); OnRenamePlayerRequested?.Invoke(); }, 9.8f, 7f);
+
+        // Top-Right Utility Bar: ABSEN | SERVER | RANK | PENGATURAN (Gear)
+        float btnS = Dp(46f), gap = Dp(8f);
+        float rx = w - pad;
+        DrawSharpButton(canvas, rx - btnS, pad, rx, pad + topH, "", VectorIconKind.SettingsGear,
+            Color.Argb(230, 16, 26, 32), Color.Argb(235, 74, 222, 128), Color.White,
+            () => { _sfx?.Play("ui_open"); OpenModal(ActiveModalOverlay.Settings); });
+        rx -= btnS + gap;
+        DrawSharpButton(canvas, rx - btnS, pad, rx, pad + topH, "", VectorIconKind.Trophy,
+            Color.Argb(225, 16, 24, 30), Color.Argb(200, 245, 196, 66), Color.Argb(255, 250, 208, 92),
+            () => { _sfx?.Play("ui_open"); OpenModal(ActiveModalOverlay.Ranking); });
+        rx -= btnS + gap;
+        DrawSharpButton(canvas, rx - btnS, pad, rx, pad + topH, "", VectorIconKind.ChatBox,
+            Color.Argb(225, 16, 24, 30), Color.Argb(200, 56, 189, 248), Color.Argb(255, 140, 225, 255),
+            () => { _sfx?.Play("ui_open"); OpenModal(ActiveModalOverlay.SocialRoom); });
+        rx -= btnS + gap;
+        DrawSharpButton(canvas, rx - btnS, pad, rx, pad + topH, "", VectorIconKind.DailyCrate,
+            Color.Argb(225, 16, 24, 30), Color.Argb(200, 74, 222, 128), Color.Argb(255, 134, 239, 172),
+            () => { _sfx?.Play("ui_open"); OpenModal(ActiveModalOverlay.DailyReward); });
+
+        // Left Showroom Wardrobe & Accessory Rail (instant live 3D preview on the turntable!)
+        float railL = pad, railW = Dp(196f), rowH = Dp(36f), rowGap = Dp(6f);
+        float ry = pad + topH + Dp(14f);
+        var av = _net.Profile.Avatar;
+
+        DrawSharpButton(canvas, railL, ry, railL + railW, ry + rowH,
+            $"TOPI: {FindLabel(HatCycle, HatLabels, av.Hat)}", VectorIconKind.None,
+            Color.Argb(215, 12, 20, 25), Color.Argb(175, 52, 211, 153), Color.White,
+            () => CycleAvatarSlot(HatCycle, av.Hat, v => av.Hat = v), 9.5f, 6f);
+        ry += rowH + rowGap;
+
+        DrawSharpButton(canvas, railL, ry, railL + railW, ry + rowH,
+            $"KACAMATA: {(av.Glasses ? "AKTIF" : "LEPAS")}", VectorIconKind.None,
+            Color.Argb(215, 12, 20, 25), Color.Argb(175, 56, 189, 248), Color.White,
+            () => { _sfx?.Play("ui_click"); av.Glasses = !av.Glasses; NotifyProfileUpdated(); }, 9.5f, 6f);
+        ry += rowH + rowGap;
+
+        DrawSharpButton(canvas, railL, ry, railL + railW, ry + rowH,
+            $"TAS: {FindLabel(BackCycle, BackLabels, av.Back)}", VectorIconKind.None,
+            Color.Argb(215, 12, 20, 25), Color.Argb(175, 52, 211, 153), Color.White,
+            () => CycleAvatarSlot(BackCycle, av.Back, v => av.Back = v), 9.5f, 6f);
+        ry += rowH + rowGap;
+
+        DrawSharpButton(canvas, railL, ry, railL + railW, ry + rowH,
+            $"ALAT: {FindLabel(ToolCycle, ToolLabels, av.Tool)}", VectorIconKind.None,
+            Color.Argb(215, 12, 20, 25), Color.Argb(175, 245, 196, 66), Color.Argb(255, 253, 230, 138),
+            () => CycleAvatarSlot(ToolCycle, av.Tool, v => av.Tool = v), 9.5f, 6f);
+        ry += rowH + rowGap;
+
+        DrawSharpButton(canvas, railL, ry, railL + railW, ry + rowH,
+            $"BAJU: {FindLabel(ColorHexCycle, ColorNameCycle, av.OutfitHex)}", VectorIconKind.None,
+            Color.Argb(215, 12, 20, 25), Color.Argb(175, 52, 211, 153), Color.White,
+            () => CycleAvatarSlot(ColorHexCycle, av.OutfitHex, v => av.OutfitHex = v), 9.5f, 6f);
+        ry += rowH + rowGap;
+
+        DrawSharpButton(canvas, railL, ry, railL + railW, ry + rowH,
+            "KATALOG LENGKAP", VectorIconKind.AvatarHelm,
+            Color.Argb(230, 18, 36, 32), Color.Argb(235, 74, 222, 128), Color.Argb(255, 134, 239, 172),
+            () => { _sfx?.Play("ui_open"); OpenModal(ActiveModalOverlay.Wardrobe); }, 9.5f, 6f);
+
+        // Subtle Showroom Interactive Orbit Hint at Bottom-Left
+        _textPaint.Color = Color.Argb(175, 205, 222, 230);
+        _textPaint.TextSize = Dp(9.5f);
+        _textPaint.TextAlign = Paint.Align.Left;
+        canvas.DrawText("GESER LAYAR UNTUK PUTAR KAMERA GARASI 360°  •  MITSUBISHI CANTER FE 74 HD SIAP", pad, h - pad - Dp(8f), _textPaint);
+
+        // Bottom-Right Heroic CTA: MULAI PANEN (Enters PreparingWorld -> Plantation World!)
+        float ctaW = Dp(236f), ctaH = Dp(58f);
+        float cl = w - pad - ctaW, ct = h - pad - ctaH;
+        LastEnterWorldButtonRect = new RectF(cl, ct, cl + ctaW, ct + ctaH);
+        DrawSharpButton(
+            canvas, cl, ct, cl + ctaW, ct + ctaH,
+            "MULAI PANEN", VectorIconKind.PlayChevron,
+            Color.Argb(245, 22, 163, 74), Color.Argb(255, 187, 247, 208), Color.White,
+            () => OnEnterWorldRequested?.Invoke(), 14.5f, 9f);
+    }
+
+    private void DrawWorldLoadingScreen(Canvas canvas, int w, int h)
+    {
+        // Clean full-screen tactical slate-obsidian backdrop over warm-up frame
+        _fillPaint.Color = Color.Argb(242, 9, 13, 17);
+        canvas.DrawRect(0, 0, w, h, _fillPaint);
+
+        _strokePaint.Color = Color.Argb(85, 74, 222, 128);
+        _strokePaint.StrokeWidth = Dp(1.3f);
+        canvas.DrawRect(Dp(20f), Dp(18f), w - Dp(20f), h - Dp(18f), _strokePaint);
+
+        if (_brandWideLogo != null)
+        {
+            float logoH = Dp(34f);
+            float logoW = _brandWideLogo.Width * (logoH / _brandWideLogo.Height);
+            _srcRect.Set(0, 0, _brandWideLogo.Width, _brandWideLogo.Height);
+            _dstRect.Set(Dp(38f), Dp(34f), Dp(38f) + logoW, Dp(34f) + logoH);
+            canvas.DrawBitmap(_brandWideLogo, _srcRect, _dstRect, null);
+        }
+
+        _titlePaint.Color = Color.White;
+        _titlePaint.TextSize = Dp(30f);
+        _titlePaint.TextAlign = Paint.Align.Center;
+        canvas.DrawText("MENYIAPKAN DUNIA", w * 0.5f, h * 0.34f, _titlePaint);
+
+        float prog = System.Math.Clamp(_renderer!.WorldPrepProgress, 0.03f, 1.0f);
+        int pct = (int)MathF.Round(prog * 100f);
+
+        // Streaming system checklist card
+        float cardW = System.Math.Min(w * 0.62f, Dp(520f));
+        float cl = (w - cardW) * 0.5f, ct = h * 0.41f, cb = ct + Dp(122f);
+        DrawSharpPanel(canvas, cl, ct, cl + cardW, cb, Color.Argb(235, 13, 21, 26), Color.Argb(180, 52, 211, 153), 7f, 1.4f);
+
+        _textPaint.TextAlign = Paint.Align.Left;
+        _textPaint.TextSize = Dp(10.2f);
+        DrawCheckStep(canvas, cl + Dp(20f), ct + Dp(26f), prog >= 0.25f, "TOPOGRAFI JALAN TANAH LATERIT, RUMPUT & PARIT KEBUN");
+        DrawCheckStep(canvas, cl + Dp(20f), ct + Dp(52f), prog >= 0.52f, "PELEPAH SAWIT ALPHA-CUTOUT & SHADOW MAP 1024x1024 PCF");
+        DrawCheckStep(canvas, cl + Dp(20f), ct + Dp(78f), prog >= 0.80f, "FISIKA RIGIDBODY & SUSPENSI BAN DOBEL MITSUBISHI CANTER");
+        DrawCheckStep(canvas, cl + Dp(20f), ct + Dp(104f), prog >= 0.96f, $"SINKRONISASI MULTIPLAYER & VOICE ({_net!.CurrentRoomId.ToUpperInvariant()})");
+
+        // Segmented high-precision loading bar
+        float bt = cb + Dp(22f), bb = bt + Dp(16f);
+        DrawSharpPanel(canvas, cl, bt, cl + cardW, bb, Color.Argb(255, 16, 25, 31), Color.Argb(215, 74, 222, 128), 5f, 1.4f);
+        float fw = System.Math.Max(Dp(12f), (cardW - Dp(6f)) * prog);
+        _fillPaint.Color = Color.Argb(255, 34, 197, 94);
+        canvas.DrawRect(cl + Dp(3f), bt + Dp(3f), cl + Dp(3f) + fw, bb - Dp(3f), _fillPaint);
+
+        _textPaint.Color = Color.Argb(240, 167, 243, 208);
+        _textPaint.TextAlign = Paint.Align.Left;
+        canvas.DrawText(_renderer.WorldPrepStatus, cl, bb + Dp(20f), _textPaint);
+
+        _textPaint.Color = Color.White;
+        _textPaint.TextAlign = Paint.Align.Right;
+        canvas.DrawText($"{pct}%", cl + cardW, bb + Dp(20f), _textPaint);
+    }
+
+    private void DrawCheckStep(Canvas canvas, float x, float y, bool done, string label)
+    {
+        _fillPaint.Color = done ? Color.Argb(255, 34, 197, 94) : Color.Argb(255, 245, 196, 66);
+        canvas.DrawRect(x, y - Dp(8f), x + Dp(8f), y, _fillPaint);
+        _textPaint.Color = done ? Color.White : Color.Argb(205, 190, 208, 216);
+        canvas.DrawText(label, x + Dp(16f), y, _textPaint);
+    }
+
+    private void DrawGameplayHud(Canvas canvas, int w, int h)
+    {
+        float pad = Dp(14f);
+
+        // 1. Projected 3D World Nameplates, Voice Waves & Chat Bubbles
+        lock (_renderer!.HudLock)
+        {
+            for (int i = 0; i < _renderer.ProjectedLabels.Count; i++)
+            {
+                var lbl = _renderer.ProjectedLabels[i];
+                float sx = lbl.ScreenX * w, sy = lbl.ScreenY * h;
+                if (sx < Dp(40f) || sx > w - Dp(40f) || sy < Dp(24f) || sy > h - Dp(80f)) continue;
+
+                _textPaint.TextSize = Dp(9.5f);
+                _textPaint.TextAlign = Paint.Align.Center;
+                float tagW = System.Math.Max(Dp(86f), _textPaint.MeasureText(lbl.Name) + Dp(24f));
+                DrawSharpPanel(canvas, sx - tagW * 0.5f, sy - Dp(18f), sx + tagW * 0.5f, sy + Dp(4f),
+                    Color.Argb(186, 10, 18, 22),
+                    lbl.IsSpeaking ? Color.Argb(255, 56, 189, 248) : (lbl.IsSelf ? Color.Argb(215, 74, 222, 128) : Color.Argb(180, 245, 196, 66)),
+                    4f, 1.2f);
+                _textPaint.Color = Color.White;
+                canvas.DrawText(lbl.Name, sx, sy - Dp(3.5f), _textPaint);
+
+                if (!string.IsNullOrEmpty(lbl.BubbleText))
+                {
+                    float bw = System.Math.Min(Dp(210f), _textPaint.MeasureText(lbl.BubbleText) + Dp(22f));
+                    DrawSharpPanel(canvas, sx - bw * 0.5f, sy - Dp(44f), sx + bw * 0.5f, sy - Dp(21f),
+                        Color.Argb(230, 15, 26, 34), Color.Argb(235, 56, 189, 248), 5f, 1.2f);
+                    _textPaint.Color = Color.Argb(255, 224, 242, 254);
+                    canvas.DrawText(lbl.BubbleText, sx, sy - Dp(29f), _textPaint);
+                }
+            }
+        }
+
+        // 2. Top-Left Precision Radar Minimap + Uncluttered Status Card (ZERO overlapping widgets!)
+        float mapSize = Dp(106f);
+        DrawSharpPanel(canvas, pad, pad, pad + mapSize, pad + mapSize,
+            Color.Argb(206, 9, 16, 20), Color.Argb(210, 52, 211, 153), 6f, 1.4f);
+
+        float mcx = pad + mapSize * 0.5f, mcy = pad + mapSize * 0.5f;
+        float mScale = (mapSize * 0.45f) / 105f;
+        _strokePaint.Color = Color.Argb(75, 74, 222, 128);
+        _strokePaint.StrokeWidth = Dp(1f);
+        canvas.DrawLine(mcx, pad + Dp(4f), mcx, pad + mapSize - Dp(4f), _strokePaint);
+        canvas.DrawLine(pad + Dp(4f), mcy, pad + mapSize - Dp(4f), mcy, _strokePaint);
+
+        // RAM PKS marker (gold square)
+        float ramMx = mcx + PlantationWorld.RamX * mScale, ramMz = mcy + PlantationWorld.RamZ * mScale;
+        _fillPaint.Color = Color.Argb(255, 245, 196, 66);
+        canvas.DrawRect(ramMx - Dp(3.5f), ramMz - Dp(3.5f), ramMx + Dp(3.5f), ramMz + Dp(3.5f), _fillPaint);
+
+        // Main Canter marker (cyan square)
+        float trkMx = mcx + _renderer.Physics.MainTruck.X * mScale, trkMz = mcy + _renderer.Physics.MainTruck.Z * mScale;
+        _fillPaint.Color = Color.Argb(255, 56, 189, 248);
+        canvas.DrawRect(trkMx - Dp(3f), trkMz - Dp(3f), trkMx + Dp(3f), trkMz + Dp(3f), _fillPaint);
+
+        // Player arrow dot (bright green)
+        float plMx = System.Math.Clamp(mcx + _renderer.PlayerX * mScale, pad + Dp(6f), pad + mapSize - Dp(6f));
+        float plMz = System.Math.Clamp(mcy + _renderer.PlayerZ * mScale, pad + Dp(6f), pad + mapSize - Dp(6f));
+        _fillPaint.Color = Color.Argb(255, 74, 222, 128);
+        canvas.DrawCircle(plMx, plMz, Dp(4f), _fillPaint);
+
+        // Clean Economy & Cargo Strip beside Minimap
+        float statL = pad + mapSize + Dp(10f);
+        float statW = Dp(218f), statH = Dp(52f);
+        DrawSharpPanel(canvas, statL, pad, statL + statW, pad + statH,
+            Color.Argb(204, 10, 17, 22), Color.Argb(185, 52, 211, 153), 6f, 1.3f);
+
+        int cargoUnits = System.Math.Max(_net!.LocalCargo, _renderer.Physics.MainTruck.VisualCargoUnits);
+        _textPaint.TextAlign = Paint.Align.Left;
+        _textPaint.TextSize = Dp(10.5f);
+        _textPaint.Color = Color.Argb(255, 250, 214, 96);
+        canvas.DrawText($"RP {_net.Profile.Coins:N0}   •   {_net.Profile.Gems} EMAS", statL + Dp(12f), pad + Dp(21f), _textPaint);
+
+        _textPaint.TextSize = Dp(9.6f);
+        _textPaint.Color = Color.Argb(235, 198, 226, 214);
+        string holdInfo = _renderer.InTruck
+            ? $"CANTER: {MathF.Abs(_renderer.Physics.MainTruck.SpeedMs * 3.6f):0} KM/J  |  BAK {cargoUnits * 25} KG"
+            : $"BAK TRUK: {cargoUnits * 25} KG  |  TANGAN: {_renderer.Physics.Player.HeldTbsUnits}";
+        canvas.DrawText(holdInfo, statL + Dp(12f), pad + Dp(40f), _textPaint);
+
+        // 3. Top-Right Uncluttered 4-Button Tactical Bar: [VOICE] [SERVER] [RANK] [PENGATURAN GEAR]
+        // Notice: ALL graphics/FPS/shadow toggles moved cleanly inside PENGATURAN as requested!
+        float btnS = Dp(42f), gap = Dp(7f);
+        float rx = w - pad;
+        DrawSharpButton(canvas, rx - btnS, pad, rx, pad + btnS, "", VectorIconKind.SettingsGear,
+            Color.Argb(218, 12, 20, 26), Color.Argb(225, 74, 222, 128), Color.White,
+            () => { _sfx?.Play("ui_open"); OpenModal(ActiveModalOverlay.Settings); });
+        rx -= btnS + gap;
+        DrawSharpButton(canvas, rx - btnS, pad, rx, pad + btnS, "", VectorIconKind.Trophy,
+            Color.Argb(208, 12, 20, 26), Color.Argb(185, 245, 196, 66), Color.Argb(255, 250, 208, 92),
+            () => { _sfx?.Play("ui_open"); OpenModal(ActiveModalOverlay.Ranking); });
+        rx -= btnS + gap;
+        DrawSharpButton(canvas, rx - btnS, pad, rx, pad + btnS, "", VectorIconKind.ChatBox,
+            Color.Argb(208, 12, 20, 26), Color.Argb(185, 56, 189, 248), Color.Argb(255, 148, 226, 255),
+            () => { _sfx?.Play("ui_open"); OpenModal(ActiveModalOverlay.SocialRoom); });
+        rx -= btnS + gap;
+        bool micActive = _voice?.MicEnabled == true;
+        DrawSharpButton(canvas, rx - btnS, pad, rx, pad + btnS, "",
+            micActive ? VectorIconKind.MicOn : VectorIconKind.MicMuted,
+            micActive ? Color.Argb(225, 16, 78, 56) : Color.Argb(208, 12, 20, 26),
+            micActive ? Color.Argb(255, 74, 222, 128) : Color.Argb(165, 148, 163, 184),
+            Color.White,
+            () => OnToggleVoiceMic?.Invoke());
+
+        if (_renderer.Quality.ShowFpsHud)
+        {
+            _textPaint.Color = Color.Argb(185, 167, 243, 208);
+            _textPaint.TextSize = Dp(8.8f);
+            _textPaint.TextAlign = Paint.Align.Right;
+            canvas.DrawText(
+                $"{_renderer.Quality.CurrentFps} FPS ({_renderer.Quality.TargetFps}HZ)  •  {_renderer.Quality.Active.Label}  •  {_net.CurrentRoomId.ToUpperInvariant()}",
+                w - pad, pad + btnS + Dp(14f), _textPaint);
+        }
+
+        // 4. Bottom-Left Precision Analog Joystick
+        float baseR = Dp(56f);
+        float jcx = _joyPointerId != -1 ? _joyOriginX : pad + baseR + Dp(18f);
+        float jcy = _joyPointerId != -1 ? _joyOriginY : h - pad - baseR - Dp(12f);
+        float kx = _joyPointerId != -1 ? _joyKnobX : jcx;
+        float ky = _joyPointerId != -1 ? _joyKnobY : jcy;
+
+        _fillPaint.Color = Color.Argb(88, 10, 18, 22);
+        canvas.DrawCircle(jcx, jcy, baseR, _fillPaint);
+        _strokePaint.Color = Color.Argb(175, 74, 222, 128);
+        _strokePaint.StrokeWidth = Dp(1.6f);
+        canvas.DrawCircle(jcx, jcy, baseR, _strokePaint);
+
+        _fillPaint.Color = Color.Argb(220, 34, 197, 94);
+        canvas.DrawCircle(kx, ky, Dp(21f), _fillPaint);
+
+        // 5. Bottom-Right Ergonomic Action Cluster (Clean, Spacious, Zero Clutter!)
+        float mainS = Dp(72f);
+        float hx = w - pad - mainS, hy = h - pad - mainS;
+
+        if (!_renderer.InTruck)
+        {
+            // Primary: PANEN EGREK / DODOS / TOJOK
+            LastHarvestButtonRect = new RectF(hx, hy, hx + mainS, hy + mainS);
+            bool treeReady = _renderer.NearestRipeTreeId >= 0;
+            DrawSharpButton(canvas, hx, hy, hx + mainS, hy + mainS, "PANEN", VectorIconKind.HarvestSickle,
+                treeReady ? Color.Argb(235, 22, 163, 74) : Color.Argb(205, 16, 28, 34),
+                treeReady ? Color.Argb(255, 134, 239, 172) : Color.Argb(170, 74, 222, 128),
+                Color.White, () => OnHarvestPressed?.Invoke(), 10f, 10f);
+
+            // Contextual: AMBIL TBS / MUAT TRUK
+            float subS = Dp(56f);
+            float px = hx - subS - Dp(12f), py = h - pad - subS;
+            LastPickupOrLoadButtonRect = new RectF(px, py, px + subS, py + subS);
+            bool loadMode = _renderer.CanLoadIntoVehicleOrCart || _renderer.Physics.Player.HasHeldTbs;
+            bool glow = loadMode || _renderer.NearbyGroundFruitCount > 0;
+            DrawSharpButton(
+                canvas, px, py, px + subS, py + subS,
+                loadMode ? "MUAT" : "AMBIL",
+                loadMode ? VectorIconKind.LoadTruck : VectorIconKind.PickupTbs,
+                glow ? Color.Argb(235, 180, 83, 9) : Color.Argb(205, 16, 26, 32),
+                glow ? Color.Argb(255, 253, 224, 71) : Color.Argb(160, 148, 163, 184),
+                Color.White, () => OnPickupOrLoadPressed?.Invoke(), 8.8f, 8f);
+
+            // Secondary arc: NAIK CANTER + ANGKONG
+            float tx = hx, ty = hy - subS - Dp(10f);
+            LastTruckButtonRect = new RectF(tx, ty, tx + subS, ty + subS);
+            DrawSharpButton(canvas, tx, ty, tx + subS, ty + subS, "TRUK", VectorIconKind.CanterTruck,
+                Color.Argb(215, 16, 28, 36), Color.Argb(215, 245, 196, 66), Color.Argb(255, 253, 224, 71),
+                () => OnTruckTogglePressed?.Invoke(), 8.5f, 8f);
+
+            float ax = px - subS - Dp(10f), ay = py;
+            DrawSharpButton(canvas, ax, ay, ax + subS, ay + subS, "ANGKONG", VectorIconKind.Angkong,
+                _renderer.Physics.Player.ActiveAngkongIndex >= 0 ? Color.Argb(230, 21, 128, 61) : Color.Argb(205, 16, 26, 32),
+                Color.Argb(185, 74, 222, 128), Color.White,
+                () => OnAngkongTogglePressed?.Invoke(), 8.0f, 8f);
+        }
+        else
+        {
+            // Driving COE Mitsubishi Canter HUD Cluster: TURBO KLAKSON + TURUN KABIN
+            LastHarvestButtonRect = new RectF(hx, hy, hx + mainS, hy + mainS);
+            DrawSharpButton(canvas, hx, hy, hx + mainS, hy + mainS, "TURBO", VectorIconKind.BasuriHorn,
+                Color.Argb(235, 180, 83, 9), Color.Argb(255, 253, 224, 71), Color.White,
+                () => OnHornPressed?.Invoke(), 10f, 10f);
+
+            float subS = Dp(56f);
+            float tx = hx - subS - Dp(12f), ty = h - pad - subS;
+            LastTruckButtonRect = new RectF(tx, ty, tx + subS, ty + subS);
+            DrawSharpButton(canvas, tx, ty, tx + subS, ty + subS, "TURUN", VectorIconKind.SteeringWheel,
+                Color.Argb(220, 16, 28, 36), Color.Argb(225, 56, 189, 248), Color.White,
+                () => OnTruckTogglePressed?.Invoke(), 8.8f, 8f);
+        }
+
+        // Contextual Sell Button when near RAM PKS Weighbridge
+        if (_renderer.NearRamWeighbridge)
+        {
+            float sw = Dp(196f), sh = Dp(46f);
+            float sl = (w - sw) * 0.5f, st = h - pad - sh;
+            DrawSharpButton(canvas, sl, st, sl + sw, st + sh,
+                "JUAL SETOR RAM PKS", VectorIconKind.SellPks,
+                Color.Argb(242, 202, 138, 4), Color.Argb(255, 254, 249, 195), Color.White,
+                () => OnSellPressed?.Invoke(), 11f, 8f);
+        }
+    }
+
+    private void DrawActiveModalOverlay(Canvas canvas, int w, int h)
+    {
+        // Full-screen dim backdrop (blocks accidental touches behind modal)
+        _fillPaint.Color = Color.Argb(204, 5, 9, 12);
+        canvas.DrawRect(0, 0, w, h, _fillPaint);
+
+        float mw = System.Math.Min(w - Dp(44f), Dp(650f));
+        float mh = System.Math.Min(h - Dp(30f), Dp(368f));
+        float ml = (w - mw) * 0.5f, mt = (h - mh) * 0.5f;
+        float mr = ml + mw, mb = mt + mh;
+
+        DrawSharpPanel(canvas, ml, mt, mr, mb, Color.Argb(248, 11, 18, 23), Color.Argb(235, 74, 222, 128), 9f, 1.8f);
+
+        string title = ActiveModal switch
+        {
+            ActiveModalOverlay.Settings => "PENGATURAN",
+            ActiveModalOverlay.Wardrobe => "LEMARI AKSESORIS",
+            ActiveModalOverlay.SocialRoom => "SERVER DAN CHAT",
+            ActiveModalOverlay.Ranking => "PERINGKAT PKS",
+            ActiveModalOverlay.DailyReward => "HADIAH HARIAN",
+            _ => "MENU",
+        };
+
+        _titlePaint.Color = Color.White;
+        _titlePaint.TextSize = Dp(19f);
+        _titlePaint.TextAlign = Paint.Align.Left;
+        canvas.DrawText(title, ml + Dp(22f), mt + Dp(33f), _titlePaint);
+
+        // Close [X] button top-right of modal
+        DrawSharpButton(canvas, mr - Dp(50f), mt + Dp(10f), mr - Dp(12f), mt + Dp(44f), "", VectorIconKind.CloseCross,
+            Color.Argb(235, 127, 29, 29), Color.Argb(235, 248, 113, 113), Color.White,
+            () => { _sfx?.Play("ui_click"); CloseModal(); }, 10f, 6f);
+
+        _strokePaint.Color = Color.Argb(90, 74, 222, 128);
+        _strokePaint.StrokeWidth = Dp(1f);
+        canvas.DrawLine(ml + Dp(18f), mt + Dp(52f), mr - Dp(18f), mt + Dp(52f), _strokePaint);
+
+        switch (ActiveModal)
+        {
+            case ActiveModalOverlay.Settings:
+                DrawSettingsModalBody(canvas, ml, mt + Dp(60f), mr, mb);
+                break;
+            case ActiveModalOverlay.Wardrobe:
+                DrawWardrobeModalBody(canvas, ml, mt + Dp(60f), mr, mb);
+                break;
+            case ActiveModalOverlay.SocialRoom:
+                DrawSocialRoomModalBody(canvas, ml, mt + Dp(60f), mr, mb);
+                break;
+            case ActiveModalOverlay.Ranking:
+                DrawRankingModalBody(canvas, ml, mt + Dp(60f), mr, mb);
+                break;
+            case ActiveModalOverlay.DailyReward:
+                DrawDailyModalBody(canvas, ml, mt + Dp(60f), mr, mb);
+                break;
+        }
+    }
+
+    private void DrawSettingsModalBody(Canvas canvas, float ml, float bodyTop, float mr, float mb)
+    {
+        var q = _renderer!.Quality;
+        float innerL = ml + Dp(20f), innerR = mr - Dp(20f);
+        float tabW = (innerR - innerL - Dp(16f)) / 3f;
+        string[] tabs = ["GRAFIK & FPS", "VISUAL & BAYANGAN", "AUDIO & SISTEM"];
+        for (int i = 0; i < 3; i++)
+        {
+            float tl = innerL + i * (tabW + Dp(8f));
+            bool sel = SettingsTabIndex == i;
+            DrawSharpButton(canvas, tl, bodyTop, tl + tabW, bodyTop + Dp(34f), tabs[i], VectorIconKind.None,
+                sel ? Color.Argb(240, 22, 163, 74) : Color.Argb(220, 18, 28, 35),
+                sel ? Color.Argb(255, 187, 247, 208) : Color.Argb(150, 71, 85, 105),
+                Color.White, _tabActions[i], 9.8f, 5f);
+        }
+
+        float y = bodyTop + Dp(48f);
+        float rowH = Dp(42f), rowStep = Dp(52f);
+
+        if (SettingsTabIndex == 0)
+        {
+            // Row 1: Graphics Quality Preset
+            DrawSettingLabel(canvas, innerL, y, "KUALITAS GRAFIK", q.Active.Label);
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+                ["SMOOTH", "STD", "ULTRA", "MAX HD"],
+                (int)q.CurrentPreset,
+                idx =>
+                {
+                    _sfx?.Play("ui_click");
+                    _renderer.RequestPresetChange((GraphicsPreset)idx);
+                    PostInvalidate();
+                });
+            y += rowStep;
+
+            // Row 2: Target Frame Rate (30 / 60 / 90 / 120 FPS + Hardware Display Mode!)
+            int fpsIdx = q.TargetFps >= 115 ? 3 : (q.TargetFps >= 85 ? 2 : (q.TargetFps >= 55 ? 1 : 0));
+            DrawSettingLabel(canvas, innerL, y, "TARGET FRAME RATE", $"{q.TargetFps} FPS");
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+                ["30 FPS", "60 FPS", "90 FPS", "120 FPS"],
+                fpsIdx,
+                idx =>
+                {
+                    int[] rates = [30, 60, 90, 120];
+                    _sfx?.Play("ui_click");
+                    q.TargetFps = rates[idx];
+                    OnTargetFpsSelected?.Invoke(rates[idx]);
+                    PostInvalidate();
+                });
+            y += rowStep;
+
+            // Row 3: 3D Render Scale
+            float sc = q.EffectiveRenderScale;
+            int scIdx = sc < 0.68f ? 0 : (sc < 0.82f ? 1 : (sc < 0.95f ? 2 : 3));
+            DrawSettingLabel(canvas, innerL, y, "RESOLUSI RENDER 3D", $"{(int)MathF.Round(sc * 100f)}%");
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+                ["60%", "75%", "88%", "100% HD"],
+                scIdx,
+                idx =>
+                {
+                    float[] scales = [0.60f, 0.75f, 0.88f, 1.00f];
+                    _sfx?.Play("ui_click");
+                    q.CustomRenderScale = scales[idx];
+                    _renderer.SyncRenderScaleNow();
+                    PostInvalidate();
+                });
+            y += rowStep;
+
+            // Row 4: Adaptive Anti-Lag Governor
+            DrawSettingLabel(canvas, innerL, y, "OPTIMASI ANTI-LAG OTOMATIS", q.AutoStepDownEnabled ? "AKTIF" : "MANUAL");
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+                ["MATI (MANUAL)", "AKTIF (STABIL FPS)"],
+                q.AutoStepDownEnabled ? 1 : 0,
+                idx => { _sfx?.Play("ui_click"); q.AutoStepDownEnabled = idx == 1; PostInvalidate(); });
+        }
+        else if (SettingsTabIndex == 1)
+        {
+            // Row 1: Real-Time Sun Shadow Map Quality
+            DrawSettingLabel(canvas, innerL, y, "BAYANGAN MATAHARI REAL-TIME", q.ShadowTier.ToString().ToUpperInvariant());
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+                ["MATI", "SEDANG", "TINGGI PCF"],
+                (int)q.ShadowTier,
+                idx => { _sfx?.Play("ui_click"); q.ShadowTier = (ShadowQualityTier)idx; PostInvalidate(); });
+            y += rowStep;
+
+            // Row 2: Volumetric Cumulus Clouds & Atmospheric Lighting
+            DrawSettingLabel(canvas, innerL, y, "AWAN VOLUMETRIK & KABUT", q.CloudsEnabled ? "AKTIF" : "MATI");
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+                ["MATI", "AKTIF"],
+                q.CloudsEnabled ? 1 : 0,
+                idx => { _sfx?.Play("ui_click"); q.CloudsEnabled = idx == 1; PostInvalidate(); });
+            y += rowStep;
+
+            // Row 3: Tire Dust, Diesel Smoke & Harvest VFX
+            DrawSettingLabel(canvas, innerL, y, "EFEK DEBU BAN & ASAP DIESEL", q.ParticlesEnabled ? "AKTIF" : "MATI");
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+                ["MATI", "AKTIF"],
+                q.ParticlesEnabled ? 1 : 0,
+                idx => { _sfx?.Play("ui_click"); q.ParticlesEnabled = idx == 1; PostInvalidate(); });
+            y += rowStep;
+
+            // Row 4: Live FPS & Frame Telemetry Indicator
+            DrawSettingLabel(canvas, innerL, y, "INDIKATOR FPS DI LAYAR", q.ShowFpsHud ? "TAMPIL" : "SEMBUNYI");
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+                ["SEMBUNYI", "TAMPIL FPS"],
+                q.ShowFpsHud ? 1 : 0,
+                idx => { _sfx?.Play("ui_click"); q.ShowFpsHud = idx == 1; PostInvalidate(); });
+        }
+        else
+        {
+            bool sfxOn = _sfx?.Muted == false;
+            DrawSettingLabel(canvas, innerL, y, "EFEK SUARA MESIN & PANEN", sfxOn ? "AKTIF" : "BISU");
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+                ["BISU", "SUARA AKTIF"],
+                sfxOn ? 1 : 0,
+                idx => { if (_sfx != null) _sfx.Muted = idx == 0; _sfx?.Play("ui_click"); PostInvalidate(); });
+            y += rowStep;
+
+            int sensIdx = _renderer.CameraSensitivity < 0.85f ? 0 : (_renderer.CameraSensitivity > 1.25f ? 2 : 1);
+            DrawSettingLabel(canvas, innerL, y, "SENSITIVITAS KAMERA 3D", sensIdx == 0 ? "RENDAH" : (sensIdx == 2 ? "CEPAT" : "NORMAL"));
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+                ["RENDAH", "NORMAL", "CEPAT"],
+                sensIdx,
+                idx => { float[] sv = [0.68f, 1.0f, 1.45f]; _renderer.CameraSensitivity = sv[idx]; _sfx?.Play("ui_click"); PostInvalidate(); });
+            y += rowStep + Dp(8f);
+
+            if (_renderer.Stage == AppSceneStage.Gameplay)
+            {
+                DrawSharpButton(canvas, innerL, y, innerR, y + Dp(46f),
+                    "KEMBALI KE GARASI SHOWROOM LOBBY", VectorIconKind.LobbyGrid,
+                    Color.Argb(235, 30, 58, 138), Color.Argb(235, 96, 165, 250), Color.White,
+                    () => { CloseModal(); OnReturnLobbyRequested?.Invoke(); }, 10.5f, 7f);
+            }
+        }
+    }
+
+    private void DrawWardrobeModalBody(Canvas canvas, float ml, float bodyTop, float mr, float mb)
+    {
+        var av = _net!.Profile.Avatar;
+        float innerL = ml + Dp(20f), innerR = mr - Dp(20f);
+        float y = bodyTop + Dp(4f), rowH = Dp(42f), step = Dp(54f);
+
+        DrawSettingLabel(canvas, innerL, y, "PENUTUP KEPALA", FindLabel(HatCycle, HatLabels, av.Hat));
+        DrawOptionStrip(canvas, innerL + Dp(165f), y, innerR, rowH,
+            ["CAPING", "HELM", "IKAT", "MANDOR", "SULTAN"],
+            System.Math.Max(0, Array.IndexOf(HatCycle, av.Hat)),
+            idx => { av.Hat = HatCycle[idx]; _sfx?.Play("ui_click"); NotifyProfileUpdated(); });
+        y += step;
+
+        DrawSettingLabel(canvas, innerL, y, "TAS & GENDONGAN", FindLabel(BackCycle, BackLabels, av.Back));
+        DrawOptionStrip(canvas, innerL + Dp(165f), y, innerR, rowH,
+            ["ROTAN", "RANSEL", "JUBAH", "SAYAP", "LEPAS"],
+            System.Math.Max(0, Array.IndexOf(BackCycle, av.Back)),
+            idx => { av.Back = BackCycle[idx]; _sfx?.Play("ui_click"); NotifyProfileUpdated(); });
+        y += step;
+
+        DrawSettingLabel(canvas, innerL, y, "ALAT PANEN UTAMA", FindLabel(ToolCycle, ToolLabels, av.Tool));
+        DrawOptionStrip(canvas, innerL + Dp(165f), y, innerR, rowH,
+            ["EGREK", "DODOS", "TOJOK", "NAGA"],
+            System.Math.Max(0, Array.IndexOf(ToolCycle, av.Tool)),
+            idx => { av.Tool = ToolCycle[idx]; _sfx?.Play("ui_click"); NotifyProfileUpdated(); });
+        y += step;
+
+        DrawSettingLabel(canvas, innerL, y, "WARNA SERAGAM", FindLabel(ColorHexCycle, ColorNameCycle, av.OutfitHex));
+        DrawOptionStrip(canvas, innerL + Dp(165f), y, innerR, rowH,
+            ["HIJAU", "BIRU", "MERAH", "EMAS", "HITAM"],
+            System.Math.Max(0, Array.IndexOf(ColorHexCycle, av.OutfitHex)),
+            idx => { av.OutfitHex = ColorHexCycle[idx]; _sfx?.Play("ui_click"); NotifyProfileUpdated(); });
+        y += step;
+
+        float halfW = (innerR - innerL - Dp(12f)) * 0.5f;
+        DrawSharpButton(canvas, innerL, y, innerL + halfW, y + Dp(40f),
+            $"KACAMATA HITAM: {(av.Glasses ? "AKTIF" : "LEPAS")}", VectorIconKind.None,
+            av.Glasses ? Color.Argb(235, 22, 163, 74) : Color.Argb(220, 18, 28, 35),
+            Color.Argb(200, 74, 222, 128), Color.White,
+            () => { av.Glasses = !av.Glasses; _sfx?.Play("ui_click"); NotifyProfileUpdated(); }, 9.5f, 6f);
+
+        DrawSharpButton(canvas, innerL + halfW + Dp(12f), y, innerR, y + Dp(40f),
+            $"SARUNG PARANG PINGGANG: {(av.WaistParang ? "AKTIF" : "LEPAS")}", VectorIconKind.None,
+            av.WaistParang ? Color.Argb(235, 22, 163, 74) : Color.Argb(220, 18, 28, 35),
+            Color.Argb(200, 74, 222, 128), Color.White,
+            () => { av.WaistParang = !av.WaistParang; _sfx?.Play("ui_click"); NotifyProfileUpdated(); }, 9.5f, 6f);
+    }
+
+    private void DrawSocialRoomModalBody(Canvas canvas, float ml, float bodyTop, float mr, float mb)
+    {
+        float innerL = ml + Dp(20f), innerR = mr - Dp(20f);
+        string[] rooms = ["kebun-sumatera-01", "kebun-riau-02", "kebun-kalimantan-03", "kebun-sultan-vip"];
+        DrawSettingLabel(canvas, innerL, bodyTop + Dp(4f), "PILIH ROOM SERVER LIVE", _net!.CurrentRoomId.ToUpperInvariant());
+        DrawOptionStrip(canvas, innerL + Dp(175f), bodyTop + Dp(4f), innerR, Dp(40f),
+            ["SUMATERA", "RIAU", "KALIMANTAN", "SULTAN"],
+            System.Math.Max(0, Array.IndexOf(rooms, _net.CurrentRoomId)),
+            idx => { _sfx?.Play("ui_click"); _net.SelectRoom(rooms[idx]); ShowToast($"PINDAH KE SERVER {rooms[idx].ToUpperInvariant()}"); PostInvalidate(); });
+
+        float y = bodyTop + Dp(58f);
+        string[] quickMsgs = ["SIAP SETOR RAM!", "ADA SAWIT EMAS!", "BANTU MUAT TRUK!", "CANTER OLENG GAS!"];
+        float qw = (innerR - innerL - Dp(18f)) / 4f;
+        for (int i = 0; i < quickMsgs.Length; i++)
+        {
+            string msg = quickMsgs[i];
+            float ql = innerL + i * (qw + Dp(6f));
+            DrawSharpButton(canvas, ql, y, ql + qw, y + Dp(36f), msg, VectorIconKind.None,
+                Color.Argb(225, 16, 32, 42), Color.Argb(185, 56, 189, 248), Color.White,
+                () => { _sfx?.Play("ui_click"); _net.SendChat(msg); ShowToast($"TERKIRIM: {msg}"); PostInvalidate(); }, 8.3f, 5f);
+        }
+
+        // Recent live chat feed box + custom keyboard chat button
+        float feedTop = y + Dp(46f), feedBot = mb - Dp(56f);
+        DrawSharpPanel(canvas, innerL, feedTop, innerR, feedBot, Color.Argb(230, 8, 13, 17), Color.Argb(130, 56, 189, 248), 6f, 1.1f);
+        _net.CopyRenderState(_peersTmp, _boarsTmp, _chatsTmp, 0f);
+        _textPaint.TextAlign = Paint.Align.Left;
+        _textPaint.TextSize = Dp(9.6f);
+        int start = System.Math.Max(0, _chatsTmp.Count - 4);
+        float cy = feedTop + Dp(22f);
+        if (_chatsTmp.Count == 0)
+        {
+            _textPaint.Color = Color.Argb(175, 148, 163, 184);
+            canvas.DrawText("SERVER CHAT GLOBAL AKTIF — PILIH PESAN CEPAT ATAU KETIK PESAN BARU.", innerL + Dp(14f), cy, _textPaint);
+        }
+        else
+        {
+            for (int i = start; i < _chatsTmp.Count; i++)
+            {
+                _textPaint.Color = Color.Argb(255, 167, 243, 208);
+                canvas.DrawText($"[{_chatsTmp[i].SenderName}]  {_chatsTmp[i].Text}", innerL + Dp(14f), cy, _textPaint);
+                cy += Dp(22f);
+            }
+        }
+
+        float halfW = (innerR - innerL - Dp(12f)) * 0.5f;
+        DrawSharpButton(canvas, innerL, mb - Dp(46f), innerL + halfW, mb - Dp(10f),
+            "KETIK PESAN CHAT...", VectorIconKind.ChatBox,
+            Color.Argb(235, 14, 116, 144), Color.Argb(235, 125, 211, 252), Color.White,
+            () => { _sfx?.Play("ui_click"); OnCustomChatInputRequested?.Invoke(); }, 9.8f, 6f);
+
+        bool micOn = _voice?.MicEnabled == true;
+        DrawSharpButton(canvas, innerL + halfW + Dp(12f), mb - Dp(46f), innerR, mb - Dp(10f),
+            micOn ? "VOICE CHAT: AKTIF (MATIKAN)" : "VOICE CHAT: AKTIFKAN MIC",
+            micOn ? VectorIconKind.MicOn : VectorIconKind.MicMuted,
+            micOn ? Color.Argb(235, 22, 163, 74) : Color.Argb(225, 30, 41, 59),
+            Color.Argb(220, 74, 222, 128), Color.White,
+            () => { OnToggleVoiceMic?.Invoke(); PostInvalidate(); }, 9.8f, 6f);
+    }
+
+    private void DrawRankingModalBody(Canvas canvas, float ml, float bodyTop, float mr, float mb)
+    {
+        float innerL = ml + Dp(20f), innerR = mr - Dp(20f);
+        DrawSharpPanel(canvas, innerL, bodyTop + Dp(2f), innerR, mb - Dp(14f),
+            Color.Argb(228, 8, 14, 18), Color.Argb(150, 245, 196, 66), 6f, 1.2f);
+
+        _textPaint.TextSize = Dp(10f);
+        float y = bodyTop + Dp(26f);
+        lock (_leaderCache)
+        {
+            if (_leaderCache.Count == 0)
+            {
+                _textPaint.Color = Color.Argb(225, 250, 214, 96);
+                _textPaint.TextAlign = Paint.Align.Left;
+                canvas.DrawText($"#1  {_net!.Profile.Name.ToUpperInvariant()}   —   {_net.Profile.TotalKg} KG TBS DISERAHKAN KE PKS", innerL + Dp(18f), y, _textPaint);
+            }
+            else
+            {
+                int limit = System.Math.Min(7, _leaderCache.Count);
+                for (int i = 0; i < limit; i++)
+                {
+                    var r = _leaderCache[i];
+                    _textPaint.Color = i == 0 ? Color.Argb(255, 253, 224, 71) : Color.White;
+                    _textPaint.TextAlign = Paint.Align.Left;
+                    canvas.DrawText($"#{r.Rank}   {r.Name}", innerL + Dp(18f), y, _textPaint);
+                    _textPaint.TextAlign = Paint.Align.Right;
+                    canvas.DrawText($"{r.TotalKg:N0} KG  •  {r.Score:N0} PTS", innerR - Dp(18f), y, _textPaint);
+                    y += Dp(34f);
+                }
+            }
+        }
+    }
+
+    private void DrawDailyModalBody(Canvas canvas, float ml, float bodyTop, float mr, float mb)
+    {
+        float innerL = ml + Dp(20f), innerR = mr - Dp(20f);
+        float cardW = (innerR - innerL - Dp(36f)) / 7f;
+        int streak = System.Math.Clamp(_net!.Profile.StreakDay, 0, 7);
+        for (int d = 0; d < 7; d++)
+        {
+            float cl = innerL + d * (cardW + Dp(6f));
+            bool claimed = d < streak;
+            DrawSharpPanel(canvas, cl, bodyTop + Dp(12f), cl + cardW, bodyTop + Dp(132f),
+                claimed ? Color.Argb(230, 20, 83, 45) : Color.Argb(220, 16, 25, 32),
+                d == streak ? Color.Argb(255, 253, 224, 71) : Color.Argb(165, 74, 222, 128), 6f, 1.3f);
+            _textPaint.TextAlign = Paint.Align.Center;
+            _textPaint.TextSize = Dp(9.2f);
+            _textPaint.Color = Color.Argb(230, 167, 243, 208);
+            canvas.DrawText($"HARI {d + 1}", cl + cardW * 0.5f, bodyTop + Dp(38f), _textPaint);
+            _textPaint.Color = Color.Argb(255, 253, 224, 71);
+            canvas.DrawText($"+{(d + 1) * 25}K", cl + cardW * 0.5f, bodyTop + Dp(78f), _textPaint);
+            _textPaint.Color = Color.White;
+            canvas.DrawText(claimed ? "SELESAI" : "BONUS", cl + cardW * 0.5f, bodyTop + Dp(110f), _textPaint);
+        }
+
+        DrawSharpButton(canvas, innerL, mb - Dp(62f), innerR, mb - Dp(14f),
+            "KLAIM BONUS KEHADIRAN HARIAN", VectorIconKind.DailyCrate,
+            Color.Argb(242, 22, 163, 74), Color.Argb(255, 187, 247, 208), Color.White,
+            () =>
+            {
+                _sfx?.Play("sell");
+                _net.ClaimDaily();
+                ShowToast("BONUS HARIAN DIKLAIM!");
+                CloseModal();
+            }, 11.5f, 7f);
+    }
+
+    private void DrawSettingLabel(Canvas canvas, float x, float y, string title, string currentVal)
+    {
+        _textPaint.TextAlign = Paint.Align.Left;
+        _textPaint.TextSize = Dp(9.6f);
+        _textPaint.Color = Color.White;
+        canvas.DrawText(title, x, y + Dp(17f), _textPaint);
+        _textPaint.TextSize = Dp(8.8f);
+        _textPaint.Color = Color.Argb(235, 74, 222, 128);
+        canvas.DrawText(currentVal, x, y + Dp(33f), _textPaint);
+    }
+
+    private void DrawOptionStrip(Canvas canvas, float l, float t, float r, float h, string[] labels, int activeIdx, Action<int> onPick)
+    {
+        float gap = Dp(6f);
+        float bw = (r - l - gap * (labels.Length - 1)) / labels.Length;
+        for (int i = 0; i < labels.Length; i++)
+        {
+            int captured = i;
+            float bl = l + i * (bw + gap);
+            bool sel = i == activeIdx;
+            DrawSharpButton(
+                canvas, bl, t, bl + bw, t + h,
+                labels[i], VectorIconKind.None,
+                sel ? Color.Argb(242, 22, 163, 74) : Color.Argb(220, 17, 26, 33),
+                sel ? Color.Argb(255, 187, 247, 208) : Color.Argb(150, 71, 85, 105),
+                Color.White,
+                () => onPick(captured), 9.0f, 5f);
+        }
+    }
+
+    private void CycleAvatarSlot(string[] values, string current, Action<string> setter)
+    {
+        _sfx?.Play("ui_click");
+        int idx = Array.IndexOf(values, current);
+        setter(values[(idx + 1 + values.Length) % values.Length]);
+        NotifyProfileUpdated();
+    }
+
+    private static string FindLabel(string[] keys, string[] labels, string val)
+    {
+        int i = Array.IndexOf(keys, val);
+        return i >= 0 && i < labels.Length ? labels[i] : labels[0];
+    }
+
+    private void NotifyProfileUpdated()
+    {
+        if (_net != null) _net.SaveAvatar(_net.Profile.Name, _net.Profile.Avatar);
+        OnProfileModified?.Invoke();
+        PostInvalidate();
     }
 
     public override bool OnTouchEvent(MotionEvent? e)
     {
         if (e == null || _renderer == null) return false;
-        int action = (int)e.ActionMasked;
+        var action = e.ActionMasked;
         int idx = e.ActionIndex;
         int pid = e.GetPointerId(idx);
         float x = e.GetX(idx), y = e.GetY(idx);
-        float maxR = 52f * (Resources?.DisplayMetrics?.Density ?? 2.5f);
 
-        if (action == (int)MotionEventActions.Down || action == (int)MotionEventActions.PointerDown)
+        if (action == MotionEventActions.Down || action == MotionEventActions.PointerDown)
         {
-            for (int i = _hitZones.Count - 1; i >= 0; i--)
+            // Tap anywhere during Splash once GPU is warm skips cleanly straight into Garage Lobby!
+            if (_renderer.Stage == AppSceneStage.Splash)
             {
-                if (_hitZones[i].Rect.Contains(x, y))
+                _renderer.SkipSplashToLobby();
+                PostInvalidate();
+                return true;
+            }
+
+            // 1. Check crisp registered UI hit zones first (LIFO so modal buttons always win!)
+            for (int i = _hitCount - 1; i >= 0; i--)
+            {
+                ref var hz = ref _hitZones[i];
+                if (x >= hz.L && x <= hz.R && y >= hz.T && y <= hz.B && hz.Callback != null)
                 {
-                    _sfx?.Play("ui_click");
-                    try { PerformHapticFeedback(FeedbackConstants.KeyboardTap); } catch { }
-                    _hitZones[i].Tap();
+                    hz.Callback.Invoke();
                     return true;
                 }
             }
 
-            if (_renderer.Stage == AppSceneStage.Lobby)
-            {
-                _camPointerId = pid;
-                _camLastX = x;
-                _camLastY = y;
-                return true;
-            }
-            if (_renderer.Stage != AppSceneStage.Gameplay)
-            {
-                return true;
-            }
+            if (ActiveModal != ActiveModalOverlay.None) return true;
 
-            if (x < Width * 0.44f && _joyPointerId == -1)
+            // 2. Left-half analog movement stick in Gameplay!
+            if (_renderer.Stage == AppSceneStage.Gameplay && _joyPointerId == -1 && x < Width * 0.44f && y > Height * 0.30f)
             {
                 _joyPointerId = pid;
-                _joyOriginX = _joyKnobX = x;
-                _joyOriginY = _joyKnobY = y;
-                _renderer.JoyX = _renderer.JoyY = 0f;
+                _joyOriginX = x;
+                _joyOriginY = y;
+                _joyKnobX = x;
+                _joyKnobY = y;
+                _renderer.JoyX = 0f;
+                _renderer.JoyY = 0f;
+                PostInvalidate();
+                return true;
             }
-            else if (pid != _joyPointerId && _camPointerId == -1)
+
+            // 3. Free 360-deg Camera Orbit (both in Separate Garage Lobby AND in Gameplay!)
+            if (_camPointerId == -1)
             {
                 _camPointerId = pid;
                 _camLastX = x;
                 _camLastY = y;
+                return true;
             }
-            return true;
         }
-
-        if (action == (int)MotionEventActions.Move)
+        else if (action == MotionEventActions.Move)
         {
+            float maxR = Dp(56f);
             for (int p = 0; p < e.PointerCount; p++)
             {
                 int id = e.GetPointerId(p);
                 float px = e.GetX(p), py = e.GetY(p);
-                if (_renderer.Stage == AppSceneStage.Lobby && id == _camPointerId)
-                {
-                    _renderer.LobbyAvatarSpinOffset += (px - _camLastX) * 0.012f;
-                    _camLastX = px;
-                    _camLastY = py;
-                }
-                else if (id == _joyPointerId)
+                if (id == _joyPointerId)
                 {
                     float dx = px - _joyOriginX, dy = py - _joyOriginY;
-                    float dist = MathF.Sqrt(dx * dx + dy * dy);
-                    if (dist > maxR) { dx = dx / dist * maxR; dy = dy / dist * maxR; }
+                    float len = MathF.Sqrt(dx * dx + dy * dy);
+                    if (len > maxR) { dx = dx / len * maxR; dy = dy / len * maxR; }
                     _joyKnobX = _joyOriginX + dx;
                     _joyKnobY = _joyOriginY + dy;
                     _renderer.JoyX = dx / maxR;
                     _renderer.JoyY = dy / maxR;
+                    PostInvalidate();
                 }
                 else if (id == _camPointerId)
                 {
-                    _renderer.CamYaw -= (px - _camLastX) * 0.0065f;
-                    _renderer.CamPitch = System.Math.Clamp(_renderer.CamPitch + (py - _camLastY) * 0.005f, 0.10f, 1.08f);
+                    float dx = px - _camLastX, dy = py - _camLastY;
                     _camLastX = px;
                     _camLastY = py;
+                    float sens = 0.0052f * _renderer.CameraSensitivity;
+                    if (_renderer.Stage == AppSceneStage.Lobby)
+                    {
+                        _renderer.LobbyOrbitYaw = System.Math.Clamp(_renderer.LobbyOrbitYaw - dx * sens * 0.85f, -0.85f, 0.85f);
+                        _renderer.LobbyAvatarSpinOffset += dx * sens * 0.65f;
+                    }
+                    else
+                    {
+                        _renderer.CamYaw -= dx * sens;
+                        _renderer.CamPitch = System.Math.Clamp(_renderer.CamPitch + dy * sens * 0.72f, 0.06f, 0.88f);
+                    }
                 }
             }
             return true;
         }
-
-        if (action == (int)MotionEventActions.Up || action == (int)MotionEventActions.PointerUp || action == (int)MotionEventActions.Cancel)
+        else if (action == MotionEventActions.Up || action == MotionEventActions.PointerUp || action == MotionEventActions.Cancel)
         {
-            if (pid == _joyPointerId || action == (int)MotionEventActions.Cancel)
+            if (action == MotionEventActions.Cancel || pid == _joyPointerId)
             {
                 _joyPointerId = -1;
-                _renderer.JoyX = _renderer.JoyY = 0f;
+                _renderer.JoyX = 0f;
+                _renderer.JoyY = 0f;
+                PostInvalidate();
             }
-            if (pid == _camPointerId || action == (int)MotionEventActions.Cancel)
+            if (action == MotionEventActions.Cancel || pid == _camPointerId)
             {
                 _camPointerId = -1;
             }

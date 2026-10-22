@@ -36,10 +36,23 @@ public sealed class QualityProfile
     ];
 }
 
+public enum ShadowQualityTier
+{
+    Off = 0,
+    Medium = 1,
+    High = 2
+}
+
 public sealed class QualityGovernor
 {
     public GraphicsPreset CurrentPreset { get; private set; } = GraphicsPreset.Ultra;
     public bool AutoStepDownEnabled { get; set; } = true;
+    public int TargetFps { get; set; } = 60;
+    public ShadowQualityTier ShadowTier { get; set; } = ShadowQualityTier.High;
+    public bool CloudsEnabled { get; set; } = true;
+    public bool ParticlesEnabled { get; set; } = true;
+    public bool ShowFpsHud { get; set; } = true;
+    public float? CustomRenderScale { get; set; }
     public int CurrentFps { get; private set; } = 60;
     public float AvgFrameMs { get; private set; } = 16.6f;
 
@@ -48,10 +61,20 @@ public sealed class QualityGovernor
     private int _lowFpsStrikes;
 
     public QualityProfile Active => QualityProfile.All[(int)CurrentPreset];
+    public float EffectiveRenderScale => CustomRenderScale ?? Active.RenderScale;
 
     public void SetManualPreset(GraphicsPreset preset, bool disableAuto = true)
     {
         CurrentPreset = preset;
+        CustomRenderScale = null;
+        ShadowTier = preset switch
+        {
+            GraphicsPreset.Smooth => ShadowQualityTier.Off,
+            GraphicsPreset.Standard => ShadowQualityTier.Medium,
+            _ => ShadowQualityTier.High,
+        };
+        CloudsEnabled = preset != GraphicsPreset.Smooth;
+        ParticlesEnabled = preset != GraphicsPreset.Smooth;
         if (disableAuto) AutoStepDownEnabled = false;
         _lowFpsStrikes = 0;
     }
@@ -73,6 +96,8 @@ public sealed class QualityGovernor
             if (_lowFpsStrikes >= 3)
             {
                 CurrentPreset = (GraphicsPreset)((int)CurrentPreset - 1);
+                if (ShadowTier > ShadowQualityTier.Off)
+                    ShadowTier = (ShadowQualityTier)((int)ShadowTier - 1);
                 _lowFpsStrikes = 0;
                 return true;
             }

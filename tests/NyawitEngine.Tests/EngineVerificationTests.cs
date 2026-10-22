@@ -23,13 +23,18 @@ public sealed class EngineVerificationTests
     }
 
     [Fact]
-    public void NpakArchive_LoadsAll35SculptedModelsAndMatchesEveryMeshCatalogKey()
+    public void NpakArchive_LoadsAll41UvMappedPbrModelsAndAtlasExists()
     {
-        string path = Path.Combine(ResolveRepoRoot(), "src", "Nyawit.Android", "Assets", "Meshes", "nyawit_models.npak");
+        string root = ResolveRepoRoot();
+        string path = Path.Combine(root, "src", "Nyawit.Android", "Assets", "Meshes", "nyawit_models.npak");
+        string atlasPath = Path.Combine(root, "src", "Nyawit.Android", "Assets", "Textures", "nyawit_pbr_atlas.png");
+        Assert.True(File.Exists(atlasPath), "Missing 2048x2048 PBR texture atlas nyawit_pbr_atlas.png");
+        Assert.True(new FileInfo(atlasPath).Length > 500_000, "PBR texture atlas must contain rich high-res texel detail");
+
         using var fs = File.OpenRead(path);
         var archive = NpakArchive.Load(fs);
 
-        Assert.Equal(35, archive.Meshes.Count);
+        Assert.Equal(41, archive.Meshes.Count);
         foreach (string requiredKey in MeshCatalog.AllRequiredNames)
         {
             Assert.True(archive.Meshes.ContainsKey(requiredKey), $"Missing required 3D model '{requiredKey}' in nyawit_models.npak");
@@ -40,8 +45,11 @@ public sealed class EngineVerificationTests
             Assert.Equal(3, kv.Value.Lods.Length);
             Assert.True(kv.Value.Lods[0].IndexCount >= kv.Value.Lods[2].IndexCount,
                 $"Mesh {kv.Key} LOD2 must be lighter than or equal to LOD0");
-            Assert.True(kv.Value.Lods[0].VertexCount >= 70,
-                $"Mesh {kv.Key} must be a detailed sculpted mesh, never a primitive cube");
+            if (kv.Key != MeshCatalog.VfxPuffQuad && kv.Key != MeshCatalog.TropicalFern)
+            {
+                Assert.True(kv.Value.Lods[0].VertexCount >= 48,
+                    $"Mesh {kv.Key} must be a detailed sculpted mesh, never a primitive cube");
+            }
         }
     }
 

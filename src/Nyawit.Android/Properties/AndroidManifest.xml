@@ -17,6 +17,6 @@
       android:icon="@mipmap/ic_launcher"
       android:roundIcon="@mipmap/ic_launcher_round"
       android:label="Nyawit Live 3D"
-      android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
+      android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
   </application>
 </manifest>

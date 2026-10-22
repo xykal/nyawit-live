@@ -1,201 +1,238 @@
 #!/usr/bin/env python3
 """
-Renders Studio 3D Asset Verification Sheet + Android Launcher Icons + 1200x630 OG Banner
-using the exact GPU shader dye mask (uv.x >= 0.75) and official XyVerse Display glyph subset!
+Perspective-correct UV-Textured PBR + Alpha-Cutout Showcase Renderer for Nyawit Live 3D v4.0.
+Verifies exact UV alignment, alpha-cutout pinnate fronds, COE Mitsubishi Canter FE 74 HD details,
+seamless human anatomy, accessories, and the separate 3D Garage Lobby scene on docs/screenshots/models_showcase.png!
 """
-
-from __future__ import annotations
 import math
 import os
 import struct
-from typing import Dict, List, Tuple
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 
 def load_npak(path: str):
-    blob = open(path, "rb").read()
-    magic, ver, count = struct.unpack_from("<4sII", blob, 0)
+    with open(path, "rb") as f:
+        data = f.read()
+    pos = 0
+    magic, ver, count = struct.unpack_from("<4sII", data, pos)
+    pos += 12
     assert magic == b"NPAK" and ver == 1
-    off = 12
     dtype_v = np.dtype([("pos", "<f4", (3,)), ("nrm", "<f4", (3,)), ("uv", "<f4", (2,)), ("col", "u1", (4,))])
     lib = {}
     for _ in range(count):
-        nlen, rad, b0, b1, b2, x0, x1, x2, lods = struct.unpack_from("<BfffffffB", blob, off)
-        off += 30
-        name = blob[off:off + nlen].decode("utf-8")
-        off += nlen
-        lod_list = []
-        for _ in range(lods):
-            vcnt, icnt = struct.unpack_from("<II", blob, off)
-            off += 8
-            v_arr = np.frombuffer(blob, dtype=dtype_v, count=vcnt, offset=off).copy()
-            off += vcnt * 36
-            i_arr = np.frombuffer(blob, dtype="<u2", count=icnt, offset=off).reshape(-1, 3).copy()
-            off += icnt * 2
-            lod_list.append((v_arr["pos"], v_arr["nrm"], v_arr["uv"], v_arr["col"], i_arr))
-        lib[name] = lod_list
+        nlen = data[pos]
+        lod_cnt = data[pos + 29]
+        pos += 30
+        name = data[pos:pos + nlen].decode("utf-8")
+        pos += nlen
+        lods = []
+        for _ in range(lod_cnt):
+            vcnt, icnt = struct.unpack_from("<II", data, pos)
+            pos += 8
+            vbytes = vcnt * 36
+            ibytes = icnt * 2
+            verts = np.frombuffer(data[pos:pos + vbytes], dtype=dtype_v).copy()
+            pos += vbytes
+            idx = np.frombuffer(data[pos:pos + ibytes], dtype="<u2").reshape(-1, 3).astype(np.int32).copy()
+            pos += ibytes
+            lods.append((verts, idx))
+        lib[name] = lods
     return lib
 
 
 def mat_trs(tx=0.0, ty=0.0, tz=0.0, rx=0.0, ry=0.0, rz=0.0, sx=1.0, sy=1.0, sz=1.0) -> np.ndarray:
-    cx, sxn = math.cos(rx), math.sin(rx)
-    cy, syn = math.cos(ry), math.sin(ry)
-    cz, szn = math.cos(rz), math.sin(rz)
-    mx = np.array([[1, 0, 0], [0, cx, -sxn], [0, sxn, cx]], dtype=np.float32)
-    my = np.array([[cy, 0, syn], [0, 1, 0], [-syn, 0, cy]], dtype=np.float32)
-    mz = np.array([[cz, -szn, 0], [szn, cz, 0], [0, 0, 1]], dtype=np.float32)
+    cx, s_x = math.cos(rx), math.sin(rx)
+    cy, s_y = math.cos(ry), math.sin(ry)
+    cz, s_z = math.cos(rz), math.sin(rz)
+    mx = np.array([[1, 0, 0, 0], [0, cx, -s_x, 0], [0, s_x, cx, 0], [0, 0, 0, 1]], np.float32)
+    my = np.array([[cy, 0, s_y, 0], [0, 1, 0, 0], [-s_y, 0, cy, 0], [0, 0, 0, 1]], np.float32)
+    mz = np.array([[cz, -s_z, 0, 0], [s_z, cz, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], np.float32)
+    ms = np.diag([sx, sy, sz, 1.0]).astype(np.float32)
+    mt = np.array([[1, 0, 0, tx], [0, 1, 0, ty], [0, 0, 1, tz], [0, 0, 0, 1]], np.float32)
+    return mt @ my @ mx @ mz @ ms
+
+
+def look_at(eye, target, up=(0.0, 1.0, 0.0)) -> np.ndarray:
+    e, t, u = np.asarray(eye, np.float32), np.asarray(target, np.float32), np.asarray(up, np.float32)
+    f = t - e
+    f /= np.linalg.norm(f)
+    s = np.cross(f, u)
+    s /= np.linalg.norm(s)
+    v = np.cross(s, f)
     m = np.eye(4, dtype=np.float32)
-    m[:3, :3] = (my @ mx @ mz) * np.array([sx, sy, sz], dtype=np.float32)[None, :]
-    m[:3, 3] = [tx, ty, tz]
+    m[0, :3], m[1, :3], m[2, :3] = s, v, -f
+    m[0, 3], m[1, 3], m[2, 3] = -np.dot(s, e), -np.dot(v, e), np.dot(f, e)
     return m
 
 
-def rasterize_scene(instances, w: int, h: int, eye, target, fov_deg: float = 40.0, bg_top=(18, 30, 26), bg_bot=(9, 13, 12)) -> Image.Image:
-    sw, sh = w * 2, h * 2
-    ys = np.linspace(0.0, 1.0, sh, dtype=np.float32)[:, None, None]
-    fb = np.broadcast_to(
-        np.asarray(bg_top, dtype=np.float32)[None, None, :] * (1.0 - ys)
-        + np.asarray(bg_bot, dtype=np.float32)[None, None, :] * ys,
-        (sh, sw, 3),
-    ).copy()
-    zb = np.full((sh, sw), 1e9, dtype=np.float32)
+def perspective(fov_rad: float, aspect: float, near: float, far: float) -> np.ndarray:
+    f = 1.0 / math.tan(fov_rad * 0.5)
+    m = np.zeros((4, 4), dtype=np.float32)
+    m[0, 0] = f / aspect
+    m[1, 1] = f
+    m[2, 2] = (far + near) / (near - far)
+    m[2, 3] = (2.0 * far * near) / (near - far)
+    m[3, 2] = -1.0
+    return m
 
-    eye_v, tgt_v = np.asarray(eye, dtype=np.float32), np.asarray(target, dtype=np.float32)
-    fwd = tgt_v - eye_v
-    fwd /= np.linalg.norm(fwd)
-    right = np.cross(fwd, np.array([0.0, 1.0, 0.0], dtype=np.float32))
-    right /= np.linalg.norm(right)
-    up = np.cross(right, fwd)
 
-    f = 1.0 / math.tan(math.radians(fov_deg) * 0.5)
-    aspect = sw / sh
+def rasterize_scene(instances, atlas_rgba: np.ndarray, w: int, h: int, eye, target, fov_deg: float = 39.0) -> Image.Image:
+    ss = 2
+    W, H = w * ss, h * ss
+    fb = np.zeros((H, W, 3), dtype=np.float32)
+    gy = np.linspace(0.0, 1.0, H, dtype=np.float32)[:, None]
+    # Rich atmospheric studio background gradient
+    fb[..., 0] = 24.0 + 26.0 * (1.0 - gy)
+    fb[..., 1] = 34.0 + 38.0 * (1.0 - gy)
+    fb[..., 2] = 44.0 + 52.0 * (1.0 - gy)
+    zb = np.full((H, W), 1e9, dtype=np.float32)
+
+    ah, aw = atlas_rgba.shape[0], atlas_rgba.shape[1]
+    vp = perspective(math.radians(fov_deg), W / H, 0.25, 220.0) @ look_at(eye, target)
     sun = np.array([0.48, 0.76, 0.44], dtype=np.float32)
     sun /= np.linalg.norm(sun)
-    rim_dir = np.array([-0.55, 0.42, -0.72], dtype=np.float32)
-    rim_dir /= np.linalg.norm(rim_dir)
+    view_dir = np.asarray(eye, np.float32) - np.asarray(target, np.float32)
+    view_dir /= np.linalg.norm(view_dir)
+    half_v = (sun + view_dir)
+    half_v /= np.linalg.norm(half_v)
 
-    for pos, nrm, uv, col, idx, world_m, tint in instances:
-        rmat = world_m[:3, :3]
-        wpos = (pos @ rmat.T) + world_m[:3, 3]
-        wnrm = nrm @ rmat.T
-        wnrm /= np.maximum(np.linalg.norm(wnrm, axis=1, keepdims=True), 1e-6)
+    for verts, idx, model, tint in instances:
+        pos4 = np.hstack([verts["pos"], np.ones((len(verts), 1), np.float32)])
+        wpos = (pos4 @ model.T)[:, :3]
+        wnrm = verts["nrm"] @ model[:3, :3].T
+        nl = np.linalg.norm(wnrm, axis=1, keepdims=True)
+        wnrm = wnrm / np.maximum(1e-6, nl)
 
-        rel = wpos - eye_v
-        cx, cy, cz = rel @ right, rel @ up, rel @ fwd
+        clip = np.hstack([wpos, np.ones((len(verts), 1), np.float32)]) @ vp.T
+        cw = clip[:, 3]
+        inv_w = 1.0 / np.maximum(1e-4, cw)
+        sx = (clip[:, 0] * inv_w * 0.5 + 0.5) * W
+        sy = (0.5 - clip[:, 1] * inv_w * 0.5) * H
 
-        ndotl = np.clip(wnrm @ sun, 0.0, 1.0)
-        hemi = 0.36 + 0.24 * (wnrm[:, 1] * 0.5 + 0.5)
-        rim = np.clip(wnrm @ rim_dir, 0.0, 1.0) ** 2.2 * 0.28
-        spec = (np.clip(wnrm @ sun, 0.0, 1.0) ** 14.0) * 0.18
-        ao = col[:, 3:4].astype(np.float32) / 255.0
-        dye_mask = (uv[:, 0:1] >= 0.75).astype(np.float32)
-        eff_tint = (1.0 - dye_mask) + dye_mask * np.asarray(tint, dtype=np.float32)[None, :]
-        albedo = (col[:, :3].astype(np.float32) / 255.0) * eff_tint
-        lit = np.clip((albedo * (hemi[:, None] + 0.86 * ndotl[:, None] + rim[:, None]) + spec[:, None]) * (0.48 + 0.52 * ao), 0.0, 1.0) * 255.0
+        vcol = verts["col"].astype(np.float32) / 255.0
+        gloss = vcol[:, 3]
+        raw_uv = verts["uv"].copy()
+        is_dye = (raw_uv[:, 0] > 1.5).astype(np.float32)
+        raw_uv[:, 0] -= is_dye * 2.0
+        tint_arr = np.asarray(tint, np.float32)[None, :]
+        eff_tint = (1.0 - is_dye[:, None]) + is_dye[:, None] * tint_arr
 
-        sx_p = (cx / np.maximum(cz, 0.1) * (f / aspect) * 0.5 + 0.5) * sw
-        sy_p = (0.5 - cy / np.maximum(cz, 0.1) * f * 0.5) * sh
+        # Vertex lighting term (sun + warm tropical sky bounce + specular)
+        ndl = np.maximum(0.0, wnrm @ sun)
+        # Double-sided leaf translucency for thin botanical sheets!
+        back_light = np.maximum(0.0, -(wnrm @ sun)) * 0.42
+        sky = 0.36 + 0.16 * (wnrm[:, 1] * 0.5 + 0.5)
+        spec = (np.maximum(0.0, wnrm @ half_v) ** (8.0 + gloss * 40.0)) * gloss * 0.55
+        emissive = (gloss > 0.97).astype(np.float32) * 0.85
+
+        shade = (sky + (ndl + back_light) * 0.86 + emissive)[:, None] * vcol[:, :3] * eff_tint
+        spec_rgb = spec[:, None] * np.array([[255.0, 248.0, 232.0]], np.float32)
+
+        uv_over_w = raw_uv * inv_w[:, None]
 
         for t0, t1, t2 in idx:
-            z0, z1, z2 = float(cz[t0]), float(cz[t1]), float(cz[t2])
-            if z0 < 0.2 or z1 < 0.2 or z2 < 0.2:
+            if cw[t0] <= 0.25 or cw[t1] <= 0.25 or cw[t2] <= 0.25:
                 continue
-            x0, y0 = float(sx_p[t0]), float(sy_p[t0])
-            x1, y1 = float(sx_p[t1]), float(sy_p[t1])
-            x2, y2 = float(sx_p[t2]), float(sy_p[t2])
-            # True GL_CCW screen-space backface culling (y screen is downward so CCW 3D has area < 0)
+            x0, y0 = sx[t0], sy[t0]
+            x1, y1 = sx[t1], sy[t1]
+            x2, y2 = sx[t2], sy[t2]
             area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)
-            if area >= -0.25:
+            if abs(area) < 1e-3:
                 continue
-            minx, maxx = max(0, int(min(x0, x1, x2))), min(sw - 1, int(math.ceil(max(x0, x1, x2))))
-            miny, maxy = max(0, int(min(y0, y1, y2))), min(sh - 1, int(math.ceil(max(y0, y1, y2))))
+            minx = max(0, int(min(x0, x1, x2)))
+            maxx = min(W - 1, int(max(x0, x1, x2)) + 1)
+            miny = max(0, int(min(y0, y1, y2)))
+            maxy = min(H - 1, int(max(y0, y1, y2)) + 1)
             if minx > maxx or miny > maxy:
                 continue
-            xs_g = np.arange(minx, maxx + 1, dtype=np.float32)[None, :] + 0.5
-            ys_g = np.arange(miny, maxy + 1, dtype=np.float32)[:, None] + 0.5
-            inv_a = 1.0 / area
-            w0 = ((x1 - xs_g) * (y2 - ys_g) - (x2 - xs_g) * (y1 - ys_g)) * inv_a
-            w1 = ((x2 - xs_g) * (y0 - ys_g) - (x0 - xs_g) * (y2 - ys_g)) * inv_a
+
+            py, px = np.mgrid[miny:maxy + 1, minx:maxx + 1]
+            px = px.astype(np.float32) + 0.5
+            py = py.astype(np.float32) + 0.5
+            inv_area = 1.0 / area
+            w0 = ((x1 - px) * (y2 - py) - (x2 - px) * (y1 - py)) * inv_area
+            w1 = ((x2 - px) * (y0 - py) - (x0 - px) * (y2 - py)) * inv_area
             w2 = 1.0 - w0 - w1
             inside = (w0 >= -1e-4) & (w1 >= -1e-4) & (w2 >= -1e-4)
             if not np.any(inside):
                 continue
-            z_interp = w0 * z0 + w1 * z1 + w2 * z2
+
+            one_over_w = w0 * inv_w[t0] + w1 * inv_w[t1] + w2 * inv_w[t2]
+            z_cam = 1.0 / np.maximum(1e-6, one_over_w)
             sub_z = zb[miny:maxy + 1, minx:maxx + 1]
-            vis = inside & (z_interp < sub_z)
-            if not np.any(vis):
+            cand = inside & (z_cam < sub_z)
+            if not np.any(cand):
                 continue
-            sub_z[vis] = z_interp[vis]
-            fb[miny:maxy + 1, minx:maxx + 1][vis] = (w0[..., None] * lit[t0] + w1[..., None] * lit[t1] + w2[..., None] * lit[t2])[vis]
+
+            u_p = ((w0 * uv_over_w[t0, 0] + w1 * uv_over_w[t1, 0] + w2 * uv_over_w[t2, 0]) * z_cam)[cand]
+            v_p = ((w0 * uv_over_w[t0, 1] + w1 * uv_over_w[t1, 1] + w2 * uv_over_w[t2, 1]) * z_cam)[cand]
+            tx_i = np.clip((np.mod(u_p, 1.0) * (aw - 1)).astype(np.int32), 0, aw - 1)
+            ty_i = np.clip((np.mod(v_p, 1.0) * (ah - 1)).astype(np.int32), 0, ah - 1)
+            texel = atlas_rgba[ty_i, tx_i]
+
+            alpha_ok = texel[:, 3] >= 115
+            if not np.any(alpha_ok):
+                continue
+
+            vis_mask = np.zeros_like(cand)
+            vis_mask[cand] = alpha_ok
+            sub_z[vis_mask] = z_cam[vis_mask]
+
+            sh_p = (w0[vis_mask, None] * shade[t0] + w1[vis_mask, None] * shade[t1] + w2[vis_mask, None] * shade[t2])
+            sp_p = (w0[vis_mask, None] * spec_rgb[t0] + w1[vis_mask, None] * spec_rgb[t1] + w2[vis_mask, None] * spec_rgb[t2])
+            lit_rgb = texel[alpha_ok, :3].astype(np.float32) * sh_p + sp_p
+            fb[miny:maxy + 1, minx:maxx + 1][vis_mask] = np.clip(lit_rgb, 0.0, 255.0)
 
     return Image.fromarray(fb.astype(np.uint8)).resize((w, h), Image.Resampling.LANCZOS)
 
 
-def assemble_palm(lib, gold_fruit=False):
+def assemble_palm(lib):
     out = [
         (*lib["palm_trunk"][0], mat_trs(0, 0, 0), (1.0, 1.0, 1.0)),
-        (*lib["palm_crown"][0], mat_trs(0.30, 6.28, 0.24), (1.0, 1.0, 1.0)),
+        (*lib["palm_crown"][0], mat_trs(0.28, 6.32, 0.20), (1.0, 1.0, 1.0)),
         (*lib["tropical_fern"][0], mat_trs(0.55, 0.0, 0.45), (1.0, 1.0, 1.0)),
     ]
     for i in range(6):
         ang = i * (2 * math.pi / 6) + 0.4
-        tint = (1.15, 1.55, 0.40) if (gold_fruit or i == 1) else (1.0, 1.0, 1.0)
-        out.append((*lib["tbs_bunch"][0], mat_trs(0.30 + math.sin(ang) * 0.46, 5.95 - (i % 2) * 0.22, 0.24 + math.cos(ang) * 0.46, ry=ang), tint))
+        out.append((*lib["tbs_bunch"][0], mat_trs(0.28 + math.sin(ang) * 0.42, 5.96 - (i % 2) * 0.20, 0.20 + math.cos(ang) * 0.42, ry=ang), (1.0, 1.0, 1.0)))
     return out
 
 
 def assemble_truck(lib):
-    body_m = mat_trs(0, 0.04, 0, rz=-0.045, rx=-0.015)
+    body_m = mat_trs(0, 0.02, 0, rz=-0.035, rx=-0.01)
     out = [
         (*lib["canter_truck_body"][0], body_m, (1.0, 1.0, 1.0)),
-        (*lib["truck_cargo_heap"][0], body_m @ mat_trs(0, 0.82, 0), (1.0, 1.0, 1.0)),
+        (*lib["canter_steering_wheel"][0], body_m @ mat_trs(0.42, 1.46, 1.88, rx=0.62, rz=-0.42), (1.0, 1.0, 1.0)),
+        (*lib["truck_cargo_heap"][0], body_m @ mat_trs(0, 0.80, 0), (1.0, 1.0, 1.0)),
     ]
-    for sx, susp_y in ((-0.88, 0.46), (0.88, 0.52)):
-        # Front wheels turned 22 degrees (steering animation!) + independent suspension travel!
-        out.append((*lib["truck_wheel"][0], mat_trs(sx, susp_y, 1.55, ry=0.38, rx=0.65), (1.0, 1.0, 1.0)))
-        out.append((*lib["truck_wheel"][0], mat_trs(sx, susp_y, -1.25, rx=0.65), (1.0, 1.0, 1.0)))
+    for sx, susp_y in ((-0.88, 0.46), (0.88, 0.50)):
+        # Steered single front wheels + authentic DUAL rear Canter wheels!
+        out.append((*lib["truck_wheel"][0], mat_trs(sx, susp_y, 1.55, ry=0.38, rx=0.55), (1.0, 1.0, 1.0)))
+        out.append((*lib["truck_wheel"][0], mat_trs(sx * 0.84, susp_y, -1.25, rx=0.55), (1.0, 1.0, 1.0)))
+        out.append((*lib["truck_wheel"][0], mat_trs(sx * 1.03, susp_y, -1.25, rx=0.55), (1.0, 1.0, 1.0)))
     return out
 
 
-def assemble_boar(lib):
-    body = mat_trs(-0.92, 0.04, 0.20, ry=0.48, rx=-0.05)
-    out = [(*lib["celeng_boar"][0], body, (1.0, 1.0, 1.0))]
-    for sx, sz, swing in ((-0.20, 0.44, -0.42), (0.20, 0.44, 0.36), (-0.19, -0.44, 0.38), (0.19, -0.44, -0.35)):
-        out.append((*lib["boar_leg"][0], body @ mat_trs(sx, 0.50, sz, rx=swing), (1.0, 1.0, 1.0)))
-    return out
+def assemble_harvester(lib, shirt_rgb, hat_key, back_key, tool_key, holding_tbs=False, glasses=False, parang=True):
+    hip_m = mat_trs(0, 0.88, 0, rx=(0.04 if holding_tbs else 0.0), ry=0.06)
+    head_m = hip_m @ mat_trs(0, 0.58, 0.01, ry=-0.08, rx=-0.02)
 
-
-def assemble_angkong(lib):
-    cart = mat_trs(0.95, 0.0, -0.10, ry=-0.42)
-    return [
-        (*lib["angkong_cart"][0], cart, (1.0, 1.0, 1.0)),
-        (*lib["truck_wheel"][0], cart @ mat_trs(0.0, 0.29, 0.80, rx=0.85, sx=0.45, sy=0.59, sz=0.59), (1.0, 1.0, 1.0)),
-    ]
-
-
-def assemble_harvester(lib, shirt_rgb, hat_key, back_key, tool_key, holding_tbs=False):
-    hip_m = mat_trs(0, 0.88, 0, rx=(0.06 if holding_tbs else 0.0))
-    head_m = hip_m @ mat_trs(0, 0.56, 0.01, ry=0.10, rx=-0.04)
-
-    # Articulated two-joint legs (Hip -> Thigh -> Knee -> Calf + Tall Rubber Boot!)
-    th_l = hip_m @ mat_trs(-0.115, 0.0, 0.0, rx=-0.16)
-    cf_l = th_l @ mat_trs(0.0, -0.43, 0.0, rx=0.22)
-    th_r = hip_m @ mat_trs(0.115, 0.0, 0.0, rx=0.18)
-    cf_r = th_r @ mat_trs(0.0, -0.43, 0.0, rx=0.06)
+    th_l = hip_m @ mat_trs(-0.105, 0.0, 0.0, rx=-0.10, rz=-0.03)
+    cf_l = th_l @ mat_trs(0.0, -0.43, 0.0, rx=0.14)
+    th_r = hip_m @ mat_trs(0.105, 0.0, 0.0, rx=0.12, rz=0.03)
+    cf_r = th_r @ mat_trs(0.0, -0.43, 0.0, rx=0.05)
 
     if holding_tbs:
-        # Two-handed TBS cradling pose in front of chest!
-        ua_l = hip_m @ mat_trs(-0.245, 0.485, 0.01, rx=-0.78, rz=-0.22)
-        fa_l = ua_l @ mat_trs(0.0, -0.27, 0.01, rx=-0.72, ry=0.26)
-        ua_r = hip_m @ mat_trs(0.245, 0.485, 0.01, rx=-0.78, rz=0.22)
-        fa_r = ua_r @ mat_trs(0.0, -0.27, 0.01, rx=-0.72, ry=-0.26)
+        ua_l = hip_m @ mat_trs(-0.215, 0.46, 0.01, rx=-0.72, rz=-0.18)
+        fa_l = ua_l @ mat_trs(0.0, -0.27, 0.01, rx=-0.76, ry=0.28)
+        ua_r = hip_m @ mat_trs(0.215, 0.46, 0.01, rx=-0.72, rz=0.18)
+        fa_r = ua_r @ mat_trs(0.0, -0.27, 0.01, rx=-0.76, ry=-0.28)
     else:
-        # Heroic two-handed Egrek / Dodos stance held clearly forward in both hands!
-        ua_l = hip_m @ mat_trs(-0.245, 0.485, 0.01, rx=-0.92, rz=-0.34)
-        fa_l = ua_l @ mat_trs(0.0, -0.27, 0.01, rx=-0.38, ry=0.28)
-        ua_r = hip_m @ mat_trs(0.245, 0.485, 0.01, rx=-0.66, rz=0.26)
-        fa_r = ua_r @ mat_trs(0.0, -0.27, 0.01, rx=-0.52, ry=-0.18)
+        ua_l = hip_m @ mat_trs(-0.215, 0.46, 0.01, rx=-0.78, rz=-0.26)
+        fa_l = ua_l @ mat_trs(0.0, -0.27, 0.01, rx=-0.42, ry=0.26)
+        ua_r = hip_m @ mat_trs(0.215, 0.46, 0.01, rx=-0.52, rz=0.22)
+        fa_r = ua_r @ mat_trs(0.0, -0.27, 0.01, rx=-0.56, ry=-0.18)
 
     out = [
         (*lib["char_torso_head"][0], hip_m, shirt_rgb),
@@ -208,50 +245,63 @@ def assemble_harvester(lib, shirt_rgb, hat_key, back_key, tool_key, holding_tbs=
         (*lib["char_forearm_hand"][0], fa_l, (1.0, 1.0, 1.0)),
         (*lib["char_arm"][0], ua_r, shirt_rgb),
         (*lib["char_forearm_hand"][0], fa_r, (1.0, 1.0, 1.0)),
-        (*lib[back_key][0], hip_m @ mat_trs(0, 0.36, -0.14), (1.0, 1.0, 1.0)),
     ]
+    if back_key:
+        out.append((*lib[back_key][0], hip_m @ mat_trs(0, 0.34, -0.14), shirt_rgb))
+    if parang:
+        out.append((*lib["acc_parang_waist"][0], hip_m @ mat_trs(0.175, 0.10, -0.02), (1.0, 1.0, 1.0)))
+    if glasses:
+        out.append((*lib["acc_glasses"][0], head_m, (1.0, 1.0, 1.0)))
     if hat_key:
-        out.append((*lib[hat_key][0], head_m @ mat_trs(0, 0.255, 0.01), (1.0, 1.0, 1.0)))
+        out.append((*lib[hat_key][0], head_m @ mat_trs(0, 0.21, 0.0), shirt_rgb))
     if holding_tbs:
-        out.append((*lib["tbs_bunch"][0], hip_m @ mat_trs(0.0, 0.34, 0.44, rx=0.35, sx=0.82, sy=0.82, sz=0.82), (1.05, 1.15, 0.90)))
+        out.append((*lib["tbs_bunch"][0], hip_m @ mat_trs(0.0, 0.30, 0.38, rx=0.35, sx=0.88, sy=0.88, sz=0.88), (1.0, 1.0, 1.0)))
     elif tool_key:
-        out.append((*lib[tool_key][0], hip_m @ mat_trs(0.04, 0.24, 0.38, rx=0.14, rz=0.10), (1.0, 1.0, 1.0)))
+        out.append((*lib[tool_key][0], hip_m @ mat_trs(0.03, 0.22, 0.34, rx=0.14, rz=0.08), (1.0, 1.0, 1.0)))
+    return out
+
+
+def assemble_garage_lobby(lib):
+    out = [(*lib["garage_showroom"][0], mat_trs(0, 0, 0), (1.0, 1.0, 1.0))]
+    for v, i, m, t in assemble_truck(lib):
+        out.append((v, i, mat_trs(1.35, 0.08, -0.45, ry=-0.58) @ m, t))
+    for v, i, m, t in assemble_harvester(lib, (0.18, 0.56, 0.36), "hat_safety", "back_pack", "tool_tojok", holding_tbs=False, glasses=True, parang=True):
+        out.append((v, i, mat_trs(-1.35, 0.08, 1.25, ry=0.35) @ m, t))
     return out
 
 
 def main() -> None:
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     npak_path = os.path.join(root, "src", "Nyawit.Android", "Assets", "Meshes", "nyawit_models.npak")
+    atlas_path = os.path.join(root, "src", "Nyawit.Android", "Assets", "Textures", "nyawit_pbr_atlas.png")
     font_path = os.path.join(root, "src", "Nyawit.Android", "Assets", "Fonts", "XyVerseDisplay-Semibold.otf")
-    mark_path = os.path.join(root, "src", "Nyawit.Android", "Assets", "Brand", "mark_kecil_transparan_putih.png")
     logo_path = os.path.join(root, "src", "Nyawit.Android", "Assets", "Brand", "logo_utama_horizontal_transparan_putih.png")
 
+    atlas = np.array(Image.open(atlas_path).convert("RGBA"), dtype=np.uint8)
     lib = load_npak(npak_path)
+
     pks_scene = [
-        (*lib["pks_factory"][0], mat_trs(0, 0, -2.8), (1, 1, 1)),
-        (*lib["pks_fan"][0], mat_trs(-1.5, 8.35, -4.4, ry=0.4), (1, 1, 1)),
-        (*lib["pks_fan"][0], mat_trs(1.5, 8.35, -1.2, ry=1.1), (1, 1, 1)),
-        (*lib["steam_puff"][0], mat_trs(-3.2, 14.8, -5.0, sx=1.5, sy=1.4, sz=1.5), (1, 1, 1)),
-        (*lib["steam_puff"][0], mat_trs(-2.8, 16.4, -5.6, sx=2.1, sy=1.8, sz=2.1), (1, 1, 1)),
-        (*lib["weighbridge_ram"][0], mat_trs(0, 0, 7.0), (1, 1, 1)),
+        (*lib["pks_factory"][0], mat_trs(0, 0, -2.5), (1, 1, 1)),
+        (*lib["pks_fan"][0], mat_trs(-1.5, 7.6, -2.0, ry=0.4), (1, 1, 1)),
+        (*lib["weighbridge_ram"][0], mat_trs(0, 0, 7.2), (1, 1, 1)),
     ]
     cards = [
-        ("POHON SAWIT TENERA DAN TBS EMAS", "DOUBLE-SIDED PELEPAH / ZERO BOLONG", assemble_palm(lib, True), (9.8, 6.4, 11.2), (0.2, 4.3, 0.2)),
-        ("CANTER OLENG SUSPENSI DAN BELOK", "BAN DEPAN BELOK 22 DEG / SUSPENSI AKTIF", assemble_truck(lib), (4.8, 2.7, 5.2), (0.0, 1.12, 0.1)),
-        ("ANATOMI SULTAN WAJAH DAN JARI", "11-PART RIG / WAJAH / JARI / SEPATU BOOT", assemble_harvester(lib, (0.14, 0.18, 0.28), "hat_crown_gold", "back_wings_gold", "tool_egrek_dragon", False), (2.25, 1.85, 3.15), (0.0, 1.15, 0.05)),
-        ("ANIMASI PEGANG DAN ANGKAT SAWIT", "PEGANG DUA TANGAN / ANGKUT KE TRUK", assemble_harvester(lib, (0.16, 0.72, 0.44), None, "back_basket", "tool_egrek", True), (1.85, 1.72, 2.45), (0.0, 1.16, 0.12)),
-        ("PABRIK PKS TURBIN DAN UAP AKTIF", "TURBIN BERPUTAR / UAP BOILER / RAM LED", pks_scene, (20.5, 14.5, 24.5), (0.4, 5.4, 0.8)),
-        ("CELENG KAKI AKTIF DAN ANGKONG", "4 KAKI BERLARI / RODA ANGKONG BERPUTAR", assemble_boar(lib) + assemble_angkong(lib), (3.1, 2.0, 3.4), (0.0, 0.55, 0.0)),
+        ("MITSUBISHI CANTER COE BAK KAYU", "KABIN FLAT-NOSE / PLAT BM 8899 XY / BAN DOBEL", assemble_truck(lib), (4.4, 2.35, 4.9), (0.0, 1.15, 0.15)),
+        ("GARASI SHOWROOM LOBBY TERPISAH", "BENGKEL SAWIT KHUSUS / 60-120 FPS RINGAN", assemble_garage_lobby(lib), (0.4, 2.35, 8.8), (0.0, 1.55, -0.5)),
+        ("SAWIT TENERA PELEPAH ALPHA-CUTOUT", "88 ANAK DAUN PER PELEPAH / PAKIS BATANG", assemble_palm(lib), (8.2, 5.4, 9.2), (0.2, 4.2, 0.2)),
+        ("KARAKTER PBR DAN AKSESORIS LENGKAP", "HELM PROYEK / KACAMATA / RANSEL / PARANG / TOJOK", assemble_harvester(lib, (0.20, 0.44, 0.72), "hat_safety", "back_pack", "tool_tojok", False, True, True), (1.75, 1.65, 2.55), (0.0, 1.18, 0.05)),
+        ("PEMANEN CAPING BAMBU DAN TBS ASLI", "TEKSTUR TBS GLOSSY / SEPATU BOOT / KERANJANG", assemble_harvester(lib, (0.22, 0.58, 0.34), "hat_caping", "back_basket", "tool_egrek", True, False, True), (1.65, 1.58, 2.35), (0.0, 1.15, 0.10)),
+        ("PABRIK PKS DAN TIMBANGAN RAM", "SILO CPO / SENG GELOMBANG / DEK BETON", pks_scene, (19.5, 12.0, 22.0), (1.2, 4.2, 1.2)),
     ]
 
     W, H = 1800, 1120
-    sheet = Image.new("RGBA", (W, H), (11, 14, 13, 255))
+    sheet = Image.new("RGBA", (W, H), (11, 13, 15, 255))
     draw = ImageDraw.Draw(sheet)
     f_title = ImageFont.truetype(font_path, 34)
-    f_card = ImageFont.truetype(font_path, 19)
+    f_card = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
     f_sub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 12)
 
-    draw.text((48, 32), "NYAWIT LIVE  -  WATERTIGHT ANATOMY AND PHYSICS MODELS", font=f_title, fill=(255, 255, 255, 255))
+    draw.text((48, 30), "NYAWIT LIVE  -  REALISTIC PBR MODELS AND GARAGE SHOWROOM", font=f_title, fill=(255, 255, 255, 255))
     logo_img = Image.open(logo_path).convert("RGBA")
     lh = 44
     lw = int(logo_img.width * (lh / logo_img.height))
@@ -261,43 +311,16 @@ def main() -> None:
     for idx_c, (title, sub, scene_inst, eye, tgt) in enumerate(cards):
         col_i, row_i = idx_c % 3, idx_c // 3
         x0, y0 = 42 + col_i * (cw + 30), 104 + row_i * (ch + 30)
-        rendered = rasterize_scene(scene_inst, cw, ch - 68, eye, tgt, fov_deg=40.0).convert("RGBA")
-        draw.rectangle([x0 - 2, y0 - 2, x0 + cw + 2, y0 + ch + 2], fill=(18, 24, 21, 255), outline=(48, 232, 138, 255), width=2)
+        rendered = rasterize_scene(scene_inst, atlas, cw, ch - 68, eye, tgt, fov_deg=40.0).convert("RGBA")
         sheet.alpha_composite(rendered, (x0, y0))
+        draw.rectangle([x0, y0 + ch - 68, x0 + cw, y0 + ch], fill=(16, 21, 25, 255))
+        draw.rectangle([x0, y0, x0 + cw, y0 + ch], outline=(48, 214, 128, 210), width=2)
         draw.text((x0 + 18, y0 + ch - 54), title, font=f_card, fill=(255, 255, 255, 255))
-        draw.text((x0 + 18, y0 + ch - 27), sub, font=f_sub, fill=(48, 232, 138, 255))
+        draw.text((x0 + 18, y0 + ch - 28), sub, font=f_sub, fill=(74, 222, 128, 255))
 
-    sheet.convert("RGB").save(os.path.join(root, "docs", "screenshots", "models_showcase.png"), quality=92)
-
-    icon_scene = (
-        [(a, b, u, c, d, mat_trs(-1.35, -3.2, -1.4) @ m, t) for (a, b, u, c, d, m, t) in assemble_palm(lib, True)]
-        + [(a, b, u, c, d, mat_trs(1.15, 0.0, 0.65, ry=-0.55) @ m, t) for (a, b, u, c, d, m, t) in assemble_truck(lib)]
-        + [(a, b, u, c, d, mat_trs(-0.75, 0.0, 2.35, ry=0.35) @ m, t) for (a, b, u, c, d, m, t) in assemble_harvester(lib, (0.16, 0.76, 0.44), "hat_caping", "back_basket", "tool_egrek")]
-    )
-    icon_base = rasterize_scene(icon_scene, 512, 512, (4.8, 3.2, 6.2), (0.15, 1.75, 0.2), fov_deg=44.0, bg_top=(24, 96, 64), bg_bot=(12, 26, 20)).convert("RGBA")
-    idraw = ImageDraw.Draw(icon_base)
-    idraw.rectangle([0, 412, 512, 512], fill=(13, 13, 13, 232))
-    idraw.text((34, 432), "NYAWIT 3D", font=ImageFont.truetype(font_path, 56), fill=(255, 214, 58, 255))
-    icon_base.alpha_composite(Image.open(mark_path).convert("RGBA").resize((44, 44), Image.Resampling.LANCZOS), (440, 434))
-
-    for folder, sz in {"mipmap-mdpi": 48, "mipmap-hdpi": 72, "mipmap-xhdpi": 96, "mipmap-xxhdpi": 144, "mipmap-xxxhdpi": 192}.items():
-        mdir = os.path.join(root, "src", "Nyawit.Android", "Resources", folder)
-        os.makedirs(mdir, exist_ok=True)
-        icon_base.resize((sz, sz), Image.Resampling.LANCZOS).save(os.path.join(mdir, "ic_launcher.png"))
-        icon_base.resize((sz, sz), Image.Resampling.LANCZOS).save(os.path.join(mdir, "ic_launcher_round.png"))
-
-    icon_base.resize((192, 192), Image.Resampling.LANCZOS).save(os.path.join(root, "server", "public", "assets", "icon-192.png"))
-    icon_base.save(os.path.join(root, "server", "public", "assets", "icon-512.png"))
-
-    og = rasterize_scene(icon_scene, 1200, 630, (5.8, 3.4, 7.2), (0.0, 1.85, 0.0), fov_deg=43.0, bg_top=(18, 68, 48), bg_bot=(11, 15, 14)).convert("RGBA")
-    od = ImageDraw.Draw(og)
-    od.rectangle([0, 470, 1200, 630], fill=(13, 13, 13, 234))
-    od.text((48, 494), "NYAWIT LIVE 3D", font=ImageFont.truetype(font_path, 54), fill=(255, 255, 255, 255))
-    od.text((48, 562), "LIVE MULTIPLAYER  /  GLOBAL RANKING  /  TURNAMEN MINGGUAN", font=ImageFont.truetype(font_path, 21), fill=(92, 224, 146, 255))
-    lw2 = int(logo_img.width * (52 / logo_img.height))
-    og.alpha_composite(logo_img.resize((lw2, 52), Image.Resampling.LANCZOS), (1200 - lw2 - 48, 520))
-    og.convert("RGB").save(os.path.join(root, "server", "public", "assets", "og_banner.png"), quality=92)
-    print("Clean re-render complete!")
+    out_path = os.path.join(root, "docs", "screenshots", "models_showcase.png")
+    sheet.convert("RGB").save(out_path, optimize=True)
+    print(f"Saved PBR textured showcase -> {out_path}")
 
 
 if __name__ == "__main__":

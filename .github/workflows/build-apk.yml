@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build-verify-and-release-apk:
-    name: Native C11 NDK + .NET 10 Custom 3D Engine + Android 14 Emulator v3.0 Verification + Signed APK
+    name: Native C11 NDK + .NET 10 PBR Shadow Engine + Android 14 Emulator v4.0 Verification + Signed APK
     runs-on: ubuntu-latest
 
     steps:
@@ -101,7 +101,7 @@ jobs:
 
           ls -lh src/Nyawit.Android/Libs/*/*.so
 
-      - name: Run Automated C# Engine, Physics, Suspension & Watertight NPAK v3.0 Tests
+      - name: Run Automated C# Engine, Physics, PBR Atlas & 41-Mesh NPAK v4.0 Tests
         run: dotnet test tests/NyawitEngine.Tests/NyawitEngine.Tests.csproj -c Release --verbosity normal
 
       - name: Prepare Release Signing Keystore
@@ -122,7 +122,7 @@ jobs:
               -dname "CN=Nyawit Live 3D, OU=Game Engine, O=XyVerse Tech, L=Jakarta, ST=DKI, C=ID"
           fi
 
-      - name: Build & Sign True Universal v3.0.0 Release Android APK (arm64-v8a + armeabi-v7a + x86_64)
+      - name: Build & Sign True Universal v4.0.0 Release Android APK (arm64-v8a + armeabi-v7a + x86_64)
         run: |
           dotnet publish src/Nyawit.Android/Nyawit.Android.csproj \
             -f net10.0-android \
@@ -138,19 +138,19 @@ jobs:
           mkdir -p dist-apk
           SIGNED_APK=$(find src/Nyawit.Android/bin/Release -name "*-Signed.apk" | head -n 1)
           echo "Located signed APK: $SIGNED_APK"
+          cp "$SIGNED_APK" dist-apk/NyawitLive-v4.0.0-universal.apk
           cp "$SIGNED_APK" dist-apk/NyawitLive-v3.0.0-universal.apk
           cp "$SIGNED_APK" dist-apk/NyawitLive-v2.0.0-universal.apk
-          cp "$SIGNED_APK" dist-apk/NyawitLive-v1.0.0-universal.apk
-          (cd dist-apk && sha256sum NyawitLive-v3.0.0-universal.apk NyawitLive-v2.0.0-universal.apk > SHA256SUMS.txt)
+          (cd dist-apk && sha256sum NyawitLive-v4.0.0-universal.apk NyawitLive-v3.0.0-universal.apk > SHA256SUMS.txt)
 
-          echo "=== APK Archive Verification (3 Native ABIs + 105 Watertight NPAK v3.0 Meshes) ==="
-          unzip -l dist-apk/NyawitLive-v3.0.0-universal.apk | grep -E "libnyawit_simd|nyawit_models.npak|XyVerseDisplay"
+          echo "=== APK Archive Verification (3 Native ABIs + 2048x2048 PBR Atlas + 123 NPAK v4.0 Meshes) ==="
+          unzip -l dist-apk/NyawitLive-v4.0.0-universal.apk | grep -E "libnyawit_simd|nyawit_models.npak|nyawit_pbr_atlas.png|XyVerseDisplay"
           ls -lh dist-apk/
 
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
-          "$APKSIGNER" verify --verbose dist-apk/NyawitLive-v3.0.0-universal.apk
+          "$APKSIGNER" verify --verbose dist-apk/NyawitLive-v4.0.0-universal.apk
 
-      - name: Boot Real Android 14 (API 34) Emulator & Verify Lobby, Loading, TBS Hold & Canter Suspension
+      - name: Boot Real Android 14 (API 34) Emulator & Verify All 6 v4.0 PBR Screens (Splash, Garage Lobby, Loading, On-Foot, Canter COE, Settings)
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -162,29 +162,27 @@ jobs:
           disable-animations: true
           script: python3 tools/verify_android_emulator.py
 
-      - name: Upload Verified v3.0.0 APK & Live Android 14 Screenshots Artifact
+      - name: Upload Verified v4.0.0 APK & Live Android 14 Screenshots Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: NyawitLive-v3-Verified-Android-Bundle
+          name: NyawitLive-v4-Verified-Android-Bundle
           path: dist-apk/*
           if-no-files-found: warn
 
-      - name: Publish Verified v3.0.0 Universal APK to GitHub Releases
+      - name: Publish Verified v4.0.0 Universal APK to GitHub Releases
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v3.0.0
-          name: "Nyawit Live 3D v3.0.0 — RigidBody Physics, 4-Wheel Suspension, Hold Animations, Lobby & Dedicated Server"
+          tag_name: v4.0.0
+          name: "Nyawit Live 3D v4.0.0 — Photorealistic PBR, 1024x1024 Real Shadows, Separate Garage Lobby, Splash & 60-120 FPS"
           make_latest: true
           body: |
-            ## Nyawit Live 3D (`v3.0.0`) — Official Native Android Release & Dedicated Multiplayer/Voice Architecture
-            - **Dedicated Android Client + Dedicated Server Domain (`https://nyawit.xyverse.my.id`)**: Browser WebGL client retired completely so gameplay never diverges; `nyawit.xyverse.my.id` serves 100% authoritative Multiplayer Sync (`8 Hz`), Multi-Room Lobby (`KEBUN SUMATERA #1`, `KEBUN RIAU #2`, `KALIMANTAN BARAT #3`, `SULTAN OLENG ARENA`), Global & Room Chat, Real-Time `8 kHz` Voice Relay (`G.711 u-law`), Global Leaderboards, Weekly Tournaments, and direct signed APK downloads (`/download/apk`).
-            - **Zero Mesh Holes (`0% Bolong-Bolong`) & Ultra-Detailed 11-Part Human Anatomy (`NPAK v3.0` — `105` Watertight Meshes)**: Mathematically verified determinant-aware winding + signed-volume outward normals + shader double-sided normal flip; full human posture, head, face, eyes, eyebrows, nose, ears, hair, shoulders, elbows, hands/fingers, knees, and tall rubber boots.
-            - **Solid RigidBody Physics (`0% Nembus`) & 4-Wheel Spring-Damper Canter Suspension**: Solid 3D collisions against every tree, rock, bridge, Mandor post, Angkong, Canter, RAM, and PKS building; independent 4-wheel spring-damper suspension, rolling tires, front-wheel steering up to `28 deg`, chassis pitch/roll ("Canter Oleng"), and bouncing harvested TBS fruits.
-            - **Hold, Pickup & Cargo Load Animations**: Two-handed Egrek/Dodos grip, deep squat pickup of fallen TBS from ground, cradling spiky TBS in both hands, overhead parabolic throw into Canter truck bed or Angkong cart, pushing Angkong handles, and seated Canter driver steering pose.
-            - **Sharp Chamfered Tactical HUD, Custom Vector Icons (Zero Emojis), 14 Tactile Click/Gameplay SFX, Live Voice Chat, 3D Main Lobby & `"MENYIAPKAN DUNIA..."` Loading Screen**.
+            ## Nyawit Live 3D (`v4.0.0`) — Photorealistic PBR, Real-Time Shadows, Separate 3D Garage Lobby & 60-120 FPS Optimization
+            - **Photorealistic Reference-Accurate 3D Models & `2048x2048` Mipmapped PBR Texture Atlas (`NPAK v4.0` — `41` Models x `3` LODs = `123` GPU Meshes)**: Authentic flat-nose Cab-Over-Engine **Mitsubishi Fuso Canter FE 74 HD Bak Kayu** with `"BM 8899 XY"` plate, dual rear tires, live-rotating steering wheel, 88-leaflet alpha-cutout oil palm fronds, trunk ferns, glossy crimson-orange TBS bunches, and full Indonesian harvester outfits & accessories (`Caping`, `Helm Proyek`, `Kacamata Hitam`, `Sarung Parang`, `Keranjang Rotan`, `Ransel`, `Egrek`, `Dodos`, `Tojok`).
+            - **Real `1024x1024` Directional Sun Shadow Mapping (`PCF`), Multi-Scale Laterite/Grass Splat Terrain, Volumetric Cumulus Clouds & Particle VFX**: Dynamic palm frond & vehicle shadows, multi-scale red-brown Sumatran harvest roads, drifting sky clouds, tire dust plumes, diesel exhaust smoke, and harvest chaff bursts.
+            - **Zero Stock Android UI + 4 Clean Dedicated Stages**: Custom XyVerse Boot Splash Screen -> Separate Isolated 3D Garage/Workshop Lobby -> Full-Screen `"MENYIAPKAN DUNIA"` Loading Screen -> Uncluttered Gameplay HUD + Custom In-Game **`PENGATURAN`** Modal (`30 / 60 / 90 / 120 FPS`, `PreferredDisplayModeId`, Render Scale, Shadow Quality, Clouds, VFX, Audio).
           files: |
+            dist-apk/NyawitLive-v4.0.0-universal.apk
             dist-apk/NyawitLive-v3.0.0-universal.apk
-            dist-apk/NyawitLive-v2.0.0-universal.apk
             dist-apk/SHA256SUMS.txt
