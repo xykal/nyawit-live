@@ -10,10 +10,18 @@ using NyawitEngine.Assets;
 using NyawitEngine.Core;
 using NyawitEngine.Math;
 using NyawitEngine.Network;
+using NyawitEngine.Physics;
 using NyawitEngine.World;
 using EGLConfig = Javax.Microedition.Khronos.Egl.EGLConfig;
 
 namespace Nyawit.AndroidClient.Rendering;
+
+public enum AppSceneStage : byte
+{
+    Lobby = 0,
+    PreparingWorld = 1,
+    Gameplay = 2,
+}
 
 public sealed class GpuMeshHandle
 {
@@ -28,17 +36,16 @@ public struct ProjectedLabel
     public string SubTitle;
     public string BubbleText;
     public bool IsSelf;
+    public bool IsSpeaking;
 }
 
 /// <summary>
-/// NyawitEngine v2.0 Next-Gen OpenGL ES 3.0 Hardware-Instanced PBR-Inspired Renderer.
-/// Features:
-///   - Atmospheric tropical sky gradient dome + glowing solar halo
-///   - 1-draw-call hardware-instanced soft ground canopy &amp; contact shadows
-///   - Screen-space derivative (dFdx/dFdy) procedural HD micro-normal detail on terrain, roads &amp; wet mud
-///   - Animated specular canal water ripples + Fresnel sky reflections
-///   - Palm frond Subsurface Scattering (SSS) + baked 12-ray Ambient Occlusion + HDR emissive LEDs + ACES tone mapping
-///   - Dynamic hardware resolution scaling + SIMD multi-LOD culling (~25 draw calls/frame, zero GC churn!)
+/// NyawitEngine v3.0 Watertight OpenGL ES 3.0 Hardware-Instanced PBR Renderer &amp; Full RigidBody Integrator:
+///   - Zero mesh holes ("0% bolong-bolong"): GL_CULL_FACE disabled + gl_FrontFacing normal orientation + watertight NPAK v3.0
+///   - 3D Main Lobby Showcase Stage + "MENYIAPKAN DUNIA..." Loading Stage + Live Multiplayer Plantation World
+///   - Full 11-Part Articulated Human Anatomy Rig (Head/Face/Eyes/Hair + Torso/Belt + UpperArm + Forearm/5-Finger Hand + Thigh + Calf/Boot)
+///   - Full Action &amp; Hold Animations: Two-Hand Egrek Grip &amp; Slash, Knee-Squat Ground Pickup, Two-Hand TBS Chest Hold, Parabolic Throw, Angkong Push, Seated Steering
+///   - 4-Wheel Spring-Damper Vehicle Suspension + Steered Front Wheels + Rolling Tires + Chassis Pitch/Roll ("Canter Oleng")
 /// </summary>
 public sealed class Gles3InstancedRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
 {
@@ -183,18 +190,17 @@ float vnoise(vec2 p) {
 }
 
 void main() {
-    vec3 N = normalize(vNormal);
+    // True double-sided surface shading guarantee: backfaces orient cleanly toward camera!
+    vec3 N = normalize(vNormal) * (gl_FrontFacing ? 1.0 : -1.0);
     vec3 L = normalize(uSunDir);
     vec3 V = normalize(uCamPos - vWorldPos);
     float dist = length(uCamPos - vWorldPos);
 
     vec3 effTint = mix(vec3(1.0), vTint, step(0.75, vUV.x));
-    // True Physically-Based Linear-Space Albedo Workflow (decodes sRGB vertex colors -> deep saturated colors & rich shadows!)
     vec3 base = pow(max(vColor.rgb, vec3(0.001)), vec3(2.15)) * pow(max(effTint, vec3(0.001)), vec3(1.6));
     float ao = mix(0.22, 1.0, vColor.a);
     float gloss = vUV.y;
 
-    // 1. HD Procedural Micro-Normal Detail within 38m around camera (0 ALU cost on distant horizon!)
     if (vUV.y < 0.12 && dist < 38.0 && uDetailStrength > 0.01) {
         float fade = uDetailStrength * (1.0 - smoothstep(14.0, 38.0, dist));
         float n1 = vnoise(vWorldPos.xz * 2.6);
@@ -207,7 +213,6 @@ void main() {
         gloss = mix(0.14, 0.80, clamp(vUV.x * 1.35 * n1, 0.0, 1.0));
     }
 
-    // 2. Animated Rippling Tropical Canal Water with Sky Fresnel & Sun Glints!
     if (vUV.y > 0.895 && vUV.y < 0.915) {
         float w1 = sin(vWorldPos.x * 1.35 + uTime * 2.2 + sin(vWorldPos.z * 1.8) * 0.8);
         float w2 = cos(vWorldPos.z * 2.65 - uTime * 1.7 + vWorldPos.x * 0.7);
@@ -219,7 +224,6 @@ void main() {
         gloss = 0.92;
     }
 
-    // 3. HDR Emissive Self-Illuminated Materials (LED Headlights, Taillights, RAM Sign, Crown Gems, Floodlights!)
     if (gloss >= 0.94) {
         vec3 hdrEm = base * 3.2;
         float fogEm = smoothstep(52.0, 190.0, dist) * 0.75;
@@ -234,11 +238,9 @@ void main() {
     float wrapNdl = max(dot(N, L) * 0.65 + 0.35, 0.0);
     vec3 hemi = mix(uGroundBounce, uSkyTop, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
 
-    // Subsurface Scattering (SSS) through lush green tropical palm fronds when backlit by sun!
     float isFoliage = step(0.55, gloss) * (1.0 - step(0.68, gloss));
     float sss = isFoliage * pow(clamp(dot(-V, L) * 0.5 + 0.5, 0.0, 1.0), 2.6) * 0.65;
 
-    // Dual-lobe specular + subtle grazing Fresnel rim light
     float shininess = mix(16.0, 110.0, clamp(gloss, 0.0, 1.0));
     float specStrength = mix(0.05, 0.95, clamp(gloss, 0.0, 1.0)) * ao;
     float spec = pow(max(dot(N, H), 0.0), shininess) * specStrength;
@@ -248,11 +250,9 @@ void main() {
              + uSunColor * spec * 0.45
              + uSkyTop * rim;
 
-    // Zero milky haze close to camera (< 48m is 100% razor-clear!), smooth atmospheric perspective near horizon!
     float fogAmt = smoothstep(48.0, 195.0, dist) * (0.82 + uFogDensity * 12.0);
     vec3 hdr = mix(lit, uFogColor, clamp(fogAmt, 0.0, 0.88));
 
-    // ACES Filmic Tone Mapping + True sRGB Gamma Encode (1/2.2)
     vec3 mapped = (hdr * (2.51 * hdr + 0.03)) / (hdr * (2.43 * hdr + 0.59) + 0.14);
     fragColor = vec4(pow(clamp(mapped, 0.0, 1.0), vec3(0.4545)), 1.0);
 }";
@@ -264,8 +264,15 @@ void main() {
     private readonly List<StaticPropInstance> _ferns = [];
     private readonly List<StaticPropInstance> _rocks = [];
 
+    public RigidBodyWorld Physics { get; } = null!;
     public QualityGovernor Quality { get; } = new();
+    public AppSceneStage Stage { get; private set; } = AppSceneStage.Lobby;
+    public float WorldPrepProgress { get; private set; }
+    public string WorldPrepStatus { get; private set; } = "MENYIAPKAN DUNIA...";
+    public float LobbyAvatarSpinOffset { get; set; }
+
     public event Action<float>? OnRenderScaleChanged;
+    public event Action? OnWorldReady;
 
     private readonly Dictionary<string, GpuMeshHandle[]> _gpuMeshes = new(StringComparer.Ordinal);
     private GpuMeshHandle? _terrainGpu;
@@ -276,6 +283,7 @@ void main() {
     private int _program;
     private int _instanceVbo;
     private int _uVp, _uTime, _uSunDir, _uSunColor, _uSkyTop, _uGroundBounce, _uFogColor, _uCamPos, _uFogDensity, _uDetailStrength;
+    private bool _gpuReady;
 
     private const int MaxInstancesPerBatch = 1024;
     private readonly float[] _instStaging = new float[MaxInstancesPerBatch * 16];
@@ -287,19 +295,22 @@ void main() {
     private readonly sbyte[] _treeLodResult = [];
     private FloatBuffer? _directFloatBuffer;
 
-    private readonly FallingTbs[] _fallingPool = new FallingTbs[40];
-    private int _fallingCursor;
-
-    public float PlayerX = (Random.Shared.NextSingle() - 0.5f) * 9.0f;
-    public float PlayerY = 0f;
-    public float PlayerZ = 3.0f + Random.Shared.NextSingle() * 4.5f;
-    public float PlayerYaw = MathF.PI, PlayerSpeed = 0f;
     public bool InTruck;
-    public float WalkPhase, ChopAnim, BoostTimer;
+    public float BoostTimer;
     public float JoyX, JoyY;
-    public float CamYaw = 0.35f, CamPitch = 0.34f, CamDist = 8.8f;
+    public float CamYaw = 0.25f, CamPitch = 0.30f, CamDist = 7.8f;
+    public bool LockShowcaseCam;
     public int NearestRipeTreeId = -1;
     public bool NearRamWeighbridge;
+    public int NearbyGroundFruitCount;
+    public bool CanLoadIntoVehicleOrCart;
+    public int NearbyAngkongId = -1;
+    public bool LocalMicSpeaking;
+
+    public float PlayerX => Physics.Player.X;
+    public float PlayerY => Physics.Player.Y;
+    public float PlayerZ => Physics.Player.Z;
+
     public int LastDrawCalls { get; private set; }
     public int LastTriangles { get; private set; }
     public int SurfaceWidth => _surfaceWidth;
@@ -323,7 +334,6 @@ void main() {
     public readonly List<ProjectedLabel> ProjectedLabels = new(24);
     public readonly List<(float X, float Z, bool InTruck)> MinimapPeers = new(24);
 
-    // Explicit JNI peer rehydration constructor required by Android / Mono GC across config changes
     public Gles3InstancedRenderer(IntPtr javaReference, JniHandleOwnership transfer)
         : base(javaReference, transfer)
     {
@@ -342,6 +352,7 @@ void main() {
         var (ferns, rocks) = PlantationWorld.GenerateScatterProps();
         _ferns = ferns;
         _rocks = rocks;
+        Physics = new RigidBodyWorld(trees, rocks);
 
         _treePositionsXyz = new float[_trees.Count * 3];
         _treeLodResult = new sbyte[_trees.Count];
@@ -352,10 +363,33 @@ void main() {
             _treePositionsXyz[i * 3 + 2] = _trees[i].Z;
         }
 
-        _net.OnHarvestSpawnFruit += SpawnFallingFruits;
+        _net.OnHarvestSpawnFruit += (tx, tz, isGold) =>
+        {
+            if (InTruck) Physics.LaunchDirectTreeToTruckArc(tx, tz, isGold);
+            else Physics.SpawnHarvestedGroundFruit(tx, tz, isGold);
+        };
+        Physics.OnCargoLandedInVehicle += (units, isGold) =>
+        {
+            _net.SendLoadTbs(units, isGold ? 1 : 0);
+        };
     }
 
     public List<PalmTreeNode> Trees => _trees;
+
+    public void BeginWorldPreparation()
+    {
+        if (Stage == AppSceneStage.PreparingWorld) return;
+        WorldPrepProgress = 0.02f;
+        WorldPrepStatus = "MEMBANGUN TOPOGRAFI KEBUN SAWIT & PARIT...";
+        Stage = AppSceneStage.PreparingWorld;
+    }
+
+    public void ReturnToLobby()
+    {
+        InTruck = false;
+        JoyX = JoyY = 0f;
+        Stage = AppSceneStage.Lobby;
+    }
 
     public void RequestPresetChange(GraphicsPreset preset)
     {
@@ -373,27 +407,33 @@ void main() {
         }
     }
 
-    public void SpawnFallingFruits(float tx, float tz, bool isGold)
+    public void ToggleVehicleEnterExit()
     {
-        float gy = PlantationWorld.TerrainHeight(tx, tz);
-        int count = isGold ? 3 : 2;
-        for (int i = 0; i < count; i++)
+        if (!InTruck)
         {
-            float ang = i * 2.1f + (float)_lastTimeSec;
-            _fallingPool[_fallingCursor % _fallingPool.Length] = new FallingTbs
+            // Bring Canter close in front/beside player if parked far away, or climb straight in!
+            if (!Physics.IsNearMainTruck(9.5f))
             {
-                Active = true,
-                X = tx + MathF.Cos(ang) * 0.85f,
-                Y = gy + 4.9f,
-                Z = tz + MathF.Sin(ang) * 0.85f,
-                Vx = MathF.Cos(ang) * 1.45f,
-                Vy = 1.6f,
-                Vz = MathF.Sin(ang) * 1.45f,
-                GroundY = gy + 0.34f,
-                Life = 3.2f,
-                IsGold = isGold
-            };
-            _fallingCursor++;
+                float sx = PlayerX + MathF.Sin(Physics.Player.Yaw) * 3.6f;
+                float sz = PlayerZ + MathF.Cos(Physics.Player.Yaw) * 3.6f;
+                Physics.SolveSolidCircleCollision(ref sx, ref sz, 1.15f, skipVehicle: Physics.MainTruck);
+                Physics.MainTruck.X = sx;
+                Physics.MainTruck.Z = sz;
+                Physics.MainTruck.Yaw = Physics.Player.Yaw;
+            }
+            InTruck = true;
+            Physics.MainTruck.TriggerCargoDropImpulse(0.45f);
+        }
+        else
+        {
+            InTruck = false;
+            float exitX = Physics.MainTruck.X - MathF.Cos(Physics.MainTruck.Yaw) * 1.95f;
+            float exitZ = Physics.MainTruck.Z + MathF.Sin(Physics.MainTruck.Yaw) * 1.95f;
+            Physics.SolveSolidCircleCollision(ref exitX, ref exitZ, 0.45f);
+            Physics.Player.X = exitX;
+            Physics.Player.Z = exitZ;
+            Physics.Player.Y = RigidBodyWorld.SurfaceHeightWithStructures(exitX, exitZ);
+            Physics.Player.VelX = Physics.Player.VelZ = 0f;
         }
     }
 
@@ -451,8 +491,9 @@ void main() {
         _shadowGpu = UploadMeshToGpu(PlantationWorld.BuildSoftShadowDiscMesh(16));
 
         GLES30.GlEnable(GLES30.GlDepthTest);
-        GLES30.GlEnable(0x0B44); // GL_CULL_FACE
-        GLES30.GlCullFace(0x0405); // GL_BACK
+        // Disable backface culling so no open botanical/fabric or mirrored surface ever renders hollow!
+        GLES30.GlDisable(0x0B44);
+        _gpuReady = true;
         _lastTimeSec = _clock.Elapsed.TotalSeconds;
     }
 
@@ -475,59 +516,73 @@ void main() {
         if (Quality.RecordFrame(dt))
             EnsureRenderScaleSynced();
 
-        StepGameplayPhysics(dt, now);
+        if (Stage == AppSceneStage.PreparingWorld)
+        {
+            StepWorldPreparation(dt);
+        }
+        else if (Stage == AppSceneStage.Gameplay)
+        {
+            StepGameplayPhysics(dt, now);
+        }
+        else
+        {
+            Physics.Player.IdleBreathPhase += dt * 2.2f;
+        }
+
         Render3DWorld((float)now, dt);
+    }
+
+    private void StepWorldPreparation(float dt)
+    {
+        if (!_gpuReady) return;
+        WorldPrepProgress = System.Math.Min(1.0f, WorldPrepProgress + dt * 0.42f);
+
+        if (WorldPrepProgress < 0.25f)
+            WorldPrepStatus = "MEMBANGUN TOPOGRAFI KEBUN SAWIT & PARIT...";
+        else if (WorldPrepProgress < 0.52f)
+            WorldPrepStatus = $"MEMUAT FISIKA RIGIDBODY & {Physics.StaticColliders.Count} COLLIDER SOLID...";
+        else if (WorldPrepProgress < 0.78f)
+            WorldPrepStatus = "MENYIAPKAN SUSPENSI 4 RODA TRUK CANTER & ANGKONG...";
+        else if (WorldPrepProgress < 0.96f)
+            WorldPrepStatus = $"SINKRONISASI SERVER LIVE ({_net?.CurrentRoomId.ToUpperInvariant()})...";
+        else
+            WorldPrepStatus = "DUNIA SIAP - SELAMAT MEMANEN!";
+
+        Physics.StepWorld(dt, inTruck: false, inputSide: 0f, inputForward: 0f, camYaw: CamYaw, boars: _boarsSnap);
+
+        if (WorldPrepProgress >= 1.0f)
+        {
+            Stage = AppSceneStage.Gameplay;
+            OnWorldReady?.Invoke();
+        }
     }
 
     private void StepGameplayPhysics(float dt, double now)
     {
         if (_net == null) return;
-        float mud = PlantationWorld.MudFactor(PlayerX, PlayerZ);
-        float road = PlantationWorld.RoadFactor(PlayerX, PlayerZ);
-        float boostMul = BoostTimer > 0f ? 1.55f : 1.0f;
         if (BoostTimer > 0f) BoostTimer -= dt;
+        float boostScale = BoostTimer > 0f ? 1.38f : 1.0f;
 
-        float baseSpeed = InTruck ? (14.6f + road * 4.4f - mud * 4.6f) : (7.5f - mud * 1.6f);
-        float maxSpeed = baseSpeed * boostMul;
+        Physics.StepWorld(
+            dt,
+            inTruck: InTruck,
+            inputSide: JoyX,
+            inputForward: (-JoyY) * boostScale,
+            camYaw: CamYaw,
+            boars: _boarsSnap);
 
-        float jMag = MathF.Sqrt(JoyX * JoyX + JoyY * JoyY);
-        if (jMag > 0.05f)
+        // Smooth camera follow behind Canter when driving!
+        if (!LockShowcaseCam && InTruck && MathF.Abs(Physics.MainTruck.SpeedMs) > 0.6f)
         {
-            float nx = JoyX / System.Math.Max(1f, jMag);
-            float ny = JoyY / System.Math.Max(1f, jMag);
-            float fwdX = -MathF.Sin(CamYaw), fwdZ = -MathF.Cos(CamYaw);
-            float rgtX = MathF.Cos(CamYaw), rgtZ = -MathF.Sin(CamYaw);
-            float wx = rgtX * nx + fwdX * (-ny);
-            float wz = rgtZ * nx + fwdZ * (-ny);
-            float targetYaw = MathF.Atan2(wx, wz);
-            float diff = targetYaw - PlayerYaw;
+            float desiredCamYaw = Physics.MainTruck.Yaw + MathF.PI;
+            float diff = desiredCamYaw - CamYaw;
             while (diff > MathF.PI) diff -= MathF.PI * 2f;
             while (diff < -MathF.PI) diff += MathF.PI * 2f;
-            PlayerYaw += diff * System.Math.Min(1f, dt * (InTruck ? 5.6f : 12.0f));
-            PlayerSpeed = System.Math.Min(maxSpeed, PlayerSpeed + dt * 26f) * System.Math.Min(1f, jMag);
-            WalkPhase += dt * (InTruck ? 14f : 10.5f);
-        }
-        else
-        {
-            PlayerSpeed = System.Math.Max(0f, PlayerSpeed - dt * 24f);
+            CamYaw += diff * MathF.Min(1f, dt * 3.1f);
         }
 
-        if (PlayerSpeed > 0.02f)
-        {
-            float nx = System.Math.Clamp(PlayerX + MathF.Sin(PlayerYaw) * PlayerSpeed * dt, -96f, 96f);
-            float nz = System.Math.Clamp(PlayerZ + MathF.Cos(PlayerYaw) * PlayerSpeed * dt, -96f, 96f);
-            bool onBridge = MathF.Abs(nx + 28f) < 2.2f || MathF.Abs(nx - 28f) < 2.2f;
-            if (MathF.Abs(nz - PlantationWorld.CanalZ) < 3.6f && !onBridge)
-            {
-                nz = PlayerZ < PlantationWorld.CanalZ ? PlantationWorld.CanalZ - 3.65f : PlantationWorld.CanalZ + 3.65f;
-            }
-            PlayerX = nx;
-            PlayerZ = nz;
-        }
-        PlayerY = PlantationWorld.SurfaceHeight(PlayerX, PlayerZ);
-        if (ChopAnim > 0f) ChopAnim = System.Math.Max(0f, ChopAnim - dt * 2.8f);
-
-        float bestD2 = 38.5f;
+        // Nearest ripe tree within harvest reach
+        float bestD2 = InTruck ? 56.0f : 38.5f;
         int bestId = -1;
         for (int i = 0; i < _trees.Count; i++)
         {
@@ -539,34 +594,28 @@ void main() {
         }
         NearestRipeTreeId = bestId;
 
-        float rdx = PlayerX - PlantationWorld.RamX, rdz = PlayerZ - PlantationWorld.RamZ;
-        NearRamWeighbridge = _net.LocalCargo > 0 && MathF.Sqrt(rdx * rdx + rdz * rdz) < 11.5f;
+        NearbyGroundFruitCount = InTruck ? 0 : Physics.CountNearbyGroundFruits(3.8f);
+        NearbyAngkongId = InTruck ? -1 : Physics.FindNearbyAngkong(3.2f);
+        CanLoadIntoVehicleOrCart = !InTruck && (
+            (Physics.Player.HasHeldTbs && (Physics.IsNearMainTruck(5.6f) || NearbyAngkongId >= 0)) ||
+            (Physics.IsNearMainTruck(5.6f) && NearbyAngkongId >= 0 && Physics.Angkongs[NearbyAngkongId].CargoUnits > 0));
 
-        for (int i = 0; i < _fallingPool.Length; i++)
-        {
-            if (!_fallingPool[i].Active) continue;
-            ref var f = ref _fallingPool[i];
-            f.Vy -= 15.5f * dt;
-            f.X += f.Vx * dt;
-            f.Y += f.Vy * dt;
-            f.Z += f.Vz * dt;
-            f.Rot += 5.5f * dt;
-            if (f.Y < f.GroundY)
-            {
-                f.Y = f.GroundY;
-                f.Vy = MathF.Abs(f.Vy) * 0.34f;
-                f.Vx *= 0.6f;
-                f.Vz *= 0.6f;
-            }
-            f.Life -= dt;
-            if (f.Life <= 0f) f.Active = false;
-        }
+        int totalSellableCargo = _net.LocalCargo
+            + Physics.Player.HeldTbsUnits
+            + (NearbyAngkongId >= 0 ? Physics.Angkongs[NearbyAngkongId].CargoUnits : 0);
+        float rdx = PlayerX - PlantationWorld.RamX, rdz = PlayerZ - PlantationWorld.RamZ;
+        NearRamWeighbridge = totalSellableCargo > 0 && MathF.Sqrt(rdx * rdx + rdz * rdz) < 11.5f;
 
         if (now >= _nextNetSyncSec)
         {
             _nextNetSyncSec = now + 0.085;
-            int anim = ChopAnim > 0.1f ? 2 : (PlayerSpeed > 0.4f ? 1 : 0);
-            _net.SendPlayerState(PlayerX, PlayerY, PlayerZ, PlayerYaw, anim, InTruck);
+            int anim = Physics.Player.SlashTimer > 0.05f ? 2 : (Physics.Player.MoveSpeedMs > 0.4f ? 1 : 0);
+            _net.SendPlayerState(
+                PlayerX, PlayerY, PlayerZ, Physics.Player.Yaw,
+                anim, InTruck,
+                carryingTbs: Physics.Player.HasHeldTbs,
+                pushingAngkong: Physics.Player.ActiveAngkongIndex >= 0,
+                steerAngle: InTruck ? Physics.MainTruck.SteerAngle : 0f);
         }
     }
 
@@ -582,20 +631,60 @@ void main() {
         GLES30.GlClearColor(0.24f, 0.56f, 0.86f, 1.0f);
         GLES30.GlClear(GLES30.GlColorBufferBit | GLES30.GlDepthBufferBit);
 
-        float dist = InTruck ? CamDist * 1.28f : CamDist;
-        float eyeX = PlayerX + MathF.Sin(CamYaw) * MathF.Cos(CamPitch) * dist;
-        float eyeZ = PlayerZ + MathF.Cos(CamYaw) * MathF.Cos(CamPitch) * dist;
-        float eyeY = System.Math.Max(PlantationWorld.TerrainHeight(eyeX, eyeZ) + 1.25f, PlayerY + 1.9f + MathF.Sin(CamPitch) * dist);
-        float lookY = PlayerY + (InTruck ? 1.85f : 1.55f);
+        float eyeX, eyeY, eyeZ, lookX, lookY, lookZ, fovDeg;
+        if (Stage == AppSceneStage.Lobby)
+        {
+            // Heroic 3D Main Lobby Showroom Stage: close-up full-body view of Avatar + Canter Truck + PKS backdrop!
+            float gy = RigidBodyWorld.SurfaceHeightWithStructures(8.0f, 6.0f);
+            lookX = 8.35f;
+            lookY = gy + 1.18f;
+            lookZ = 5.45f;
+            float orbit = MathF.Sin(now * 0.42f) * 0.14f;
+            eyeX = 8.0f + MathF.Sin(orbit) * 3.55f;
+            eyeY = gy + 1.56f;
+            eyeZ = 6.0f + MathF.Cos(orbit) * 3.55f;
+            fovDeg = 46f;
+        }
+        else if (Stage == AppSceneStage.PreparingWorld)
+        {
+            // Cinematic sweeping fly-in camera descending smoothly from panoramic aerial view straight to shoulder!
+            float t = WorldPrepProgress;
+            float ease = t * t * (3f - 2f * t);
+            float dist = (1f - ease) * 34f + ease * CamDist;
+            float pitch = (1f - ease) * 0.72f + ease * CamPitch;
+            float yaw = CamYaw + (1f - ease) * 1.15f;
+            eyeX = PlayerX + MathF.Sin(yaw) * MathF.Cos(pitch) * dist;
+            eyeZ = PlayerZ + MathF.Cos(yaw) * MathF.Cos(pitch) * dist;
+            eyeY = System.Math.Max(PlantationWorld.TerrainHeight(eyeX, eyeZ) + 1.25f, PlayerY + 1.65f + MathF.Sin(pitch) * dist);
+            lookX = PlayerX;
+            lookY = PlayerY + 1.45f;
+            lookZ = PlayerZ;
+            fovDeg = 55f;
+        }
+        else
+        {
+            if (LockShowcaseCam && InTruck)
+                CamYaw = Physics.MainTruck.Yaw + 0.68f;
 
-        Mat4Utils.CreatePerspective(_proj, 58f * MathF.PI / 180f, _surfaceWidth / (float)_surfaceHeight, 0.35f, 260f);
-        Mat4Utils.CreateLookAt(_view, eyeX, eyeY, eyeZ, PlayerX, lookY, PlayerZ);
+            float dist = InTruck ? (LockShowcaseCam ? CamDist : CamDist * 1.22f) : CamDist;
+            eyeX = PlayerX + MathF.Sin(CamYaw) * MathF.Cos(CamPitch) * dist;
+            eyeZ = PlayerZ + MathF.Cos(CamYaw) * MathF.Cos(CamPitch) * dist;
+            float baseEyeH = LockShowcaseCam ? (InTruck ? 1.05f : 1.16f) : 1.62f;
+            eyeY = System.Math.Max(PlantationWorld.TerrainHeight(eyeX, eyeZ) + (LockShowcaseCam ? 0.85f : 1.25f), PlayerY + baseEyeH + MathF.Sin(CamPitch) * dist);
+            lookX = PlayerX;
+            lookY = PlayerY + (LockShowcaseCam ? (InTruck ? 1.18f : 1.20f) : (InTruck ? 1.68f : 1.38f));
+            lookZ = PlayerZ;
+            fovDeg = LockShowcaseCam ? 47f : 56f;
+        }
+
+        Mat4Utils.CreatePerspective(_proj, fovDeg * MathF.PI / 180f, _surfaceWidth / (float)_surfaceHeight, 0.30f, 260f);
+        Mat4Utils.CreateLookAt(_view, eyeX, eyeY, eyeZ, lookX, lookY, lookZ);
         Mat4Utils.Multiply(_vp, _proj, _view);
         InvertMatrix4(_vp, _invVp);
 
         int drawCalls = 0, tris = 0;
 
-        // Pass 0: Atmospheric Sky Gradient + Solar Halo Dome (1 ultra-fast draw call)
+        // Pass 0: Atmospheric Sky Gradient + Solar Halo Dome
         GLES30.GlDepthMask(false);
         GLES30.GlDisable(GLES30.GlDepthTest);
         GLES30.GlUseProgram(_skyProgram);
@@ -626,7 +715,7 @@ void main() {
         GLES30.GlEnable(GLES30.GlDepthTest);
         GLES30.GlDepthMask(true);
 
-        // Pass 1: Main PBR-Inspired Instanced Scene (Linear Light Space!)
+        // Pass 1: Main Double-Sided Watertight PBR Scene
         GLES30.GlUseProgram(_program);
         GLES30.GlUniformMatrix4fv(_uVp, 1, false, _vp, 0);
         GLES30.GlUniform1f(_uTime, now);
@@ -665,18 +754,24 @@ void main() {
         c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, 0, MathF.Sin(now * 1.4f) * 0.03f, 0, 0, 0, 0, 1, 1, 1);
         DrawGpuHandle(_waterGpu, _instStaging, c, ref drawCalls, ref tris);
 
-        // Snapshot network peers + run Native SIMD multi-LOD culler so we also cast soft ground shadows!
         _net.CopyRenderState(_peersSnap, _boarsSnap, _chatSnap, dt);
 
-        float fx = PlayerX - eyeX, fy = lookY - eyeY, fz = PlayerZ - eyeZ;
-        float fl = MathF.Sqrt(fx * fx + fy * fy + fz * fz);
+        float fx = lookX - eyeX, fy = lookY - eyeY, fz = lookZ - eyeZ;
+        float fl = MathF.Max(1e-4f, MathF.Sqrt(fx * fx + fy * fy + fz * fz));
         SimdCuller.SelectLodBatch(_treePositionsXyz, _trees.Count, eyeX, eyeY, eyeZ, fx / fl, fy / fl, fz / fl, q.Lod0Distance, q.Lod1Distance, q.MaxDrawDistance, _treeLodResult);
 
-        // 1.5. 1-Draw-Call Hardware-Instanced Soft Canopy & Contact Ground Shadows!
+        // 1.5. Hardware-Instanced Soft Canopy, Vehicle & Character Contact Shadows!
         int nSh = 0;
         nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, PlantationWorld.PksX, PlantationWorld.TerrainHeight(PlantationWorld.PksX, PlantationWorld.PksZ), PlantationWorld.PksZ, 0, 0, 0, 7.6f, 1f, 6.2f, 0.95f);
         nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, PlantationWorld.MandorX, PlantationWorld.TerrainHeight(PlantationWorld.MandorX, PlantationWorld.MandorZ), PlantationWorld.MandorZ, 0, 0, 0, 2.9f, 1f, 2.9f, 0.85f);
-        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, PlayerX, PlayerY, PlayerZ, 0, PlayerYaw, 0, InTruck ? 1.45f : 0.68f, 1f, InTruck ? 2.95f : 0.68f, 1.0f);
+        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.MainTruck.X, Physics.MainTruck.Y, Physics.MainTruck.Z, 0, Physics.MainTruck.Yaw, 0, 1.45f, 1f, 2.95f, 1.0f);
+        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.YardTruck.X, Physics.YardTruck.Y, Physics.YardTruck.Z, 0, Physics.YardTruck.Yaw, 0, 1.45f, 1f, 2.95f, 1.0f);
+        if (!InTruck)
+            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, PlayerX, Physics.Player.GroundedY, PlayerZ, 0, Physics.Player.Yaw, 0, 0.68f, 1f, 0.68f, 1.0f);
+
+        for (int i = 0; i < Physics.Angkongs.Length; i++)
+            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.Angkongs[i].X, Physics.Angkongs[i].Y, Physics.Angkongs[i].Z, 0, Physics.Angkongs[i].Yaw, 0, 0.68f, 1f, 0.98f, 0.88f);
+
         for (int i = 0; i < _peersSnap.Count; i++)
         {
             var p = _peersSnap[i];
@@ -707,9 +802,41 @@ void main() {
             GLES30.GlUseProgram(_program);
         }
 
-        // 2. PKS Mill, RAM Weighbridge, Bridges, Mandor Hut, Parked Wheelbarrows
-        c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, PlantationWorld.PksX, PlantationWorld.TerrainHeight(PlantationWorld.PksX, PlantationWorld.PksZ), PlantationWorld.PksZ, 0, 0, 0, 1, 1, 1);
+        // 2. Living PKS Mill + Spinning Rooftop Turbines + Billowing Boiler Steam + RAM + Bridges + Mandor Post
+        float pksGround = PlantationWorld.TerrainHeight(PlantationWorld.PksX, PlantationWorld.PksZ);
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, PlantationWorld.PksX, pksGround, PlantationWorld.PksZ, 0, 0, 0, 1, 1, 1);
         DrawNamed(MeshCatalog.PksFactory, 0, _instStaging, c, ref drawCalls, ref tris);
+
+        // Spinning industrial cyclone turbines on PKS rooftop!
+        c = 0;
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.PksX - 1.5f, pksGround + 8.35f, PlantationWorld.PksZ - 1.6f, 0, now * 5.2f, 0, 1, 1, 1);
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.PksX + 1.5f, pksGround + 8.35f, PlantationWorld.PksZ + 1.6f, 0, -now * 4.6f, 0, 1, 1, 1);
+        DrawNamed(MeshCatalog.PksFan, 0, _instStaging, c, ref drawCalls, ref tris);
+
+        // Rising billowing boiler steam clouds from twin PKS smokestacks + diesel truck exhaust!
+        c = 0;
+        for (int sp = 0; sp < 6; sp++)
+        {
+            float cycle = ((now * 0.42f + sp * 0.1666f) % 1.0f);
+            float cxChim = sp % 2 == 0 ? (PlantationWorld.PksX - 3.2f) : (PlantationWorld.PksX - 1.0f);
+            float sc = 0.85f + cycle * 2.15f;
+            c = Mat4Utils.WriteInstanceTRS(
+                _instStaging, c,
+                cxChim + cycle * 2.2f + MathF.Sin(now + sp) * 0.25f,
+                pksGround + 14.2f + cycle * 6.8f,
+                PlantationWorld.PksZ - 2.2f + cycle * 1.4f,
+                0, now * 0.6f + sp, 0, sc, sc * 0.82f, sc);
+        }
+        if (InTruck && MathF.Abs(Physics.MainTruck.SpeedMs) > 1.2f)
+        {
+            float exCycle = (now * 2.4f) % 1.0f;
+            float syT = MathF.Sin(Physics.MainTruck.Yaw), cyT = MathF.Cos(Physics.MainTruck.Yaw);
+            float exX = Physics.MainTruck.X + 0.85f * cyT + 0.86f * syT;
+            float exZ = Physics.MainTruck.Z - 0.85f * syT + 0.86f * cyT;
+            float exS = 0.22f + exCycle * 0.45f;
+            c = Mat4Utils.WriteInstanceTRS(_instStaging, c, exX, Physics.MainTruck.Y + 2.48f + exCycle * 1.15f, exZ, 0, now * 3f, 0, exS, exS, exS);
+        }
+        DrawNamed(MeshCatalog.SteamPuff, 0, _instStaging, c, ref drawCalls, ref tris);
 
         c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, PlantationWorld.RamX, PlantationWorld.TerrainHeight(PlantationWorld.RamX, PlantationWorld.RamZ), PlantationWorld.RamZ, 0, 0, 0, 1, 1, 1);
         DrawNamed(MeshCatalog.WeighbridgeRam, 0, _instStaging, c, ref drawCalls, ref tris);
@@ -722,12 +849,27 @@ void main() {
         c = Mat4Utils.WriteInstanceTRS(_instStaging, c, 28f, PlantationWorld.TerrainHeight(28f, PlantationWorld.CanalZ - 4.7f), PlantationWorld.CanalZ, 0, 0, 0, 1, 1, 1);
         DrawNamed(MeshCatalog.WoodenBridge, 0, _instStaging, c, ref drawCalls, ref tris);
 
-        c = 0;
-        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, -6.5f, PlantationWorld.TerrainHeight(-6.5f, -13f), -13f, 0, 0.8f, 0, 1, 1, 1);
-        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, 7.2f, PlantationWorld.TerrainHeight(7.2f, -12.5f), -12.5f, 0, -1.1f, 0, 1, 1, 1);
-        DrawNamed(MeshCatalog.AngkongCart, 0, _instStaging, c, ref drawCalls, ref tris);
+        // 2.5. Physical Angkong Wheelbarrows + Independent Spinning Wheels!
+        int nCart = 0, nCartWheel = 0, nCartExtraFruit = 0;
+        for (int i = 0; i < Physics.Angkongs.Length; i++)
+        {
+            var ak = Physics.Angkongs[i];
+            var cartMat = Mat4Utils.BoneMat.TRS(ak.X, ak.Y, ak.Z, ak.PitchRad, ak.Yaw, 0f);
+            nCart = cartMat.Emit(_instStaging, nCart);
+            nCartWheel = cartMat.Child(0f, 0.29f, 0.80f, rx: ak.WheelSpinRad, sx: 0.45f, sy: 0.59f, sz: 0.59f)
+                .Emit(_goldStaging, nCartWheel);
+            if (ak.CargoUnits > 2)
+            {
+                float stackScale = 0.85f + ak.CargoUnits * 0.05f;
+                nCartExtraFruit = cartMat.Child(0f, 1.02f, 0.14f, sx: stackScale, sy: stackScale, sz: stackScale)
+                    .Emit(_fruitStaging, nCartExtraFruit, ak.GoldUnits > 0 ? 2.2f : 1f, ak.GoldUnits > 0 ? 1.7f : 1f, ak.GoldUnits > 0 ? 0.5f : 1f);
+            }
+        }
+        DrawNamed(MeshCatalog.AngkongCart, 0, _instStaging, nCart, ref drawCalls, ref tris);
+        DrawNamed(MeshCatalog.TruckWheel, 0, _goldStaging, nCartWheel, ref drawCalls, ref tris);
+        if (nCartExtraFruit > 0) DrawNamed(MeshCatalog.TbsBunch, 0, _fruitStaging, nCartExtraFruit, ref drawCalls, ref tris);
 
-        // 3. Multi-LOD Oil Palms + Hanging Ripe/Gold TBS!
+        // 3. Multi-LOD Oil Palms + Swaying Crowns + Hanging Ripe/Gold TBS
         float windAmp = storm ? 2.1f : 0.85f;
         for (int tier = 0; tier < 3; tier++)
         {
@@ -736,7 +878,7 @@ void main() {
             {
                 if (_treeLodResult[i] != tier) continue;
                 var t = _trees[i];
-                float highlight = i == NearestRipeTreeId ? 1.22f : 1.0f;
+                float highlight = i == NearestRipeTreeId ? 1.24f : 1.0f;
                 float cy = MathF.Cos(t.RotationY), sy = MathF.Sin(t.RotationY);
 
                 nTrunk = Mat4Utils.WriteInstanceTRS(_treeLodStaging[0], nTrunk, t.X, t.Y - 0.12f, t.Z, 0, t.RotationY, 0, t.Scale, t.Scale, t.Scale, highlight, highlight, 1f, 0f);
@@ -769,16 +911,26 @@ void main() {
             DrawNamed(MeshCatalog.TbsBunch, tier, _fruitStaging, nBunch, ref drawCalls, ref tris);
         }
 
-        int nFall = 0;
-        for (int i = 0; i < _fallingPool.Length; i++)
+        // 3.5. Physical Ground Bouncing TBS Bunches + Parabolic Thrown TBS Projectiles!
+        int nDynFruit = 0;
+        for (int i = 0; i < Physics.GroundFruits.Length; i++)
         {
-            if (!_fallingPool[i].Active) continue;
-            ref var f = ref _fallingPool[i];
-            nFall = Mat4Utils.WriteInstanceTRS(
-                _goldStaging, nFall, f.X, f.Y, f.Z, f.Rot, f.Rot * 0.7f, 0, 1.0f, 1.0f, 1.0f,
-                f.IsGold ? 2.35f : 1f, f.IsGold ? 1.80f : 1f, f.IsGold ? 0.45f : 1f, 0f);
+            if (!Physics.GroundFruits[i].Active) continue;
+            ref var gf = ref Physics.GroundFruits[i];
+            float pulse = gf.Grounded ? (1.0f + MathF.Sin(now * 5.0f + i) * 0.05f) : 1.0f;
+            nDynFruit = Mat4Utils.WriteInstanceTRS(
+                _goldStaging, nDynFruit, gf.X, gf.Y, gf.Z, gf.RotX, gf.RotY, 0, pulse, pulse, pulse,
+                gf.IsGold ? 2.35f : 1.08f, gf.IsGold ? 1.80f : 1.05f, gf.IsGold ? 0.45f : 1.0f, 0f);
         }
-        DrawNamed(MeshCatalog.TbsBunch, 0, _goldStaging, nFall, ref drawCalls, ref tris);
+        for (int i = 0; i < Physics.ThrownArcs.Length; i++)
+        {
+            if (!Physics.ThrownArcs[i].Active) continue;
+            ref var ar = ref Physics.ThrownArcs[i];
+            nDynFruit = Mat4Utils.WriteInstanceTRS(
+                _goldStaging, nDynFruit, ar.CurX, ar.CurY, ar.CurZ, ar.SpinRad, ar.SpinRad * 0.7f, 0, 0.95f, 0.95f, 0.95f,
+                ar.IsGold ? 2.35f : 1.08f, ar.IsGold ? 1.80f : 1.05f, ar.IsGold ? 0.45f : 1.0f, 0f);
+        }
+        if (nDynFruit > 0) DrawNamed(MeshCatalog.TbsBunch, 0, _goldStaging, nDynFruit, ref drawCalls, ref tris);
 
         // 4. Undergrowth Ferns & Boulders
         if (q.DrawUndergrowthFerns)
@@ -804,52 +956,142 @@ void main() {
         }
         DrawNamed(MeshCatalog.RockBoulder, 1, _instStaging, c, ref drawCalls, ref tris);
 
-        // 5. Wild Celeng Boars + Local Player + Live Remote Players
-        c = 0;
+        // 5. Wild Celeng Boars with 4 Articulated Galloping Legs!
+        int nBoar = 0, nBoarLeg = 0;
         for (int i = 0; i < _boarsSnap.Count; i++)
         {
             var b = _boarsSnap[i];
-            c = Mat4Utils.WriteInstanceTRS(_instStaging, c, b.X, PlantationWorld.TerrainHeight(b.X, b.Z) + MathF.Abs(MathF.Sin(now * 9f + i)) * 0.08f, b.Z, 0, b.Yaw, 0, 1.05f, 1.05f, 1.05f);
+            float gallop = now * 10.5f + i * 1.9f;
+            float by = PlantationWorld.TerrainHeight(b.X, b.Z) + MathF.Abs(MathF.Sin(gallop)) * 0.08f;
+            var boarM = Mat4Utils.BoneMat.TRS(b.X, by, b.Z, rx: MathF.Sin(gallop) * 0.06f, ry: b.Yaw, sx: 1.05f, sy: 1.05f, sz: 1.05f);
+            nBoar = boarM.Emit(_instStaging, nBoar);
+            float sw = MathF.Sin(gallop) * 0.58f;
+            nBoarLeg = boarM.Child(-0.20f, 0.50f, 0.44f, rx: sw).Emit(_goldStaging, nBoarLeg);
+            nBoarLeg = boarM.Child(0.20f, 0.50f, 0.44f, rx: -sw).Emit(_goldStaging, nBoarLeg);
+            nBoarLeg = boarM.Child(-0.19f, 0.50f, -0.44f, rx: -sw).Emit(_goldStaging, nBoarLeg);
+            nBoarLeg = boarM.Child(0.19f, 0.50f, -0.44f, rx: sw).Emit(_goldStaging, nBoarLeg);
         }
-        DrawNamed(MeshCatalog.CelengBoar, 0, _instStaging, c, ref drawCalls, ref tris);
+        DrawNamed(MeshCatalog.CelengBoar, 0, _instStaging, nBoar, ref drawCalls, ref tris);
+        DrawNamed(MeshCatalog.BoarLeg, 0, _goldStaging, nBoarLeg, ref drawCalls, ref tris);
 
-        DrawCharacterOrTruck(PlayerX, PlayerY, PlayerZ, PlayerYaw, InTruck, _net.LocalCargo, WalkPhase, ChopAnim, PlayerSpeed > 0.3f, _net.Profile.Avatar, ref drawCalls, ref tris);
+        // 6. Render Both Physical Canter Trucks (Main Player Truck + Yard Canter Truck) with 4-Wheel Suspension & Steering!
+        if (Stage == AppSceneStage.Lobby)
+        {
+            // Showroom Canter parked at heroic 3/4 angle right behind avatar with front wheels steered +22 deg!
+            float tgy = RigidBodyWorld.SurfaceHeightWithStructures(9.85f, 3.85f);
+            Physics.MainTruck.X = 9.85f;
+            Physics.MainTruck.Z = 3.85f;
+            Physics.MainTruck.Y = tgy;
+            Physics.MainTruck.Yaw = -0.62f;
+            Physics.MainTruck.SteerAngle = 0.36f;
+            for (int w = 0; w < 4; w++) Physics.MainTruck.WheelWorldY[w] = tgy + 0.48f;
+        }
+        int shownCargo = System.Math.Max(_net.LocalCargo, Physics.MainTruck.VisualCargoUnits);
+        DrawCanterVehicleRig(Physics.MainTruck, _net.Profile.Avatar, shownCargo, hasDriver: InTruck && Stage == AppSceneStage.Gameplay, ref drawCalls, ref tris);
+        DrawCanterVehicleRig(Physics.YardTruck, new AvatarConfig { OutfitHex = "#E67E22" }, Physics.YardTruck.VisualCargoUnits, hasDriver: false, ref drawCalls, ref tris);
+
+        // 7. Render Local Player's Full 11-Part Detailed Anatomy Rig!
+        if (!InTruck || Stage != AppSceneStage.Gameplay)
+        {
+            float renderYaw = Stage == AppSceneStage.Lobby ? (LobbyAvatarSpinOffset + MathF.Sin(now * 0.7f) * 0.06f) : Physics.Player.Yaw;
+            float px = Stage == AppSceneStage.Lobby ? 7.65f : PlayerX;
+            float pz = Stage == AppSceneStage.Lobby ? 6.15f : PlayerZ;
+            float py = Stage == AppSceneStage.Lobby ? RigidBodyWorld.SurfaceHeightWithStructures(px, pz) : PlayerY;
+
+            DrawDetailedHumanRig(
+                px, py, pz, renderYaw,
+                walkPhase: Stage == AppSceneStage.Lobby ? 0f : Physics.Player.WalkCycleRad,
+                breathPhase: Physics.Player.IdleBreathPhase,
+                moving: Stage == AppSceneStage.Gameplay && Physics.Player.MoveSpeedMs > 0.2f,
+                stance: Stage == AppSceneStage.Lobby ? HoldStance.TwoHandTool : Physics.Player.Stance,
+                slashTimer: Physics.Player.SlashTimer,
+                pickupTimer: Physics.Player.PickupTimer,
+                throwTimer: Physics.Player.ThrowTimer,
+                heldGold: Physics.Player.HeldGoldUnits > 0,
+                av: _net.Profile.Avatar,
+                ref drawCalls, ref tris);
+        }
+
+        // 8. Render Live Remote Multiplayer Peers (Full 11-Part Anatomy or Canter Rig!)
         for (int i = 0; i < _peersSnap.Count; i++)
         {
             var p = _peersSnap[i];
-            DrawCharacterOrTruck(p.RenderX, p.RenderY, p.RenderZ, p.RenderYaw, p.InTruck, p.Cargo, p.WalkPhase, p.AnimState == 2 ? 0.8f : 0f, p.AnimState == 1, p.Avatar, ref drawCalls, ref tris);
+            if (p.InTruck)
+            {
+                var remoteTruck = new VehicleRigidBody
+                {
+                    X = p.RenderX,
+                    Y = p.RenderY,
+                    Z = p.RenderZ,
+                    Yaw = p.RenderYaw,
+                    SteerAngle = p.SteerAngle,
+                    WheelSpinRad = p.WalkPhase,
+                    RollRad = p.AnimState == 1 ? MathF.Sin(p.WalkPhase * 0.45f) * 0.05f : 0f,
+                };
+                for (int w = 0; w < 4; w++) remoteTruck.WheelWorldY[w] = p.RenderY + 0.48f;
+                DrawCanterVehicleRig(remoteTruck, p.Avatar, p.Cargo, hasDriver: true, ref drawCalls, ref tris);
+            }
+            else
+            {
+                var peerStance = p.PushingAngkong ? HoldStance.PushingAngkong : (p.CarryingTbs ? HoldStance.CarryingTbs : HoldStance.TwoHandTool);
+                DrawDetailedHumanRig(
+                    p.RenderX, p.RenderY, p.RenderZ, p.RenderYaw,
+                    walkPhase: p.WalkPhase,
+                    breathPhase: now * 2.1f + i,
+                    moving: p.AnimState == 1,
+                    stance: peerStance,
+                    slashTimer: p.AnimState == 2 ? 0.25f : 0f,
+                    pickupTimer: 0f,
+                    throwTimer: 0f,
+                    heldGold: false,
+                    av: p.Avatar,
+                    ref drawCalls, ref tris);
+            }
         }
 
         LastDrawCalls = drawCalls;
         LastTriangles = tris;
 
-        // Publish 2D normalized screen projections [0..1] so HUD stays aligned regardless of dynamic render scale!
+        // Publish normalized screen projections for Gameplay Nameplates & Voice Waves
         lock (HudLock)
         {
             ProjectedLabels.Clear();
             MinimapPeers.Clear();
 
-            string myBubble = FindLatestBubble(_net.Profile.Id, now);
-            if (Mat4Utils.ProjectWorldToScreen(_vp, PlayerX, PlayerY + (InTruck ? 2.85f : 2.35f), PlayerZ, 1f, 1f, out float sx, out float sy))
+            if (Stage == AppSceneStage.Gameplay)
             {
-                ProjectedLabels.Add(new ProjectedLabel { ScreenX = sx, ScreenY = sy, Name = _net.Profile.Name, SubTitle = _net.Profile.Avatar.Title, BubbleText = myBubble, IsSelf = true });
-            }
-
-            for (int i = 0; i < _peersSnap.Count; i++)
-            {
-                var p = _peersSnap[i];
-                MinimapPeers.Add((p.RenderX, p.RenderZ, p.InTruck));
-                if (Mat4Utils.ProjectWorldToScreen(_vp, p.RenderX, p.RenderY + (p.InTruck ? 2.85f : 2.35f), p.RenderZ, 1f, 1f, out float px, out float py))
+                string myBubble = FindLatestBubble(_net.Profile.Id, now);
+                if (Mat4Utils.ProjectWorldToScreen(_vp, PlayerX, PlayerY + (InTruck ? 2.85f : 2.18f), PlayerZ, 1f, 1f, out float sx, out float sy))
                 {
                     ProjectedLabels.Add(new ProjectedLabel
                     {
-                        ScreenX = px,
-                        ScreenY = py,
-                        Name = p.Name,
-                        SubTitle = p.Avatar.Title,
-                        BubbleText = FindLatestBubble(p.Id, now),
-                        IsSelf = false
+                        ScreenX = sx,
+                        ScreenY = sy,
+                        Name = _net.Profile.Name,
+                        SubTitle = _net.Profile.Avatar.Title,
+                        BubbleText = myBubble,
+                        IsSelf = true,
+                        IsSpeaking = LocalMicSpeaking,
                     });
+                }
+
+                for (int i = 0; i < _peersSnap.Count; i++)
+                {
+                    var p = _peersSnap[i];
+                    MinimapPeers.Add((p.RenderX, p.RenderZ, p.InTruck));
+                    if (Mat4Utils.ProjectWorldToScreen(_vp, p.RenderX, p.RenderY + (p.InTruck ? 2.85f : 2.18f), p.RenderZ, 1f, 1f, out float px, out float py))
+                    {
+                        ProjectedLabels.Add(new ProjectedLabel
+                        {
+                            ScreenX = px,
+                            ScreenY = py,
+                            Name = p.Name,
+                            SubTitle = p.Avatar.Title,
+                            BubbleText = FindLatestBubble(p.Id, now),
+                            IsSelf = false,
+                            IsSpeaking = p.SpeakingNow,
+                        });
+                    }
                 }
             }
         }
@@ -865,85 +1107,244 @@ void main() {
         return "";
     }
 
-    private void DrawCharacterOrTruck(
-        float x, float y, float z, float yaw,
-        bool inTruck, int cargo, float walkPhase, float chopAnim, bool moving,
+    /// <summary>
+    /// Renders Mitsubishi Canter 'Oleng Sawit HD' with:
+    ///   - Chassis Pitch + Roll ("Canter Oleng") + Heave
+    ///   - 4 Independent Spring-Damper Suspension Wheels
+    ///   - Front-Wheel Steering Turn Angle (ry = Yaw + SteerAngle) + Rolling Tire Spin (rx = WheelSpinRad)
+    ///   - Seated Visible Driver inside Cab turning with SteerAngle!
+    /// </summary>
+    private void DrawCanterVehicleRig(
+        VehicleRigidBody v,
         AvatarConfig av,
-        ref int drawCalls, ref int tris)
+        int cargoUnits,
+        bool hasDriver,
+        ref int drawCalls,
+        ref int tris)
     {
         var (cr, cg, cb) = av.GetOutfitRgb();
-        float cosY = MathF.Cos(yaw), sinY = MathF.Sin(yaw);
+        var chassis = Mat4Utils.BoneMat.TRS(v.X, v.Y, v.Z, rx: v.PitchRad, ry: v.Yaw, rz: v.RollRad);
 
-        if (inTruck)
+        int n = chassis.Emit(_instStaging, 0, cr, cg, cb);
+        DrawNamed(MeshCatalog.CanterTruckBody, 0, _instStaging, n, ref drawCalls, ref tris);
+
+        // 4 Independent Suspension + Steer + Rolling Wheels!
+        float sy = MathF.Sin(v.Yaw), cy = MathF.Cos(v.Yaw);
+        ReadOnlySpan<float> lx = [-0.88f, 0.88f, -0.88f, 0.88f];
+        ReadOnlySpan<float> lz = [1.55f, 1.55f, -1.25f, -1.25f];
+        int nw = 0;
+        for (int w = 0; w < 4; w++)
         {
-            float roll = moving ? MathF.Sin(walkPhase * 0.45f) * 0.045f : 0f;
-            int c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, x, y, z, 0, yaw, roll, 1, 1, 1, cr, cg, cb);
-            DrawNamed(MeshCatalog.CanterTruckBody, 0, _instStaging, c, ref drawCalls, ref tris);
+            float wx = v.X + lx[w] * cy + lz[w] * sy;
+            float wz = v.Z - lx[w] * sy + lz[w] * cy;
+            float wy = v.WheelWorldY[w] > 0.001f ? v.WheelWorldY[w] : (v.Y + 0.48f);
+            float wheelYaw = w < 2 ? (v.Yaw + v.SteerAngle) : v.Yaw;
+            var hub = Mat4Utils.BoneMat.TRS(wx, wy, wz, ry: wheelYaw).Child(0f, 0f, 0f, rx: v.WheelSpinRad);
+            nw = hub.Emit(_instStaging, nw);
+        }
+        DrawNamed(MeshCatalog.TruckWheel, 0, _instStaging, nw, ref drawCalls, ref tris);
 
-            c = 0;
-            (float wx, float wz)[] wheels = [(-0.90f, 1.62f), (0.90f, 1.62f), (-0.90f, -1.18f), (0.90f, -1.18f)];
-            foreach (var (ox, oz) in wheels)
-            {
-                float worldX = x + cosY * ox + sinY * oz;
-                float worldZ = z - sinY * ox + cosY * oz;
-                c = Mat4Utils.WriteInstanceTRS(_instStaging, c, worldX, y + 0.50f, worldZ, walkPhase, yaw, 0, 1, 1, 1);
-            }
-            DrawNamed(MeshCatalog.TruckWheel, 0, _instStaging, c, ref drawCalls, ref tris);
-
-            if (cargo > 0)
-            {
-                float heapScale = 0.55f + System.Math.Min(1f, cargo / 20f) * 0.50f;
-                int ch = Mat4Utils.WriteInstanceTRS(_instStaging, 0, x, y + 0.84f, z, 0, yaw, roll, heapScale, heapScale, heapScale);
-                DrawNamed(MeshCatalog.TruckCargoHeap, 0, _instStaging, ch, ref drawCalls, ref tris);
-            }
-
-            int drv = Mat4Utils.WriteInstanceTRS(_instStaging, 0, x - 0.35f * cosY + 1.55f * sinY, y + 0.92f, z + 0.35f * sinY + 1.55f * cosY, 0, yaw, 0, 0.88f, 0.88f, 0.88f, cr, cg, cb);
-            DrawNamed(MeshCatalog.CharTorsoHead, 0, _instStaging, drv, ref drawCalls, ref tris);
-            return;
+        if (cargoUnits > 0)
+        {
+            float fill = System.Math.Min(1.12f, 0.45f + cargoUnits * 0.032f);
+            int nc = chassis.Child(0f, 0.82f, 0f, sx: 0.96f, sy: fill, sz: 0.96f).Emit(_instStaging, 0);
+            DrawNamed(MeshCatalog.TruckCargoHeap, 0, _instStaging, nc, ref drawCalls, ref tris);
         }
 
-        float stride = moving ? MathF.Sin(walkPhase) * 0.55f : 0f;
-        float bob = moving ? MathF.Abs(MathF.Cos(walkPhase)) * 0.045f : 0f;
-        (float Wx, float Wy, float Wz) LocalToWorld(float lx, float ly, float lz) =>
-            (x + lx * cosY + lz * sinY, y + ly + bob, z - lx * sinY + lz * cosY);
+        if (hasDriver)
+        {
+            // Seated detailed driver inside right-hand Indonesian cab turning with steering wheel!
+            var drvTorso = chassis.Child(0.42f, 1.16f, 1.62f, sx: 0.86f, sy: 0.86f, sz: 0.86f);
+            DrawNamed(MeshCatalog.CharTorsoHead, 0, _instStaging, drvTorso.Emit(_instStaging, 0, cr, cg, cb), ref drawCalls, ref tris);
+            var drvHead = drvTorso.Child(0f, 0.56f, 0.01f, ry: v.SteerAngle * 0.55f);
+            DrawNamed(MeshCatalog.CharHead, 0, _instStaging, drvHead.Emit(_instStaging, 0), ref drawCalls, ref tris);
+            if (!string.IsNullOrEmpty(av.Hat) && av.Hat != "none")
+                DrawNamed(av.Hat, 0, _instStaging, drvHead.Child(0f, 0.255f, 0.01f).Emit(_instStaging, 0), ref drawCalls, ref tris);
 
-        var (tx, ty, tz) = LocalToWorld(0f, 0.92f, 0f);
-        int n = Mat4Utils.WriteInstanceTRS(_instStaging, 0, tx, ty, tz, 0, yaw, 0, 1, 1, 1, cr, cg, cb);
-        DrawNamed(MeshCatalog.CharTorsoHead, 0, _instStaging, n, ref drawCalls, ref tris);
+            int na = 0, nf = 0;
+            var armL = drvTorso.Child(-0.24f, 0.46f, 0.02f, rx: -0.95f + v.SteerAngle * 0.45f, rz: -0.18f);
+            var armR = drvTorso.Child(0.24f, 0.46f, 0.02f, rx: -0.95f - v.SteerAngle * 0.45f, rz: 0.18f);
+            na = armL.Emit(_instStaging, na, cr, cg, cb);
+            na = armR.Emit(_instStaging, na, cr, cg, cb);
+            nf = armL.Child(0f, -0.27f, 0.01f, rx: -0.45f).Emit(_goldStaging, nf);
+            nf = armR.Child(0f, -0.27f, 0.01f, rx: -0.45f).Emit(_goldStaging, nf);
+            DrawNamed(MeshCatalog.CharArm, 0, _instStaging, na, ref drawCalls, ref tris);
+            DrawNamed(MeshCatalog.CharForearmHand, 0, _goldStaging, nf, ref drawCalls, ref tris);
+        }
+    }
 
-        var (llx, lly, llz) = LocalToWorld(-0.11f, 0.92f, 0f);
-        var (rlx, rly, rlz) = LocalToWorld(0.11f, 0.92f, 0f);
-        int lg1 = Mat4Utils.WriteInstanceTRS(_instStaging, 0, llx, lly, llz, stride, yaw, 0, 1, 1, 1);
-        DrawNamed(MeshCatalog.CharLeg, 0, _instStaging, lg1, ref drawCalls, ref tris);
-        int lg2 = Mat4Utils.WriteInstanceTRS(_instStaging, 0, rlx, rly, rlz, -stride, yaw, 0, 1, 1, 1);
-        DrawNamed(MeshCatalog.CharLeg, 0, _instStaging, lg2, ref drawCalls, ref tris);
+    /// <summary>
+    /// Full 11-Part Hierarchical Human Anatomy &amp; Action Animator:
+    ///   - Standing height = exact 1.76m, rubber boots flush on ground y = 0.00m
+    ///   - Animations: Idle Breath &amp; Head Scan, Athletic Stride + Knee Flexion, Overhead Egrek Slash,
+    ///     Knee-Squat Ground TBS Pickup ("Animasi Mengambil Sawit"), Two-Hand TBS Hold ("Animasi Pegang"),
+    ///     Two-Hand Heave &amp; Throw ("Animasi Menaruh ke Truk / Angkong"), and Angkong Handle Push!
+    /// </summary>
+    private void DrawDetailedHumanRig(
+        float x, float y, float z, float yaw,
+        float walkPhase,
+        float breathPhase,
+        bool moving,
+        HoldStance stance,
+        float slashTimer,
+        float pickupTimer,
+        float throwTimer,
+        bool heldGold,
+        AvatarConfig av,
+        ref int drawCalls,
+        ref int tris)
+    {
+        var (cr, cg, cb) = av.GetOutfitRgb();
+        float breath = MathF.Sin(breathPhase) * 0.014f;
 
-        float armSwingR = chopAnim > 0.01f ? -1.45f + MathF.Sin((1f - chopAnim) * MathF.PI) * 1.9f : -stride * 0.7f - 0.35f;
-        var (lax, lay, laz) = LocalToWorld(-0.26f, 1.40f, 0f);
-        var (rax, ray, raz) = LocalToWorld(0.26f, 1.40f, 0f);
-        int nL = Mat4Utils.WriteInstanceTRS(_instStaging, 0, lax, lay, laz, stride * 0.7f - 0.25f, yaw, 0, 1, 1, 1, cr, cg, cb);
-        DrawNamed(MeshCatalog.CharArm, 0, _instStaging, nL, ref drawCalls, ref tris);
-        int nR = Mat4Utils.WriteInstanceTRS(_instStaging, 0, rax, ray, raz, armSwingR, yaw, 0, 1, 1, 1, cr, cg, cb);
-        DrawNamed(MeshCatalog.CharArm, 0, _instStaging, nR, ref drawCalls, ref tris);
+        // 1. Compute Leg Kinematics (Hip -> Thigh -> Knee -> Calf + Rubber Boot)
+        float stride = moving ? MathF.Sin(walkPhase) : 0f;
+        float bob = moving ? MathF.Abs(MathF.Cos(walkPhase)) * 0.042f : breath * 0.5f;
+
+        float squatK = pickupTimer > 0.001f ? MathF.Sin(System.Math.Clamp(pickupTimer / 0.40f, 0f, 1f) * MathF.PI) : 0f;
+        float hipDrop = squatK * 0.34f;
+        float torsoLeanX = squatK * 0.56f + (moving ? 0.08f : 0f);
+
+        float thighL_rx = -stride * 0.62f - squatK * 0.92f;
+        float thighR_rx = stride * 0.62f - squatK * 0.92f;
+        float kneeL_rx = (moving ? MathF.Max(0f, MathF.Cos(walkPhase)) * 0.68f : 0.05f) + squatK * 1.48f;
+        float kneeR_rx = (moving ? MathF.Max(0f, -MathF.Cos(walkPhase)) * 0.68f : 0.05f) + squatK * 1.48f;
+
+        var hipRoot = Mat4Utils.BoneMat.TRS(x, y + 0.88f + bob - hipDrop, z, ry: yaw);
+        var torsoMat = hipRoot.Child(0f, 0f, 0f, rx: torsoLeanX);
+        var headMat = torsoMat.Child(
+            0f, 0.56f + breath * 0.4f, 0.01f,
+            rx: -torsoLeanX * 0.45f + MathF.Sin(breathPhase * 0.6f) * 0.03f,
+            ry: moving ? 0f : MathF.Sin(breathPhase * 0.45f) * 0.09f);
+
+        var thighL = hipRoot.Child(-0.115f, 0f, 0f, rx: thighL_rx);
+        var calfL = thighL.Child(0f, -0.43f, 0f, rx: kneeL_rx);
+        var thighR = hipRoot.Child(0.115f, 0f, 0f, rx: thighR_rx);
+        var calfR = thighR.Child(0f, -0.43f, 0f, rx: kneeR_rx);
+
+        // 2. Compute Arm & 5-Finger Hand Kinematics per Active Hold Stance & Action Timer!
+        float uaL_rx, uaL_rz, faL_rx, faL_ry;
+        float uaR_rx, uaR_rz, faR_rx, faR_ry;
+
+        if (pickupTimer > 0.001f)
+        {
+            // Reaching both 5-finger hands down toward the fallen spiky TBS on the ground!
+            uaL_rx = -0.35f - squatK * 0.98f; uaL_rz = -0.16f;
+            faL_rx = -0.35f - squatK * 0.25f; faL_ry = 0.20f;
+            uaR_rx = -0.35f - squatK * 0.98f; uaR_rz = 0.16f;
+            faR_rx = -0.35f - squatK * 0.25f; faR_ry = -0.20f;
+        }
+        else if (throwTimer > 0.001f)
+        {
+            // Powerful two-handed chest-to-overhead heave into Truck Bed / Angkong!
+            float tk = 1f - System.Math.Clamp(throwTimer / 0.48f, 0f, 1f);
+            float heave = MathF.Sin(tk * MathF.PI);
+            uaL_rx = -0.82f - heave * 1.15f; uaL_rz = -0.18f;
+            faL_rx = -0.68f + heave * 0.48f; faL_ry = 0.20f;
+            uaR_rx = -0.82f - heave * 1.15f; uaR_rz = 0.18f;
+            faR_rx = -0.68f + heave * 0.48f; faR_ry = -0.20f;
+        }
+        else if (slashTimer > 0.001f)
+        {
+            // High-energy two-handed Egrek pull-slash!
+            float sk = 1f - System.Math.Clamp(slashTimer / 0.46f, 0f, 1f);
+            float swing = MathF.Sin(sk * MathF.PI);
+            uaL_rx = -0.88f - swing * 1.15f; uaL_rz = -0.30f;
+            faL_rx = -0.45f + swing * 0.25f; faL_ry = 0.28f;
+            uaR_rx = -0.70f - swing * 1.25f; uaR_rz = 0.22f;
+            faR_rx = -0.55f + swing * 0.25f; faR_ry = -0.18f;
+        }
+        else if (stance == HoldStance.CarryingTbs)
+        {
+            // Two-handed TBS cradling hold right in front of chest!
+            float carryBob = moving ? MathF.Sin(walkPhase * 2f) * 0.05f : breath;
+            uaL_rx = -0.78f + carryBob; uaL_rz = -0.22f;
+            faL_rx = -0.72f;            faL_ry = 0.26f;
+            uaR_rx = -0.78f + carryBob; uaR_rz = 0.22f;
+            faR_rx = -0.72f;            faR_ry = -0.26f;
+        }
+        else if (stance == HoldStance.PushingAngkong)
+        {
+            // Both hands extended forward gripping the two red rubber Angkong handles!
+            uaL_rx = -0.72f; uaL_rz = 0.06f;
+            faL_rx = -0.42f; faL_ry = 0.04f;
+            uaR_rx = -0.72f; uaR_rz = -0.06f;
+            faR_rx = -0.42f; faR_ry = -0.04f;
+        }
+        else
+        {
+            // Ready Two-Handed Egrek / Dodos Hold Pose (never empty stiff arms!)
+            float sw = moving ? stride * 0.16f : breath;
+            uaL_rx = -0.88f + sw; uaL_rz = -0.32f;
+            faL_rx = -0.40f;      faL_ry = 0.28f;
+            uaR_rx = -0.64f - sw; uaR_rz = 0.24f;
+            faR_rx = -0.52f;      faR_ry = -0.18f;
+        }
+
+        var upperArmL = torsoMat.Child(-0.245f, 0.485f, 0.01f, rx: uaL_rx, rz: uaL_rz);
+        var forearmL = upperArmL.Child(0f, -0.27f, 0.01f, rx: faL_rx, ry: faL_ry);
+        var upperArmR = torsoMat.Child(0.245f, 0.485f, 0.01f, rx: uaR_rx, rz: uaR_rz);
+        var forearmR = upperArmR.Child(0f, -0.27f, 0.01f, rx: faR_rx, ry: faR_ry);
+
+        // 3. Emit Batched GPU Draw Calls for All 11 Anatomical Segments + Cosmetics + Held Item!
+        DrawNamed(MeshCatalog.CharTorsoHead, 0, _instStaging, torsoMat.Emit(_instStaging, 0, cr, cg, cb), ref drawCalls, ref tris);
+        DrawNamed(MeshCatalog.CharHead, 0, _instStaging, headMat.Emit(_instStaging, 0), ref drawCalls, ref tris);
+
+        int nThigh = 0;
+        nThigh = thighL.Emit(_instStaging, nThigh);
+        nThigh = thighR.Emit(_instStaging, nThigh);
+        DrawNamed(MeshCatalog.CharLeg, 0, _instStaging, nThigh, ref drawCalls, ref tris);
+
+        int nBoot = 0;
+        nBoot = calfL.Emit(_instStaging, nBoot);
+        nBoot = calfR.Emit(_instStaging, nBoot);
+        DrawNamed(MeshCatalog.CharCalfBoot, 0, _instStaging, nBoot, ref drawCalls, ref tris);
+
+        int nArm = 0;
+        nArm = upperArmL.Emit(_instStaging, nArm, cr, cg, cb);
+        nArm = upperArmR.Emit(_instStaging, nArm, cr, cg, cb);
+        DrawNamed(MeshCatalog.CharArm, 0, _instStaging, nArm, ref drawCalls, ref tris);
+
+        int nHand = 0;
+        nHand = forearmL.Emit(_instStaging, nHand);
+        nHand = forearmR.Emit(_instStaging, nHand);
+        DrawNamed(MeshCatalog.CharForearmHand, 0, _instStaging, nHand, ref drawCalls, ref tris);
 
         if (!string.IsNullOrEmpty(av.Hat) && av.Hat != "none")
         {
-            var (hx, hy, hz) = LocalToWorld(0f, 1.85f, 0.02f);
-            int nh = Mat4Utils.WriteInstanceTRS(_instStaging, 0, hx, hy, hz, 0, yaw, 0, 1, 1, 1);
-            DrawNamed(av.Hat, 0, _instStaging, nh, ref drawCalls, ref tris);
+            DrawNamed(av.Hat, 0, _instStaging, headMat.Child(0f, 0.255f, 0.01f).Emit(_instStaging, 0), ref drawCalls, ref tris);
         }
 
         if (!string.IsNullOrEmpty(av.Back) && av.Back != "none")
         {
-            var (bx, by, bz) = LocalToWorld(0f, 1.28f, -0.14f);
-            int nb = Mat4Utils.WriteInstanceTRS(_instStaging, 0, bx, by, bz, 0, yaw, 0, 1, 1, 1, 1, 1, 1, av.Back == MeshCatalog.BackCape ? 0.6f : 0.2f);
-            DrawNamed(av.Back, 0, _instStaging, nb, ref drawCalls, ref tris);
+            float windBack = av.Back == MeshCatalog.BackCape ? 0.65f : 0.20f;
+            DrawNamed(av.Back, 0, _instStaging, torsoMat.Child(0f, 0.36f, -0.14f).Emit(_instStaging, 0, 1f, 1f, 1f, windBack), ref drawCalls, ref tris);
         }
 
         string toolMesh = string.IsNullOrEmpty(av.Tool) ? MeshCatalog.ToolEgrek : av.Tool;
-        var (twx, twy, twz) = LocalToWorld(0.30f, 1.08f, 0.28f);
-        int nT = Mat4Utils.WriteInstanceTRS(_instStaging, 0, twx, twy, twz, 0.28f + (chopAnim > 0.01f ? MathF.Sin(chopAnim * MathF.PI) * 1.15f : 0f), yaw, 0, 1, 1, 1);
-        DrawNamed(toolMesh, 0, _instStaging, nT, ref drawCalls, ref tris);
+        if (stance == HoldStance.CarryingTbs)
+        {
+            // Render held spiky TBS bunch directly between both 5-finger hands + sling Egrek diagonally on back!
+            var heldFruit = torsoMat.Child(0f, 0.33f, 0.44f, rx: 0.35f, sx: 0.84f, sy: 0.84f, sz: 0.84f);
+            DrawNamed(MeshCatalog.TbsBunch, 0, _instStaging,
+                heldFruit.Emit(_instStaging, 0, heldGold ? 2.35f : 1.06f, heldGold ? 1.80f : 1.05f, heldGold ? 0.45f : 1f),
+                ref drawCalls, ref tris);
+            DrawNamed(toolMesh, 0, _instStaging, torsoMat.Child(-0.08f, 0.15f, -0.22f, rx: -0.18f, rz: -0.42f, sx: 0.72f, sy: 0.72f, sz: 0.72f).Emit(_instStaging, 0), ref drawCalls, ref tris);
+        }
+        else if (stance == HoldStance.PushingAngkong)
+        {
+            // Sling Egrek neatly across back while gripping Angkong handles!
+            DrawNamed(toolMesh, 0, _instStaging, torsoMat.Child(-0.08f, 0.15f, -0.22f, rx: -0.18f, rz: -0.42f, sx: 0.72f, sy: 0.72f, sz: 0.72f).Emit(_instStaging, 0), ref drawCalls, ref tris);
+        }
+        else
+        {
+            // Held Egrek / Dodos in both hands with dynamic overhead slash pivot!
+            float slashPitch = slashTimer > 0.001f
+                ? -0.55f + MathF.Sin((1f - slashTimer / 0.46f) * MathF.PI) * 1.35f
+                : 0.14f;
+            var toolMat = torsoMat.Child(0.04f, 0.24f, 0.38f, rx: slashPitch, rz: 0.10f);
+            DrawNamed(toolMesh, 0, _instStaging, toolMat.Emit(_instStaging, 0), ref drawCalls, ref tris);
+        }
     }
 
     private void DrawNamed(string meshName, int lod, float[] instBuf, int count, ref int drawCalls, ref int tris)
@@ -1064,7 +1465,7 @@ void main() {
         inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
         inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
         inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
-        inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
+        inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] + -m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
         inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
         inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
         inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[10] + m[4] * m[1] * m[11] - m[4] * m[3] * m[10] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];

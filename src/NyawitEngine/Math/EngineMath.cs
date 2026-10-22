@@ -98,6 +98,69 @@ public static class Mat4Utils
         return cursor + 1;
     }
 
+    /// <summary>
+    /// Zero-allocation 3x4 affine bone matrix struct for multi-joint skeletal hierarchies:
+    ///   - Hip -> Torso -> Neck/Head -> Hat
+    ///   - Hip -> Shoulder -> UpperArm -> Elbow -> Forearm+5FingerHand -> Tool
+    ///   - Hip -> Thigh -> Knee -> Calf+RubberBoot
+    ///   - Chassis -> WheelHub -> Steer -> RollingTire
+    /// </summary>
+    public struct BoneMat
+    {
+        public float M00, M01, M02, M03;
+        public float M10, M11, M12, M13;
+        public float M20, M21, M22, M23;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static BoneMat TRS(float tx, float ty, float tz, float rx = 0f, float ry = 0f, float rz = 0f, float sx = 1f, float sy = 1f, float sz = 1f)
+        {
+            float cx = MathF.Cos(rx), sxn = MathF.Sin(rx);
+            float cy = MathF.Cos(ry), syn = MathF.Sin(ry);
+            float cz = MathF.Cos(rz), szn = MathF.Sin(rz);
+            return new BoneMat
+            {
+                M00 = (cy * cz + syn * sxn * szn) * sx, M01 = (-cy * szn + syn * sxn * cz) * sy, M02 = (syn * cx) * sz, M03 = tx,
+                M10 = (cx * szn) * sx,                  M11 = (cx * cz) * sy,                    M12 = (-sxn) * sz,     M13 = ty,
+                M20 = (-syn * cz + cy * sxn * szn) * sx, M21 = (syn * szn + cy * sxn * cz) * sy, M22 = (cy * cx) * sz,  M23 = tz,
+            };
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public readonly BoneMat Child(float tx, float ty, float tz, float rx = 0f, float ry = 0f, float rz = 0f, float sx = 1f, float sy = 1f, float sz = 1f)
+        {
+            BoneMat b = TRS(tx, ty, tz, rx, ry, rz, sx, sy, sz);
+            return new BoneMat
+            {
+                M00 = M00 * b.M00 + M01 * b.M10 + M02 * b.M20,
+                M01 = M00 * b.M01 + M01 * b.M11 + M02 * b.M21,
+                M02 = M00 * b.M02 + M01 * b.M12 + M02 * b.M22,
+                M03 = M00 * b.M03 + M01 * b.M13 + M02 * b.M23 + M03,
+
+                M10 = M10 * b.M00 + M11 * b.M10 + M12 * b.M20,
+                M11 = M10 * b.M01 + M11 * b.M11 + M12 * b.M21,
+                M12 = M10 * b.M02 + M11 * b.M12 + M12 * b.M22,
+                M13 = M10 * b.M03 + M11 * b.M13 + M12 * b.M23 + M13,
+
+                M20 = M20 * b.M00 + M21 * b.M10 + M22 * b.M20,
+                M21 = M20 * b.M01 + M21 * b.M11 + M22 * b.M21,
+                M22 = M20 * b.M02 + M21 * b.M12 + M22 * b.M22,
+                M23 = M20 * b.M03 + M21 * b.M13 + M22 * b.M23 + M23,
+            };
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public readonly int Emit(float[] buffer, int cursor, float cr = 1f, float cg = 1f, float cb = 1f, float wind = 0f)
+        {
+            if ((uint)cursor >= (uint)(buffer.Length / 16)) return cursor;
+            int o = cursor * 16;
+            buffer[o + 0] = M00; buffer[o + 1] = M01; buffer[o + 2] = M02; buffer[o + 3] = M03;
+            buffer[o + 4] = M10; buffer[o + 5] = M11; buffer[o + 6] = M12; buffer[o + 7] = M13;
+            buffer[o + 8] = M20; buffer[o + 9] = M21; buffer[o + 10] = M22; buffer[o + 11] = M23;
+            buffer[o + 12] = cr; buffer[o + 13] = cg; buffer[o + 14] = cb; buffer[o + 15] = wind;
+            return cursor + 1;
+        }
+    }
+
     public static bool ProjectWorldToScreen(
         ReadOnlySpan<float> vp,
         float wx, float wy, float wz,

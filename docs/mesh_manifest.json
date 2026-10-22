@@ -1,19 +1,19 @@
 {
-  "version": 1,
+  "version": 3,
   "stride_bytes": 36,
   "models": [
     {
       "name": "palm_trunk",
-      "radius": 6.43,
+      "radius": 6.429,
       "lods": [
         {
           "lod": 0,
-          "verts": 5217,
-          "tris": 2592
+          "verts": 4831,
+          "tris": 2376
         },
         {
           "lod": 1,
-          "verts": 1133,
+          "verts": 1139,
           "tris": 560
         },
         {
@@ -29,33 +29,33 @@
       "lods": [
         {
           "lod": 0,
-          "verts": 16254,
-          "tris": 4688
+          "verts": 8348,
+          "tris": 5580
         },
         {
           "lod": 1,
-          "verts": 5656,
-          "tris": 1664
+          "verts": 4104,
+          "tris": 2056
         },
         {
           "lod": 2,
-          "verts": 2064,
-          "tris": 640
+          "verts": 1676,
+          "tris": 792
         }
       ]
     },
     {
       "name": "tbs_bunch",
-      "radius": 0.494,
+      "radius": 0.485,
       "lods": [
         {
           "lod": 0,
-          "verts": 6018,
-          "tris": 3040
+          "verts": 5576,
+          "tris": 2936
         },
         {
           "lod": 1,
-          "verts": 1952,
+          "verts": 1916,
           "tris": 1072
         },
         {
@@ -67,37 +67,37 @@
     },
     {
       "name": "tropical_fern",
-      "radius": 0.874,
+      "radius": 0.861,
       "lods": [
         {
           "lod": 0,
-          "verts": 6822,
-          "tris": 1944
+          "verts": 3016,
+          "tris": 2000
         },
         {
           "lod": 1,
-          "verts": 2530,
-          "tris": 720
+          "verts": 1810,
+          "tris": 880
         },
         {
           "lod": 2,
-          "verts": 846,
-          "tris": 240
+          "verts": 666,
+          "tris": 288
         }
       ]
     },
     {
       "name": "rock_boulder",
-      "radius": 1.03,
+      "radius": 1.042,
       "lods": [
         {
           "lod": 0,
-          "verts": 864,
-          "tris": 378
+          "verts": 1002,
+          "tris": 420
         },
         {
           "lod": 1,
-          "verts": 612,
+          "verts": 537,
           "tris": 210
         },
         {
@@ -109,53 +109,53 @@
     },
     {
       "name": "canter_truck_body",
-      "radius": 3.211,
+      "radius": 3.236,
       "lods": [
         {
           "lod": 0,
-          "verts": 12621,
-          "tris": 4540
+          "verts": 14325,
+          "tris": 5148
         },
         {
           "lod": 1,
-          "verts": 11045,
-          "tris": 4012
+          "verts": 12749,
+          "tris": 4620
         },
         {
           "lod": 2,
-          "verts": 6844,
-          "tris": 2560
+          "verts": 8468,
+          "tris": 3152
         }
       ]
     },
     {
       "name": "truck_wheel",
-      "radius": 0.515,
+      "radius": 0.514,
       "lods": [
         {
           "lod": 0,
-          "verts": 1142,
-          "tris": 396
+          "verts": 2546,
+          "tris": 1200
         },
         {
           "lod": 1,
-          "verts": 614,
-          "tris": 216
+          "verts": 2348,
+          "tris": 1020
         },
         {
           "lod": 2,
-          "verts": 458,
+          "verts": 122,
           "tris": 144
         }
       ]
     },
     {
       "name": "truck_cargo_heap",
-      "radius": 2.133,
+      "radius": 2.143,
       "lods": [
         {
           "lod": 0,
-          "verts": 2884,
+          "verts": 2548,
           "tris": 1344
         },
         {
@@ -172,22 +172,22 @@
     },
     {
       "name": "angkong_cart",
-      "radius": 1.219,
+      "radius": 1.371,
       "lods": [
         {
           "lod": 0,
-          "verts": 3062,
-          "tris": 1464
+          "verts": 1408,
+          "tris": 684
         },
         {
           "lod": 1,
-          "verts": 2534,
-          "tris": 1284
+          "verts": 1408,
+          "tris": 684
         },
         {
           "lod": 2,
-          "verts": 2378,
-          "tris": 1212
+          "verts": 1408,
+          "tris": 684
         }
       ]
     },
@@ -213,22 +213,64 @@
       ]
     },
     {
-      "name": "weighbridge_ram",
-      "radius": 5.891,
+      "name": "pks_fan",
+      "radius": 1.128,
       "lods": [
         {
           "lod": 0,
-          "verts": 2262,
+          "verts": 1700,
+          "tris": 696
+        },
+        {
+          "lod": 1,
+          "verts": 1368,
+          "tris": 568
+        },
+        {
+          "lod": 2,
+          "verts": 1036,
+          "tris": 440
+        }
+      ]
+    },
+    {
+      "name": "steam_puff",
+      "radius": 0.732,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 268,
+          "tris": 248
+        },
+        {
+          "lod": 1,
+          "verts": 237,
+          "tris": 210
+        },
+        {
+          "lod": 2,
+          "verts": 112,
+          "tris": 40
+        }
+      ]
+    },
+    {
+      "name": "weighbridge_ram",
+      "radius": 5.98,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 2274,
           "tris": 800
         },
         {
           "lod": 1,
-          "verts": 2262,
+          "verts": 2274,
           "tris": 800
         },
         {
           "lod": 2,
-          "verts": 1812,
+          "verts": 1824,
           "tris": 608
         }
       ]
@@ -239,139 +281,223 @@
       "lods": [
         {
           "lod": 0,
-          "verts": 2170,
+          "verts": 2134,
           "tris": 784
         },
         {
           "lod": 1,
-          "verts": 2170,
+          "verts": 2134,
           "tris": 784
         },
         {
           "lod": 2,
-          "verts": 1886,
+          "verts": 1850,
           "tris": 704
         }
       ]
     },
     {
       "name": "wooden_bridge",
-      "radius": 4.694,
+      "radius": 5.301,
       "lods": [
         {
           "lod": 0,
-          "verts": 5576,
-          "tris": 2104
+          "verts": 6238,
+          "tris": 2408
         },
         {
           "lod": 1,
-          "verts": 4280,
-          "tris": 1552
+          "verts": 4510,
+          "tris": 1672
         },
         {
           "lod": 2,
-          "verts": 1636,
-          "tris": 544
+          "verts": 1866,
+          "tris": 664
         }
       ]
     },
     {
       "name": "celeng_boar",
-      "radius": 1.213,
+      "radius": 1.228,
       "lods": [
         {
           "lod": 0,
-          "verts": 2792,
-          "tris": 1204
+          "verts": 2259,
+          "tris": 964
         },
         {
           "lod": 1,
-          "verts": 2582,
-          "tris": 1036
+          "verts": 2142,
+          "tris": 892
         },
         {
           "lod": 2,
-          "verts": 2241,
-          "tris": 860
+          "verts": 1798,
+          "tris": 728
+        }
+      ]
+    },
+    {
+      "name": "boar_leg",
+      "radius": 0.545,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 458,
+          "tris": 256
+        },
+        {
+          "lod": 1,
+          "verts": 456,
+          "tris": 192
+        },
+        {
+          "lod": 2,
+          "verts": 401,
+          "tris": 160
         }
       ]
     },
     {
       "name": "char_torso_head",
-      "radius": 1.0,
+      "radius": 0.632,
       "lods": [
         {
           "lod": 0,
-          "verts": 2309,
-          "tris": 1352
+          "verts": 1748,
+          "tris": 1000
         },
         {
           "lod": 1,
-          "verts": 1919,
-          "tris": 968
+          "verts": 1574,
+          "tris": 880
         },
         {
           "lod": 2,
-          "verts": 1087,
-          "tris": 520
+          "verts": 1424,
+          "tris": 760
+        }
+      ]
+    },
+    {
+      "name": "char_head",
+      "radius": 0.415,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 3726,
+          "tris": 2292
+        },
+        {
+          "lod": 1,
+          "verts": 2990,
+          "tris": 1636
+        },
+        {
+          "lod": 2,
+          "verts": 922,
+          "tris": 584
         }
       ]
     },
     {
       "name": "char_arm",
-      "radius": 0.583,
+      "radius": 0.326,
       "lods": [
         {
           "lod": 0,
-          "verts": 420,
-          "tris": 204
+          "verts": 566,
+          "tris": 420
         },
         {
           "lod": 1,
-          "verts": 443,
-          "tris": 154
+          "verts": 518,
+          "tris": 300
         },
         {
           "lod": 2,
-          "verts": 392,
-          "tris": 124
+          "verts": 398,
+          "tris": 240
+        }
+      ]
+    },
+    {
+      "name": "char_forearm_hand",
+      "radius": 0.391,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 1233,
+          "tris": 504
+        },
+        {
+          "lod": 1,
+          "verts": 1239,
+          "tris": 468
+        },
+        {
+          "lod": 2,
+          "verts": 762,
+          "tris": 334
         }
       ]
     },
     {
       "name": "char_leg",
-      "radius": 0.93,
+      "radius": 0.502,
       "lods": [
         {
           "lod": 0,
-          "verts": 420,
-          "tris": 204
+          "verts": 452,
+          "tris": 388
         },
         {
           "lod": 1,
-          "verts": 443,
-          "tris": 154
+          "verts": 386,
+          "tris": 280
         },
         {
           "lod": 2,
-          "verts": 392,
-          "tris": 124
+          "verts": 326,
+          "tris": 226
+        }
+      ]
+    },
+    {
+      "name": "char_calf_boot",
+      "radius": 0.485,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 608,
+          "tris": 288
+        },
+        {
+          "lod": 1,
+          "verts": 626,
+          "tris": 228
+        },
+        {
+          "lod": 2,
+          "verts": 560,
+          "tris": 198
         }
       ]
     },
     {
       "name": "hat_caping",
-      "radius": 0.441,
+      "radius": 0.439,
       "lods": [
         {
           "lod": 0,
-          "verts": 288,
-          "tris": 176
+          "verts": 314,
+          "tris": 192
         },
         {
           "lod": 1,
-          "verts": 158,
-          "tris": 96
+          "verts": 184,
+          "tris": 112
         },
         {
           "lod": 2,
@@ -386,76 +512,76 @@
       "lods": [
         {
           "lod": 0,
-          "verts": 682,
-          "tris": 388
+          "verts": 724,
+          "tris": 448
         },
         {
           "lod": 1,
-          "verts": 622,
-          "tris": 292
+          "verts": 650,
+          "tris": 312
         },
         {
           "lod": 2,
-          "verts": 579,
-          "tris": 248
+          "verts": 604,
+          "tris": 256
         }
       ]
     },
     {
       "name": "hat_headband",
-      "radius": 0.614,
+      "radius": 0.598,
       "lods": [
         {
           "lod": 0,
-          "verts": 510,
-          "tris": 188
+          "verts": 568,
+          "tris": 208
         },
         {
           "lod": 1,
-          "verts": 522,
-          "tris": 164
+          "verts": 592,
+          "tris": 184
         },
         {
           "lod": 2,
-          "verts": 480,
-          "tris": 152
+          "verts": 536,
+          "tris": 168
         }
       ]
     },
     {
       "name": "hat_cowboy",
-      "radius": 0.409,
+      "radius": 0.41,
       "lods": [
         {
           "lod": 0,
-          "verts": 350,
-          "tris": 164
+          "verts": 834,
+          "tris": 288
         },
         {
           "lod": 1,
-          "verts": 338,
-          "tris": 152
+          "verts": 622,
+          "tris": 224
         },
         {
           "lod": 2,
-          "verts": 330,
-          "tris": 144
+          "verts": 522,
+          "tris": 192
         }
       ]
     },
     {
       "name": "hat_crown_gold",
-      "radius": 0.366,
+      "radius": 0.361,
       "lods": [
         {
           "lod": 0,
-          "verts": 1930,
-          "tris": 832
+          "verts": 1952,
+          "tris": 840
         },
         {
           "lod": 1,
-          "verts": 1456,
-          "tris": 616
+          "verts": 1448,
+          "tris": 624
         },
         {
           "lod": 2,
@@ -466,22 +592,22 @@
     },
     {
       "name": "back_basket",
-      "radius": 0.457,
+      "radius": 0.458,
       "lods": [
         {
           "lod": 0,
-          "verts": 482,
-          "tris": 264
+          "verts": 608,
+          "tris": 336
         },
         {
           "lod": 1,
-          "verts": 476,
-          "tris": 234
+          "verts": 566,
+          "tris": 300
         },
         {
           "lod": 2,
-          "verts": 422,
-          "tris": 216
+          "verts": 524,
+          "tris": 276
         }
       ]
     },
@@ -491,38 +617,38 @@
       "lods": [
         {
           "lod": 0,
-          "verts": 416,
-          "tris": 148
+          "verts": 430,
+          "tris": 152
         },
         {
           "lod": 1,
-          "verts": 416,
-          "tris": 148
+          "verts": 430,
+          "tris": 152
         },
         {
           "lod": 2,
-          "verts": 416,
-          "tris": 148
+          "verts": 430,
+          "tris": 152
         }
       ]
     },
     {
       "name": "back_cape",
-      "radius": 0.851,
+      "radius": 0.854,
       "lods": [
         {
           "lod": 0,
-          "verts": 443,
+          "verts": 296,
           "tris": 144
         },
         {
           "lod": 1,
-          "verts": 326,
+          "verts": 245,
           "tris": 96
         },
         {
           "lod": 2,
-          "verts": 214,
+          "verts": 184,
           "tris": 64
         }
       ]
@@ -533,39 +659,39 @@
       "lods": [
         {
           "lod": 0,
-          "verts": 2187,
+          "verts": 2103,
           "tris": 1152
         },
         {
           "lod": 1,
-          "verts": 1739,
+          "verts": 1679,
           "tris": 896
         },
         {
           "lod": 2,
-          "verts": 1515,
+          "verts": 1467,
           "tris": 768
         }
       ]
     },
     {
       "name": "tool_egrek",
-      "radius": 2.58,
+      "radius": 2.59,
       "lods": [
         {
           "lod": 0,
-          "verts": 494,
-          "tris": 160
+          "verts": 504,
+          "tris": 192
         },
         {
           "lod": 1,
-          "verts": 494,
-          "tris": 160
+          "verts": 504,
+          "tris": 192
         },
         {
           "lod": 2,
-          "verts": 494,
-          "tris": 160
+          "verts": 504,
+          "tris": 192
         }
       ]
     },
@@ -575,45 +701,45 @@
       "lods": [
         {
           "lod": 0,
-          "verts": 270,
-          "tris": 88
+          "verts": 298,
+          "tris": 96
         },
         {
           "lod": 1,
-          "verts": 270,
-          "tris": 88
+          "verts": 298,
+          "tris": 96
         },
         {
           "lod": 2,
-          "verts": 270,
-          "tris": 88
+          "verts": 298,
+          "tris": 96
         }
       ]
     },
     {
       "name": "tool_egrek_dragon",
-      "radius": 2.807,
+      "radius": 2.817,
       "lods": [
         {
           "lod": 0,
-          "verts": 454,
-          "tris": 152
+          "verts": 487,
+          "tris": 176
         },
         {
           "lod": 1,
-          "verts": 454,
-          "tris": 152
+          "verts": 487,
+          "tris": 176
         },
         {
           "lod": 2,
-          "verts": 454,
-          "tris": 152
+          "verts": 487,
+          "tris": 176
         }
       ]
     }
   ],
-  "total_lod0_tris": 32630,
-  "total_lod1_tris": 20316,
-  "total_lod2_tris": 12608,
-  "binary_bytes": 6506277
+  "total_lod0_tris": 38696,
+  "total_lod1_tris": 25412,
+  "total_lod2_tris": 15274,
+  "binary_bytes": 6867986
 }

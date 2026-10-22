@@ -146,27 +146,77 @@ def assemble_palm(lib, gold_fruit=False):
 
 
 def assemble_truck(lib):
+    body_m = mat_trs(0, 0.04, 0, rz=-0.045, rx=-0.015)
     out = [
-        (*lib["canter_truck_body"][0], mat_trs(0, 0.02, 0), (1.0, 1.0, 1.0)),
-        (*lib["truck_cargo_heap"][0], mat_trs(0, 0.82, 0), (1.0, 1.0, 1.0)),
+        (*lib["canter_truck_body"][0], body_m, (1.0, 1.0, 1.0)),
+        (*lib["truck_cargo_heap"][0], body_m @ mat_trs(0, 0.82, 0), (1.0, 1.0, 1.0)),
     ]
-    for sx in (-0.88, 0.88):
-        out.append((*lib["truck_wheel"][0], mat_trs(sx, 0.48, 1.62), (1.0, 1.0, 1.0)))
-        out.append((*lib["truck_wheel"][0], mat_trs(sx, 0.48, -1.18), (1.0, 1.0, 1.0)))
+    for sx, susp_y in ((-0.88, 0.46), (0.88, 0.52)):
+        # Front wheels turned 22 degrees (steering animation!) + independent suspension travel!
+        out.append((*lib["truck_wheel"][0], mat_trs(sx, susp_y, 1.55, ry=0.38, rx=0.65), (1.0, 1.0, 1.0)))
+        out.append((*lib["truck_wheel"][0], mat_trs(sx, susp_y, -1.25, rx=0.65), (1.0, 1.0, 1.0)))
     return out
 
 
-def assemble_harvester(lib, shirt_rgb, hat_key, back_key, tool_key):
+def assemble_boar(lib):
+    body = mat_trs(-0.92, 0.04, 0.20, ry=0.48, rx=-0.05)
+    out = [(*lib["celeng_boar"][0], body, (1.0, 1.0, 1.0))]
+    for sx, sz, swing in ((-0.20, 0.44, -0.42), (0.20, 0.44, 0.36), (-0.19, -0.44, 0.38), (0.19, -0.44, -0.35)):
+        out.append((*lib["boar_leg"][0], body @ mat_trs(sx, 0.50, sz, rx=swing), (1.0, 1.0, 1.0)))
+    return out
+
+
+def assemble_angkong(lib):
+    cart = mat_trs(0.95, 0.0, -0.10, ry=-0.42)
     return [
-        (*lib["char_torso_head"][0], mat_trs(0, 0.92, 0), shirt_rgb),
-        (*lib["char_leg"][0], mat_trs(-0.11, 0.92, 0, rx=0.22), (1.0, 1.0, 1.0)),
-        (*lib["char_leg"][0], mat_trs(0.11, 0.92, 0, rx=-0.22), (1.0, 1.0, 1.0)),
-        (*lib["char_arm"][0], mat_trs(-0.26, 1.40, 0, rx=-0.35, rz=0.12), shirt_rgb),
-        (*lib["char_arm"][0], mat_trs(0.26, 1.40, 0, rx=-0.75, rz=-0.16), shirt_rgb),
-        (*lib[hat_key][0], mat_trs(0, 1.85, 0.02), (1.0, 1.0, 1.0)),
-        (*lib[back_key][0], mat_trs(0, 1.28, -0.14), (1.0, 1.0, 1.0)),
-        (*lib[tool_key][0], mat_trs(0.30, 1.02, 0.30, rx=0.32, rz=-0.12), (1.0, 1.0, 1.0)),
+        (*lib["angkong_cart"][0], cart, (1.0, 1.0, 1.0)),
+        (*lib["truck_wheel"][0], cart @ mat_trs(0.0, 0.29, 0.80, rx=0.85, sx=0.45, sy=0.59, sz=0.59), (1.0, 1.0, 1.0)),
     ]
+
+
+def assemble_harvester(lib, shirt_rgb, hat_key, back_key, tool_key, holding_tbs=False):
+    hip_m = mat_trs(0, 0.88, 0, rx=(0.06 if holding_tbs else 0.0))
+    head_m = hip_m @ mat_trs(0, 0.56, 0.01, ry=0.10, rx=-0.04)
+
+    # Articulated two-joint legs (Hip -> Thigh -> Knee -> Calf + Tall Rubber Boot!)
+    th_l = hip_m @ mat_trs(-0.115, 0.0, 0.0, rx=-0.16)
+    cf_l = th_l @ mat_trs(0.0, -0.43, 0.0, rx=0.22)
+    th_r = hip_m @ mat_trs(0.115, 0.0, 0.0, rx=0.18)
+    cf_r = th_r @ mat_trs(0.0, -0.43, 0.0, rx=0.06)
+
+    if holding_tbs:
+        # Two-handed TBS cradling pose in front of chest!
+        ua_l = hip_m @ mat_trs(-0.245, 0.485, 0.01, rx=-0.78, rz=-0.22)
+        fa_l = ua_l @ mat_trs(0.0, -0.27, 0.01, rx=-0.72, ry=0.26)
+        ua_r = hip_m @ mat_trs(0.245, 0.485, 0.01, rx=-0.78, rz=0.22)
+        fa_r = ua_r @ mat_trs(0.0, -0.27, 0.01, rx=-0.72, ry=-0.26)
+    else:
+        # Heroic two-handed Egrek / Dodos stance held clearly forward in both hands!
+        ua_l = hip_m @ mat_trs(-0.245, 0.485, 0.01, rx=-0.92, rz=-0.34)
+        fa_l = ua_l @ mat_trs(0.0, -0.27, 0.01, rx=-0.38, ry=0.28)
+        ua_r = hip_m @ mat_trs(0.245, 0.485, 0.01, rx=-0.66, rz=0.26)
+        fa_r = ua_r @ mat_trs(0.0, -0.27, 0.01, rx=-0.52, ry=-0.18)
+
+    out = [
+        (*lib["char_torso_head"][0], hip_m, shirt_rgb),
+        (*lib["char_head"][0], head_m, (1.0, 1.0, 1.0)),
+        (*lib["char_leg"][0], th_l, (1.0, 1.0, 1.0)),
+        (*lib["char_calf_boot"][0], cf_l, (1.0, 1.0, 1.0)),
+        (*lib["char_leg"][0], th_r, (1.0, 1.0, 1.0)),
+        (*lib["char_calf_boot"][0], cf_r, (1.0, 1.0, 1.0)),
+        (*lib["char_arm"][0], ua_l, shirt_rgb),
+        (*lib["char_forearm_hand"][0], fa_l, (1.0, 1.0, 1.0)),
+        (*lib["char_arm"][0], ua_r, shirt_rgb),
+        (*lib["char_forearm_hand"][0], fa_r, (1.0, 1.0, 1.0)),
+        (*lib[back_key][0], hip_m @ mat_trs(0, 0.36, -0.14), (1.0, 1.0, 1.0)),
+    ]
+    if hat_key:
+        out.append((*lib[hat_key][0], head_m @ mat_trs(0, 0.255, 0.01), (1.0, 1.0, 1.0)))
+    if holding_tbs:
+        out.append((*lib["tbs_bunch"][0], hip_m @ mat_trs(0.0, 0.34, 0.44, rx=0.35, sx=0.82, sy=0.82, sz=0.82), (1.05, 1.15, 0.90)))
+    elif tool_key:
+        out.append((*lib[tool_key][0], hip_m @ mat_trs(0.04, 0.24, 0.38, rx=0.14, rz=0.10), (1.0, 1.0, 1.0)))
+    return out
 
 
 def main() -> None:
@@ -177,23 +227,31 @@ def main() -> None:
     logo_path = os.path.join(root, "src", "Nyawit.Android", "Assets", "Brand", "logo_utama_horizontal_transparan_putih.png")
 
     lib = load_npak(npak_path)
+    pks_scene = [
+        (*lib["pks_factory"][0], mat_trs(0, 0, -2.8), (1, 1, 1)),
+        (*lib["pks_fan"][0], mat_trs(-1.5, 8.35, -4.4, ry=0.4), (1, 1, 1)),
+        (*lib["pks_fan"][0], mat_trs(1.5, 8.35, -1.2, ry=1.1), (1, 1, 1)),
+        (*lib["steam_puff"][0], mat_trs(-3.2, 14.8, -5.0, sx=1.5, sy=1.4, sz=1.5), (1, 1, 1)),
+        (*lib["steam_puff"][0], mat_trs(-2.8, 16.4, -5.6, sx=2.1, sy=1.8, sz=2.1), (1, 1, 1)),
+        (*lib["weighbridge_ram"][0], mat_trs(0, 0, 7.0), (1, 1, 1)),
+    ]
     cards = [
-        ("POHON SAWIT TENERA DAN TBS EMAS", "LOD0 18K TRIS / MULTI-LOD HD", assemble_palm(lib, True), (9.8, 6.4, 11.2), (0.2, 4.3, 0.2)),
-        ("TRUK CANTER KEBUN MUATAN TBS", "KABIN OLENG HD / BASURI / LED", assemble_truck(lib), (5.0, 3.0, 5.4), (0.0, 1.15, 0.1)),
-        ("AVATAR SULTAN TURNAMEN MINGGUAN", "MAHKOTA EMAS / SAYAP PHOENIX / NAGA", assemble_harvester(lib, (0.12, 0.14, 0.22), "hat_crown_gold", "back_wings_gold", "tool_egrek_dragon"), (3.7, 2.7, 4.9), (0.0, 1.78, 0.0)),
-        ("AVATAR PEMANEN CAPING PRO", "CAPING BAMBU / KERANJANG / EGREK", assemble_harvester(lib, (0.14, 0.74, 0.44), "hat_caping", "back_basket", "tool_egrek"), (3.4, 2.6, 4.6), (0.0, 1.72, 0.0)),
-        ("PABRIK KELAPA SAWIT PKS DAN RAM", "CEROBONG UAP / 3 SILO CPO / LED RAM", [(*lib["pks_factory"][0], mat_trs(0, 0, -2.8), (1, 1, 1)), (*lib["weighbridge_ram"][0], mat_trs(0, 0, 7.0), (1, 1, 1))], (20.5, 14.5, 24.5), (0.4, 5.4, 0.8)),
-        ("CELENG LIAR DAN ANGKONG SAWIT", "HAZARD HUTAN / GEROBAK ANGKUT TBS", [(*lib["celeng_boar"][0], mat_trs(-0.92, 0, 0.2, ry=0.45), (1, 1, 1)), (*lib["angkong_cart"][0], mat_trs(0.95, 0, -0.1, ry=-0.4), (1, 1, 1))], (3.2, 2.1, 3.5), (0.0, 0.55, 0.0)),
+        ("POHON SAWIT TENERA DAN TBS EMAS", "DOUBLE-SIDED PELEPAH / ZERO BOLONG", assemble_palm(lib, True), (9.8, 6.4, 11.2), (0.2, 4.3, 0.2)),
+        ("CANTER OLENG SUSPENSI DAN BELOK", "BAN DEPAN BELOK 22 DEG / SUSPENSI AKTIF", assemble_truck(lib), (4.8, 2.7, 5.2), (0.0, 1.12, 0.1)),
+        ("ANATOMI SULTAN WAJAH DAN JARI", "11-PART RIG / WAJAH / JARI / SEPATU BOOT", assemble_harvester(lib, (0.14, 0.18, 0.28), "hat_crown_gold", "back_wings_gold", "tool_egrek_dragon", False), (2.25, 1.85, 3.15), (0.0, 1.15, 0.05)),
+        ("ANIMASI PEGANG DAN ANGKAT SAWIT", "PEGANG DUA TANGAN / ANGKUT KE TRUK", assemble_harvester(lib, (0.16, 0.72, 0.44), None, "back_basket", "tool_egrek", True), (1.85, 1.72, 2.45), (0.0, 1.16, 0.12)),
+        ("PABRIK PKS TURBIN DAN UAP AKTIF", "TURBIN BERPUTAR / UAP BOILER / RAM LED", pks_scene, (20.5, 14.5, 24.5), (0.4, 5.4, 0.8)),
+        ("CELENG KAKI AKTIF DAN ANGKONG", "4 KAKI BERLARI / RODA ANGKONG BERPUTAR", assemble_boar(lib) + assemble_angkong(lib), (3.1, 2.0, 3.4), (0.0, 0.55, 0.0)),
     ]
 
     W, H = 1800, 1120
-    sheet = Image.new("RGBA", (W, H), (13, 13, 13, 255))
+    sheet = Image.new("RGBA", (W, H), (11, 14, 13, 255))
     draw = ImageDraw.Draw(sheet)
-    f_title = ImageFont.truetype(font_path, 36)
+    f_title = ImageFont.truetype(font_path, 34)
     f_card = ImageFont.truetype(font_path, 19)
-    f_sub = ImageFont.truetype(font_path, 13)
+    f_sub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 12)
 
-    draw.text((48, 32), "NYAWIT LIVE 3D  -  CUSTOM CSHARP ENGINE 3D ASSETS", font=f_title, fill=(255, 255, 255, 255))
+    draw.text((48, 32), "NYAWIT LIVE  -  WATERTIGHT ANATOMY AND PHYSICS MODELS", font=f_title, fill=(255, 255, 255, 255))
     logo_img = Image.open(logo_path).convert("RGBA")
     lh = 44
     lw = int(logo_img.width * (lh / logo_img.height))
@@ -204,10 +262,10 @@ def main() -> None:
         col_i, row_i = idx_c % 3, idx_c // 3
         x0, y0 = 42 + col_i * (cw + 30), 104 + row_i * (ch + 30)
         rendered = rasterize_scene(scene_inst, cw, ch - 68, eye, tgt, fov_deg=40.0).convert("RGBA")
-        draw.rounded_rectangle([x0 - 2, y0 - 2, x0 + cw + 2, y0 + ch + 2], radius=16, fill=(22, 26, 24, 255), outline=(48, 86, 62, 255), width=2)
+        draw.rectangle([x0 - 2, y0 - 2, x0 + cw + 2, y0 + ch + 2], fill=(18, 24, 21, 255), outline=(48, 232, 138, 255), width=2)
         sheet.alpha_composite(rendered, (x0, y0))
         draw.text((x0 + 18, y0 + ch - 54), title, font=f_card, fill=(255, 255, 255, 255))
-        draw.text((x0 + 18, y0 + ch - 27), sub, font=f_sub, fill=(92, 224, 146, 255))
+        draw.text((x0 + 18, y0 + ch - 27), sub, font=f_sub, fill=(48, 232, 138, 255))
 
     sheet.convert("RGB").save(os.path.join(root, "docs", "screenshots", "models_showcase.png"), quality=92)
 

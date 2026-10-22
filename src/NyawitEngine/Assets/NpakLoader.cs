@@ -17,13 +17,19 @@ public static class MeshCatalog
     public const string TruckCargoHeap = "truck_cargo_heap";
     public const string AngkongCart = "angkong_cart";
     public const string PksFactory = "pks_factory";
+    public const string PksFan = "pks_fan";
+    public const string SteamPuff = "steam_puff";
     public const string WeighbridgeRam = "weighbridge_ram";
     public const string MandorPost = "mandor_post";
     public const string WoodenBridge = "wooden_bridge";
     public const string CelengBoar = "celeng_boar";
+    public const string BoarLeg = "boar_leg";
     public const string CharTorsoHead = "char_torso_head";
+    public const string CharHead = "char_head";
     public const string CharArm = "char_arm";
+    public const string CharForearmHand = "char_forearm_hand";
     public const string CharLeg = "char_leg";
+    public const string CharCalfBoot = "char_calf_boot";
 
     public const string HatCaping = "hat_caping";
     public const string HatSafety = "hat_safety";
@@ -44,8 +50,8 @@ public static class MeshCatalog
     [
         PalmTrunk, PalmCrown, TbsBunch, TropicalFern, RockBoulder,
         CanterTruckBody, TruckWheel, TruckCargoHeap, AngkongCart,
-        PksFactory, WeighbridgeRam, MandorPost, WoodenBridge, CelengBoar,
-        CharTorsoHead, CharArm, CharLeg,
+        PksFactory, PksFan, SteamPuff, WeighbridgeRam, MandorPost, WoodenBridge, CelengBoar, BoarLeg,
+        CharTorsoHead, CharHead, CharArm, CharForearmHand, CharLeg, CharCalfBoot,
         HatCaping, HatSafety, HatHeadband, HatCowboy, HatCrownGold,
         BackBasket, BackPack, BackCape, BackWingsGold,
         ToolEgrek, ToolDodos, ToolEgrekDragon

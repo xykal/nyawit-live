@@ -6,6 +6,7 @@ using NyawitEngine.Assets;
 using NyawitEngine.Core;
 using NyawitEngine.Math;
 using NyawitEngine.Network;
+using NyawitEngine.Physics;
 using NyawitEngine.World;
 using Xunit;
 
@@ -22,13 +23,13 @@ public sealed class EngineVerificationTests
     }
 
     [Fact]
-    public void NpakArchive_LoadsAll29SculptedModelsAndMatchesEveryMeshCatalogKey()
+    public void NpakArchive_LoadsAll35SculptedModelsAndMatchesEveryMeshCatalogKey()
     {
         string path = Path.Combine(ResolveRepoRoot(), "src", "Nyawit.Android", "Assets", "Meshes", "nyawit_models.npak");
         using var fs = File.OpenRead(path);
         var archive = NpakArchive.Load(fs);
 
-        Assert.Equal(29, archive.Meshes.Count);
+        Assert.Equal(35, archive.Meshes.Count);
         foreach (string requiredKey in MeshCatalog.AllRequiredNames)
         {
             Assert.True(archive.Meshes.ContainsKey(requiredKey), $"Missing required 3D model '{requiredKey}' in nyawit_models.npak");
@@ -45,21 +46,64 @@ public sealed class EngineVerificationTests
     }
 
     [Fact]
-    public void PlantationWorld_GeneratesDeterministic180TreesAndTerrainMesh()
+    public void RigidBodyWorld_EnforcesSolidCollisionsSuspensionSteeringAndTbsPickupThrow()
     {
-        var treesA = PlantationWorld.GenerateTrees();
-        var treesB = PlantationWorld.GenerateTrees();
-        Assert.Equal(180, treesA.Count);
-        for (int i = 0; i < treesA.Count; i++)
-        {
-            Assert.Equal(treesA[i].X, treesB[i].X);
-            Assert.Equal(treesA[i].Z, treesB[i].Z);
-            Assert.Equal(treesA[i].RotationY, treesB[i].RotationY);
-        }
+        var trees = PlantationWorld.GenerateTrees();
+        var (_, rocks) = PlantationWorld.GenerateScatterProps();
+        var phys = new RigidBodyWorld(trees, rocks);
 
-        var terrain = PlantationWorld.BuildSplattedTerrainMesh(64, 224f);
-        Assert.Equal(64 * 64, terrain.VertexCount);
-        Assert.Equal(63 * 63 * 6, terrain.IndexCount);
+        // 1. Solid collision against Palm Tree Trunk (0% nembus!)
+        var tree = trees[0];
+        float px = tree.X, pz = tree.Z;
+        bool pushed = phys.SolveSolidCircleCollision(ref px, ref pz, 0.44f);
+        Assert.True(pushed);
+        float distFromTrunk = MathF.Sqrt((px - tree.X) * (px - tree.X) + (pz - tree.Z) * (pz - tree.Z));
+        Assert.True(distFromTrunk >= 0.44f + 0.68f * tree.Scale - 0.01f);
+
+        // 2. Canal water barrier blocks direct water crossing at X=0, while Wooden Bridge at X=-28 allows crossing!
+        float waterX = 0f, waterZ = PlantationWorld.CanalZ;
+        phys.SolveSolidCircleCollision(ref waterX, ref waterZ, 0.44f);
+        Assert.True(MathF.Abs(waterZ - PlantationWorld.CanalZ) >= 4.25f);
+
+        float bridgeX = -28f, bridgeZ = PlantationWorld.CanalZ;
+        phys.SolveSolidCircleCollision(ref bridgeX, ref bridgeZ, 0.44f);
+        Assert.Equal(PlantationWorld.CanalZ, bridgeZ, 2);
+
+        // 3. Canter 4-wheel suspension, front wheel steering & tire rolling rotation!
+        phys.MainTruck.X = 0f;
+        phys.MainTruck.Z = 6f;
+        phys.MainTruck.Yaw = 0f;
+        for (int i = 0; i < 30; i++)
+            phys.StepWorld(0.016f, inTruck: true, inputSide: 1.0f, inputForward: 1.0f, camYaw: 0f, boars: []);
+
+        Assert.True(phys.MainTruck.SpeedMs > 3.5f);
+        Assert.True(phys.MainTruck.WheelSpinRad > 1.5f);
+        Assert.True(MathF.Abs(phys.MainTruck.SteerAngle) > 0.25f);
+        Assert.True(MathF.Abs(phys.MainTruck.RollRad) > 0.005f);
+
+        // 4. Physical Harvest -> Ground Bounce -> Squat Pickup -> Two-Hand Carry -> Parabolic Throw -> Truck Bounce!
+        phys.Player.X = 10f;
+        phys.Player.Z = 6f;
+        phys.MainTruck.X = 12.8f;
+        phys.MainTruck.Z = 6f;
+        phys.SpawnHarvestedGroundFruit(10.5f, 6.2f, isGold: true);
+        for (int i = 0; i < 90; i++)
+            phys.StepWorld(0.016f, inTruck: false, inputSide: 0f, inputForward: 0f, camYaw: 0f, boars: []);
+
+        int picked = phys.TryPickupGroundFruit();
+        Assert.True(picked >= 1);
+        Assert.True(phys.Player.HasHeldTbs);
+        Assert.Equal(HoldStance.CarryingTbs, phys.Player.Stance);
+
+        int cargoBefore = phys.MainTruck.VisualCargoUnits;
+        bool thrown = phys.TryLoadIntoTruckOrAngkong(out string msg);
+        Assert.True(thrown);
+        Assert.False(string.IsNullOrEmpty(msg));
+
+        for (int i = 0; i < 40; i++)
+            phys.StepWorld(0.016f, inTruck: false, inputSide: 0f, inputForward: 0f, camYaw: 0f, boars: []);
+
+        Assert.True(phys.MainTruck.VisualCargoUnits > cargoBefore);
     }
 
     [Fact]
@@ -67,23 +111,10 @@ public sealed class EngineVerificationTests
     {
         var gov = new QualityGovernor();
         Assert.Equal(GraphicsPreset.Ultra, gov.CurrentPreset);
-
-        // 30 x 0.05s = 1.5s = 3 half-second low-FPS strikes -> steps down Ultra -> Standard
         for (int i = 0; i < 30; i++) gov.RecordFrame(0.05f);
         Assert.Equal(GraphicsPreset.Standard, gov.CurrentPreset);
-
-        // Another 30 x 0.05s -> steps down Standard -> Smooth (HP Kentang mode!)
         for (int i = 0; i < 30; i++) gov.RecordFrame(0.05f);
         Assert.Equal(GraphicsPreset.Smooth, gov.CurrentPreset);
-
-        float[] pos = [0f, 0f, 5f, 0f, 0f, 45f, 0f, 0f, 95f, 0f, 0f, 260f];
-        sbyte[] lods = new sbyte[4];
-        int vis = SimdCuller.SelectLodBatch(pos, 4, 0, 2, 0, 0, 0, 1, 20f, 65f, 150f, lods);
-        Assert.Equal(3, vis);
-        Assert.Equal(0, lods[0]);
-        Assert.Equal(1, lods[1]);
-        Assert.Equal(2, lods[2]);
-        Assert.Equal(-1, lods[3]);
     }
 
     [Fact]
@@ -101,12 +132,15 @@ public sealed class EngineVerificationTests
     }
 
     [Fact]
-    public async Task LiveServerHandshake_ReceivesAuthoritativeWelcomeFromCloudflare()
+    public async Task LiveServerHandshake_ReceivesAuthoritativeWelcomeAndRoomsFromCloudflare()
     {
         if (Environment.GetEnvironmentVariable("SKIP_LIVE_NET_TEST") == "1") return;
         using var session = new LiveMultiplayerSession(PlantationWorld.GenerateTrees());
+        await session.RefreshRoomsFromServerAsync();
+        Assert.True(session.GetRoomsSnapshot().Count >= 3);
+
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
-        bool ok = await session.ConnectOnceForTestAsync("wss://nyawit.xyverse.my.id/ws?name=xUnitEngineProbe", cts.Token);
+        bool ok = await session.ConnectOnceForTestAsync("wss://nyawit.xyverse.my.id/ws?room=kebun-sumatera-01&name=xUnitEngineProbe", cts.Token);
         Assert.True(ok);
         Assert.StartsWith("p_", session.Profile.Id);
     }

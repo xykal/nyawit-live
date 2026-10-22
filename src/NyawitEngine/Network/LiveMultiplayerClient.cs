@@ -11,6 +11,15 @@ using NyawitEngine.World;
 
 namespace NyawitEngine.Network;
 
+public sealed class RoomDescriptor
+{
+    public string Id { get; set; } = "kebun-sumatera-01";
+    public string Label { get; set; } = "SUMATERA BLOK A-01";
+    public string Region { get; set; } = "ID-WIB";
+    public int Online { get; set; }
+    public int Capacity { get; set; } = 32;
+}
+
 public sealed class AvatarConfig
 {
     public string Hat { get; set; } = "hat_caping";
@@ -58,7 +67,12 @@ public sealed class RemotePeerState
     public float WalkPhase;
     public int AnimState;
     public bool InTruck;
+    public bool CarryingTbs;
+    public bool PushingAngkong;
+    public float SteerAngle;
     public int Cargo;
+    public bool SpeakingNow;
+    public double VoiceActiveUntilSec;
     public AvatarConfig Avatar { get; set; } = new();
 }
 
@@ -113,15 +127,21 @@ public sealed class LiveMultiplayerSession : IDisposable
         new() { Id = "boar_1", X = -24f, Z = 54f, Yaw = 0.4f },
         new() { Id = "boar_2", X = 30f, Z = 62f, Yaw = -1.2f }
     ];
+    private readonly List<RoomDescriptor> _rooms =
+    [
+        new() { Id = "kebun-sumatera-01", Label = "SUMATERA BLOK A-01", Region = "ID-WIB", Online = 1, Capacity = 32 },
+        new() { Id = "kebun-riau-02", Label = "RIAU GAMBUT B-02", Region = "ID-WIB", Online = 0, Capacity = 32 },
+        new() { Id = "kebun-kalimantan-03", Label = "KALIMANTAN SAWIT C-03", Region = "ID-WITA", Online = 0, Capacity = 32 },
+    ];
     private readonly List<ChatMessageEntry> _chat = new(40);
     private readonly List<LeaderboardRow> _globalBoard = new(24);
     private readonly List<LeaderboardRow> _weeklyBoard = new(24);
     private readonly List<TournamentTierRow> _tiers =
     [
-        new() { Id = "tier_bronze", MinPts = 250, Coins = 500000, Gems = 35, Label = "250 Poin: Ikat Kepala Pendekar" },
-        new() { Id = "tier_silver", MinPts = 800, Coins = 1200000, Gems = 80, Label = "800 Poin: Sabit Naga Sawit" },
-        new() { Id = "tier_gold", MinPts = 1800, Coins = 2500000, Gems = 160, Label = "1.800 Poin: Sayap Daun Sawit Emas" },
-        new() { Id = "tier_champion", MinPts = 3200, Coins = 5000000, Gems = 350, Label = "3.200 Poin / Top 3: Mahkota Raja Sawit" },
+        new() { Id = "tier_bronze", MinPts = 250, Coins = 500000, Gems = 35, Label = "250 POIN: IKAT KEPALA PENDEKAR" },
+        new() { Id = "tier_silver", MinPts = 800, Coins = 1200000, Gems = 80, Label = "800 POIN: SABIT NAGA SAWIT" },
+        new() { Id = "tier_gold", MinPts = 1800, Coins = 2500000, Gems = 160, Label = "1800 POIN: SAYAP DAUN SAWIT EMAS" },
+        new() { Id = "tier_champion", MinPts = 3200, Coins = 5000000, Gems = 350, Label = "3200 POIN / TOP 3: MAHKOTA RAJA SAWIT" },
     ];
 
     private CancellationTokenSource? _cts;
@@ -129,6 +149,7 @@ public sealed class LiveMultiplayerSession : IDisposable
     private readonly SemaphoreSlim _sendLock = new(1, 1);
 
     public PlayerProfile Profile { get; } = new();
+    public string CurrentRoomId { get; private set; } = "kebun-sumatera-01";
     public bool IsConnected { get; private set; }
     public int PingMs { get; private set; } = 24;
     public string EventTitle { get; private set; } = "PANEN RAYA CERAH";
@@ -143,15 +164,61 @@ public sealed class LiveMultiplayerSession : IDisposable
     public event Action<float, float, bool>? OnHarvestSpawnFruit;
     public event Action<string>? OnSoundTrigger;
     public event Action? OnProfilePersisted;
+    public event Action<string, string, byte[]>? OnVoiceFrameReceived;
 
     public LiveMultiplayerSession(List<PalmTreeNode> trees)
     {
         _trees = trees;
     }
 
+    public List<RoomDescriptor> GetRoomsSnapshot()
+    {
+        lock (_sync) return new List<RoomDescriptor>(_rooms);
+    }
+
+    public void SelectRoom(string roomId)
+    {
+        if (string.IsNullOrWhiteSpace(roomId) || roomId == CurrentRoomId) return;
+        CurrentRoomId = roomId;
+        lock (_sync) _peers.Clear();
+        StartBackgroundConnect();
+    }
+
+    public async Task RefreshRoomsFromServerAsync()
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            string raw = await http.GetStringAsync($"{PrimaryApiBase}/api/rooms");
+            using var doc = JsonDocument.Parse(raw);
+            if (!doc.RootElement.TryGetProperty("rooms", out var arr) || arr.ValueKind != JsonValueKind.Array) return;
+            var fresh = new List<RoomDescriptor>();
+            foreach (var r in arr.EnumerateArray())
+            {
+                fresh.Add(new RoomDescriptor
+                {
+                    Id = r.GetProperty("id").GetString() ?? "kebun-sumatera-01",
+                    Label = (r.GetProperty("label").GetString() ?? "KEBUN LIVE").ToUpperInvariant(),
+                    Region = r.TryGetProperty("region", out var reg) ? reg.GetString() ?? "ID" : "ID",
+                    Online = r.TryGetProperty("online", out var onl) ? onl.GetInt32() : 0,
+                    Capacity = r.TryGetProperty("capacity", out var cap) ? cap.GetInt32() : 32,
+                });
+            }
+            if (fresh.Count > 0)
+            {
+                lock (_sync)
+                {
+                    _rooms.Clear();
+                    _rooms.AddRange(fresh);
+                }
+            }
+        }
+        catch { }
+    }
+
     private static byte[] BuildJsonBytes(Action<Utf8JsonWriter> writeBody)
     {
-        using var ms = new MemoryStream(192);
+        using var ms = new MemoryStream(256);
         using (var writer = new Utf8JsonWriter(ms))
         {
             writer.WriteStartObject();
@@ -165,6 +232,7 @@ public sealed class LiveMultiplayerSession : IDisposable
     {
         _cts?.Cancel();
         _cts = new CancellationTokenSource();
+        _ = Task.Run(() => RefreshRoomsFromServerAsync());
         _ = Task.Run(() => ConnectLoopAsync(_cts.Token));
     }
 
@@ -175,6 +243,7 @@ public sealed class LiveMultiplayerSession : IDisposable
         byte[] hello = BuildJsonBytes(w =>
         {
             w.WriteString("type", "hello");
+            w.WriteString("roomId", CurrentRoomId);
             w.WriteString("playerId", Profile.Id);
             w.WriteString("token", Profile.Token);
             w.WriteString("name", Profile.Name);
@@ -212,7 +281,7 @@ public sealed class LiveMultiplayerSession : IDisposable
             {
                 using var ws = new ClientWebSocket();
                 ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
-                string fullUrl = $"{baseEp}?pid={Uri.EscapeDataString(Profile.Id)}&tok={Uri.EscapeDataString(Profile.Token)}&name={Uri.EscapeDataString(Profile.Name)}";
+                string fullUrl = $"{baseEp}?room={Uri.EscapeDataString(CurrentRoomId)}&pid={Uri.EscapeDataString(Profile.Id)}&tok={Uri.EscapeDataString(Profile.Token)}&name={Uri.EscapeDataString(Profile.Name)}";
                 await ws.ConnectAsync(new Uri(fullUrl), ct);
 
                 _ws = ws;
@@ -220,6 +289,7 @@ public sealed class LiveMultiplayerSession : IDisposable
                 await SendRawBytesAsync(BuildJsonBytes(w =>
                 {
                     w.WriteString("type", "hello");
+                    w.WriteString("roomId", CurrentRoomId);
                     w.WriteString("playerId", Profile.Id);
                     w.WriteString("token", Profile.Token);
                     w.WriteString("name", Profile.Name);
@@ -287,7 +357,7 @@ public sealed class LiveMultiplayerSession : IDisposable
         }
     }
 
-    public void SendPlayerState(float x, float y, float z, float yaw, int anim, bool inTruck)
+    public void SendPlayerState(float x, float y, float z, float yaw, int anim, bool inTruck, bool carryingTbs = false, bool pushingAngkong = false, float steerAngle = 0f)
     {
         _ = SendRawBytesAsync(BuildJsonBytes(w =>
         {
@@ -298,6 +368,35 @@ public sealed class LiveMultiplayerSession : IDisposable
             w.WriteNumber("yaw", System.Math.Round(yaw, 3));
             w.WriteNumber("anim", anim);
             w.WriteBoolean("inTruck", inTruck);
+            w.WriteBoolean("heldTbs", carryingTbs);
+            w.WriteBoolean("pushingAngkong", pushingAngkong);
+            w.WriteNumber("steerAngle", System.Math.Round(steerAngle, 3));
+        }));
+    }
+
+    public void SendLoadTbs(int units, int goldUnits)
+    {
+        LocalCargo = System.Math.Min(24, LocalCargo + units);
+        LocalGoldCargo = System.Math.Min(24, LocalGoldCargo + goldUnits);
+        if (IsConnected)
+        {
+            _ = SendRawBytesAsync(BuildJsonBytes(w =>
+            {
+                w.WriteString("type", "load_tbs");
+                w.WriteNumber("units", units);
+                w.WriteNumber("goldUnits", goldUnits);
+            }));
+        }
+    }
+
+    public void SendVoiceFrame(byte[] ulawBuffer, int length)
+    {
+        if (!IsConnected || length <= 0 || length > 4096) return;
+        string b64 = Convert.ToBase64String(ulawBuffer, 0, length);
+        _ = SendRawBytesAsync(BuildJsonBytes(w =>
+        {
+            w.WriteString("type", "voice");
+            w.WriteString("pcm", b64);
         }));
     }
 
@@ -317,12 +416,18 @@ public sealed class LiveMultiplayerSession : IDisposable
             var t = _trees[treeId];
             bool gold = t.State == 2;
             t.State = 0;
-            int cap = inTruck ? 24 : 12;
-            LocalCargo = System.Math.Min(cap, LocalCargo + (gold ? 3 : 2));
-            if (gold) LocalGoldCargo++;
+            if (inTruck)
+            {
+                LocalCargo = System.Math.Min(24, LocalCargo + (gold ? 3 : 2));
+                if (gold) LocalGoldCargo++;
+                OnToast?.Invoke($"PANEN CANTER! MUATAN {LocalCargo}/24");
+            }
+            else
+            {
+                OnToast?.Invoke(gold ? "SAWIT EMAS 24K JATUH! AMBIL DAN MUAT KE TRUK/ANGKONG" : "TBS JATUH KE TANAH! AMBIL DAN MUAT KE TRUK/ANGKONG");
+            }
             OnHarvestSpawnFruit?.Invoke(t.X, t.Z, gold);
             OnSoundTrigger?.Invoke("harvest");
-            OnToast?.Invoke($"Panen TBS! Muatan {LocalCargo}/{cap}");
         }
     }
 
@@ -342,16 +447,16 @@ public sealed class LiveMultiplayerSession : IDisposable
         Profile.AllTimeScore += kg * 12;
         Profile.WeeklyPoints += kg;
         OnSoundTrigger?.Invoke("sell");
-        OnToast?.Invoke($"Setor PKS +{kg} Kg (+Rp {earned:N0})!");
+        OnToast?.Invoke($"SETOR PKS +{kg} KG (+RP {earned:N0})");
         OnProfilePersisted?.Invoke();
     }
 
     public void SendHorn() => _ = SendRawBytesAsync(Encoding.UTF8.GetBytes("{\"type\":\"horn\"}"));
 
-    public void SendChat(string text) => _ = SendRawBytesAsync(BuildJsonBytes(w =>
+    public void SendChat(string text, string channel = "global") => _ = SendRawBytesAsync(BuildJsonBytes(w =>
     {
         w.WriteString("type", "chat");
-        w.WriteString("channel", "global");
+        w.WriteString("channel", channel);
         w.WriteString("text", text);
     }));
 
@@ -424,7 +529,7 @@ public sealed class LiveMultiplayerSession : IDisposable
         }
         catch
         {
-            string fallback = $"Gue main NYAWIT LIVE 3D sebagai {Profile.Name} ({Profile.Avatar.Title}) — Setoran {Profile.TotalKg:N0} Kg TBS! Mabar live di {PrimaryApiBase}";
+            string fallback = $"NYAWIT LIVE 3D - {Profile.Name} [{Profile.Avatar.Title}] SETORAN {Profile.TotalKg:N0} KG TBS DI {PrimaryApiBase}";
             return (PrimaryApiBase, fallback);
         }
     }
@@ -435,6 +540,7 @@ public sealed class LiveMultiplayerSession : IDisposable
         List<ChatMessageEntry> dstChat,
         float dt)
     {
+        double now = NyawitEngine.Core.Time.TotalTime;
         lock (_sync)
         {
             dstPeers.Clear();
@@ -450,6 +556,7 @@ public sealed class LiveMultiplayerSession : IDisposable
                 while (dyaw < -MathF.PI) dyaw += MathF.PI * 2f;
                 p.RenderYaw += dyaw * k;
                 if (dx * dx + dz * dz > 0.001f) p.WalkPhase += dt * 9f;
+                p.SpeakingNow = p.VoiceActiveUntilSec > now;
                 dstPeers.Add(p);
             }
             dstBoars.Clear();
@@ -477,6 +584,8 @@ public sealed class LiveMultiplayerSession : IDisposable
         switch (type)
         {
             case "welcome":
+                if (root.TryGetProperty("roomId", out var rmEl) && rmEl.GetString() is string rid && !string.IsNullOrEmpty(rid))
+                    CurrentRoomId = rid;
                 if (root.TryGetProperty("profile", out var profEl)) ParseProfile(profEl);
                 if (root.TryGetProperty("trees", out var treesEl) && treesEl.ValueKind == JsonValueKind.Array)
                 {
@@ -523,6 +632,9 @@ public sealed class LiveMultiplayerSession : IDisposable
                             peer.AnimState = pe.GetProperty("a").GetInt32();
                             peer.InTruck = pe.GetProperty("tr").GetInt32() != 0;
                             peer.Cargo = pe.GetProperty("cg").GetInt32();
+                            peer.CarryingTbs = pe.TryGetProperty("carry", out var cr) && cr.GetInt32() != 0;
+                            peer.PushingAngkong = pe.TryGetProperty("cart", out var crt) && crt.GetInt32() != 0;
+                            peer.SteerAngle = pe.TryGetProperty("steer", out var st) ? st.GetSingle() : 0f;
                             if (pe.TryGetProperty("av", out var avEl)) peer.Avatar = ParseAvatar(avEl);
                         }
                         var toRemove = new List<string>();
@@ -543,6 +655,26 @@ public sealed class LiveMultiplayerSession : IDisposable
                             });
                         }
                     }
+                }
+                break;
+
+            case "voice":
+                string vSenderId = root.TryGetProperty("senderId", out var vsid) ? vsid.GetString() ?? "" : "";
+                string vSenderName = root.TryGetProperty("senderName", out var vsn) ? vsn.GetString() ?? "Pemain" : "Pemain";
+                string b64Pcm = root.TryGetProperty("pcm", out var vpcm) ? vpcm.GetString() ?? "" : "";
+                if (!string.IsNullOrEmpty(b64Pcm))
+                {
+                    try
+                    {
+                        byte[] raw = Convert.FromBase64String(b64Pcm);
+                        lock (_sync)
+                        {
+                            if (_peers.TryGetValue(vSenderId, out var spPeer))
+                                spPeer.VoiceActiveUntilSec = nowEngineSec + 0.55;
+                        }
+                        OnVoiceFrameReceived?.Invoke(vSenderId, vSenderName, raw);
+                    }
+                    catch { }
                 }
                 break;
 
@@ -571,7 +703,7 @@ public sealed class LiveMultiplayerSession : IDisposable
                 int combo = root.GetProperty("combo").GetInt32();
                 bool isG = root.GetProperty("isGold").GetBoolean();
                 OnSoundTrigger?.Invoke("harvest");
-                OnToast?.Invoke(isG ? $"SAWIT EMAS 24K! Combo x{combo} ({LocalCargo}/{maxCap})" : $"Panen TBS! Combo x{combo} ({LocalCargo}/{maxCap})");
+                OnToast?.Invoke(isG ? $"SAWIT EMAS 24K! COMBO X{combo} [{LocalCargo}/{maxCap}]" : $"PANEN TBS! COMBO X{combo} [{LocalCargo}/{maxCap}]");
                 break;
 
             case "sell_receipt":
@@ -587,7 +719,7 @@ public sealed class LiveMultiplayerSession : IDisposable
                 }
                 OnSoundTrigger?.Invoke("sell");
                 OnProfilePersisted?.Invoke();
-                OnToast?.Invoke($"SETOR PKS SUKSES! +Rp {rp:N0} | +{tpts} Poin Turnamen!");
+                OnToast?.Invoke($"SETOR PKS SUKSES! +RP {rp:N0} | +{tpts} POIN TURNAMEN");
                 break;
 
             case "chat":
@@ -618,7 +750,7 @@ public sealed class LiveMultiplayerSession : IDisposable
                 if (root.TryGetProperty("profile", out var dp)) ParseProfile(dp);
                 OnSoundTrigger?.Invoke("sell");
                 OnProfilePersisted?.Invoke();
-                OnToast?.Invoke($"Reward Hari {root.GetProperty("day").GetInt32()} Diklaim!");
+                OnToast?.Invoke($"REWARD HARI {root.GetProperty("day").GetInt32()} DIKLAIM!");
                 break;
 
             case "tournament_claimed":
@@ -626,14 +758,14 @@ public sealed class LiveMultiplayerSession : IDisposable
                 lock (_sync) { if (root.TryGetProperty("tournament", out var tr3)) ParseTournament(tr3); }
                 OnSoundTrigger?.Invoke("sell");
                 OnProfilePersisted?.Invoke();
-                OnToast?.Invoke("Hadiah Eksklusif Turnamen Mingguan Berhasil Diklaim!");
+                OnToast?.Invoke("HADIAH EKSKLUSIF TURNAMEN MINGGUAN BERHASIL DIKLAIM!");
                 break;
 
             case "social_linked":
                 if (root.TryGetProperty("profile", out var socp)) ParseProfile(socp);
                 OnSoundTrigger?.Invoke("sell");
                 OnProfilePersisted?.Invoke();
-                OnToast?.Invoke($"Akun {Profile.SocialProvider.ToUpperInvariant()} Terhubung! +30 Permata!");
+                OnToast?.Invoke($"AKUN {Profile.SocialProvider.ToUpperInvariant()} TERHUBUNG! +30 PERMATA!");
                 break;
 
             case "profile_sync":
@@ -666,7 +798,7 @@ public sealed class LiveMultiplayerSession : IDisposable
         Profile.Token = el.GetProperty("token").GetString() ?? Profile.Token;
         Profile.Name = el.GetProperty("name").GetString() ?? Profile.Name;
         Profile.SocialProvider = el.GetProperty("socialProvider").GetString() ?? "guest";
-        Profile.SocialHandle = el.GetProperty("socialHandle").GetString() ?? "";
+        Profile.SocialHandle = el.TryGetProperty("socialHandle", out var sh) ? sh.GetString() ?? "" : "";
         Profile.Coins = el.GetProperty("coins").GetInt64();
         Profile.Gems = el.GetProperty("gems").GetInt32();
         Profile.TotalKg = el.GetProperty("totalKg").GetInt32();
