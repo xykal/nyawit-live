@@ -1,0 +1,619 @@
+{
+  "version": 1,
+  "stride_bytes": 36,
+  "models": [
+    {
+      "name": "palm_trunk",
+      "radius": 6.43,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 3118,
+          "tris": 1888
+        },
+        {
+          "lod": 1,
+          "verts": 910,
+          "tris": 512
+        },
+        {
+          "lod": 2,
+          "verts": 113,
+          "tris": 96
+        }
+      ]
+    },
+    {
+      "name": "palm_crown",
+      "radius": 3.783,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 6928,
+          "tris": 9344
+        },
+        {
+          "lod": 1,
+          "verts": 2247,
+          "tris": 2376
+        },
+        {
+          "lod": 2,
+          "verts": 1030,
+          "tris": 952
+        }
+      ]
+    },
+    {
+      "name": "tbs_bunch",
+      "radius": 0.473,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 3636,
+          "tris": 2632
+        },
+        {
+          "lod": 1,
+          "verts": 1180,
+          "tris": 952
+        },
+        {
+          "lod": 2,
+          "verts": 150,
+          "tris": 76
+        }
+      ]
+    },
+    {
+      "name": "tropical_fern",
+      "radius": 0.79,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 2472,
+          "tris": 3184
+        },
+        {
+          "lod": 1,
+          "verts": 990,
+          "tris": 1080
+        },
+        {
+          "lod": 2,
+          "verts": 426,
+          "tris": 408
+        }
+      ]
+    },
+    {
+      "name": "rock_boulder",
+      "radius": 0.99,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 624,
+          "tris": 378
+        },
+        {
+          "lod": 1,
+          "verts": 465,
+          "tris": 210
+        },
+        {
+          "lod": 2,
+          "verts": 115,
+          "tris": 40
+        }
+      ]
+    },
+    {
+      "name": "canter_truck_body",
+      "radius": 3.173,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 6938,
+          "tris": 3222
+        },
+        {
+          "lod": 1,
+          "verts": 5706,
+          "tris": 2710
+        },
+        {
+          "lod": 2,
+          "verts": 3237,
+          "tris": 1536
+        }
+      ]
+    },
+    {
+      "name": "truck_wheel",
+      "radius": 0.499,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 1022,
+          "tris": 360
+        },
+        {
+          "lod": 1,
+          "verts": 614,
+          "tris": 216
+        },
+        {
+          "lod": 2,
+          "verts": 410,
+          "tris": 144
+        }
+      ]
+    },
+    {
+      "name": "truck_cargo_heap",
+      "radius": 2.107,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 2548,
+          "tris": 1344
+        },
+        {
+          "lod": 1,
+          "verts": 740,
+          "tris": 480
+        },
+        {
+          "lod": 2,
+          "verts": 672,
+          "tris": 240
+        }
+      ]
+    },
+    {
+      "name": "angkong_cart",
+      "radius": 1.219,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 1658,
+          "tris": 712
+        },
+        {
+          "lod": 1,
+          "verts": 1250,
+          "tris": 568
+        },
+        {
+          "lod": 2,
+          "verts": 1046,
+          "tris": 496
+        }
+      ]
+    },
+    {
+      "name": "pks_factory",
+      "radius": 14.068,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 1990,
+          "tris": 1208
+        },
+        {
+          "lod": 1,
+          "verts": 1846,
+          "tris": 1112
+        },
+        {
+          "lod": 2,
+          "verts": 1846,
+          "tris": 1040
+        }
+      ]
+    },
+    {
+      "name": "weighbridge_ram",
+      "radius": 5.734,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 1200,
+          "tris": 608
+        },
+        {
+          "lod": 1,
+          "verts": 1200,
+          "tris": 608
+        },
+        {
+          "lod": 2,
+          "verts": 1200,
+          "tris": 608
+        }
+      ]
+    },
+    {
+      "name": "mandor_post",
+      "radius": 4.716,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 1192,
+          "tris": 640
+        },
+        {
+          "lod": 1,
+          "verts": 1192,
+          "tris": 640
+        },
+        {
+          "lod": 2,
+          "verts": 1192,
+          "tris": 640
+        }
+      ]
+    },
+    {
+      "name": "wooden_bridge",
+      "radius": 4.679,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 2418,
+          "tris": 1400
+        },
+        {
+          "lod": 1,
+          "verts": 1458,
+          "tris": 848
+        },
+        {
+          "lod": 2,
+          "verts": 1048,
+          "tris": 544
+        }
+      ]
+    },
+    {
+      "name": "celeng_boar",
+      "radius": 1.138,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 692,
+          "tris": 324
+        },
+        {
+          "lod": 1,
+          "verts": 687,
+          "tris": 284
+        },
+        {
+          "lod": 2,
+          "verts": 662,
+          "tris": 264
+        }
+      ]
+    },
+    {
+      "name": "char_torso_head",
+      "radius": 0.994,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 1103,
+          "tris": 824
+        },
+        {
+          "lod": 1,
+          "verts": 918,
+          "tris": 604
+        },
+        {
+          "lod": 2,
+          "verts": 575,
+          "tris": 358
+        }
+      ]
+    },
+    {
+      "name": "char_arm",
+      "radius": 0.58,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 275,
+          "tris": 154
+        },
+        {
+          "lod": 1,
+          "verts": 296,
+          "tris": 124
+        },
+        {
+          "lod": 2,
+          "verts": 267,
+          "tris": 114
+        }
+      ]
+    },
+    {
+      "name": "char_leg",
+      "radius": 0.927,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 292,
+          "tris": 164
+        },
+        {
+          "lod": 1,
+          "verts": 283,
+          "tris": 134
+        },
+        {
+          "lod": 2,
+          "verts": 267,
+          "tris": 114
+        }
+      ]
+    },
+    {
+      "name": "hat_caping",
+      "radius": 0.431,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 142,
+          "tris": 160
+        },
+        {
+          "lod": 1,
+          "verts": 86,
+          "tris": 96
+        },
+        {
+          "lod": 2,
+          "verts": 70,
+          "tris": 64
+        }
+      ]
+    },
+    {
+      "name": "hat_safety",
+      "radius": 0.326,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 408,
+          "tris": 324
+        },
+        {
+          "lod": 1,
+          "verts": 336,
+          "tris": 228
+        },
+        {
+          "lod": 2,
+          "verts": 281,
+          "tris": 184
+        }
+      ]
+    },
+    {
+      "name": "hat_headband",
+      "radius": 0.593,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 284,
+          "tris": 124
+        },
+        {
+          "lod": 1,
+          "verts": 236,
+          "tris": 100
+        },
+        {
+          "lod": 2,
+          "verts": 254,
+          "tris": 88
+        }
+      ]
+    },
+    {
+      "name": "hat_cowboy",
+      "radius": 0.399,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 230,
+          "tris": 164
+        },
+        {
+          "lod": 1,
+          "verts": 218,
+          "tris": 152
+        },
+        {
+          "lod": 2,
+          "verts": 210,
+          "tris": 144
+        }
+      ]
+    },
+    {
+      "name": "hat_crown_gold",
+      "radius": 0.353,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 1258,
+          "tris": 832
+        },
+        {
+          "lod": 1,
+          "verts": 928,
+          "tris": 616
+        },
+        {
+          "lod": 2,
+          "verts": 394,
+          "tris": 288
+        }
+      ]
+    },
+    {
+      "name": "back_basket",
+      "radius": 0.447,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 290,
+          "tris": 264
+        },
+        {
+          "lod": 1,
+          "verts": 260,
+          "tris": 234
+        },
+        {
+          "lod": 2,
+          "verts": 278,
+          "tris": 216
+        }
+      ]
+    },
+    {
+      "name": "back_pack",
+      "radius": 0.675,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 320,
+          "tris": 148
+        },
+        {
+          "lod": 1,
+          "verts": 320,
+          "tris": 148
+        },
+        {
+          "lod": 2,
+          "verts": 320,
+          "tris": 148
+        }
+      ]
+    },
+    {
+      "name": "back_cape",
+      "radius": 0.825,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 386,
+          "tris": 144
+        },
+        {
+          "lod": 1,
+          "verts": 239,
+          "tris": 96
+        },
+        {
+          "lod": 2,
+          "verts": 169,
+          "tris": 64
+        }
+      ]
+    },
+    {
+      "name": "back_wings_gold",
+      "radius": 1.215,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 2046,
+          "tris": 2676
+        },
+        {
+          "lod": 1,
+          "verts": 792,
+          "tris": 864
+        },
+        {
+          "lod": 2,
+          "verts": 568,
+          "tris": 544
+        }
+      ]
+    },
+    {
+      "name": "tool_egrek",
+      "radius": 2.556,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 404,
+          "tris": 160
+        },
+        {
+          "lod": 1,
+          "verts": 404,
+          "tris": 160
+        },
+        {
+          "lod": 2,
+          "verts": 404,
+          "tris": 160
+        }
+      ]
+    },
+    {
+      "name": "tool_dodos",
+      "radius": 1.376,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 210,
+          "tris": 88
+        },
+        {
+          "lod": 1,
+          "verts": 210,
+          "tris": 88
+        },
+        {
+          "lod": 2,
+          "verts": 210,
+          "tris": 88
+        }
+      ]
+    },
+    {
+      "name": "tool_egrek_dragon",
+      "radius": 2.762,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 403,
+          "tris": 152
+        },
+        {
+          "lod": 1,
+          "verts": 403,
+          "tris": 152
+        },
+        {
+          "lod": 2,
+          "verts": 403,
+          "tris": 152
+        }
+      ]
+    }
+  ],
+  "total_lod0_tris": 33622,
+  "total_lod1_tris": 16392,
+  "total_lod2_tris": 9810,
+  "binary_bytes": 3554709
+}

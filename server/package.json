@@ -1,0 +1,14 @@
+{
+  "name": "nyawit-live-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx wrangler dev --ip 0.0.0.0 --port 8787",
+    "deploy": "npx wrangler deploy",
+    "check": "node --check src/worker.js && node --check src/worldSpec.js && node --check public/app.js"
+  },
+  "devDependencies": {
+    "wrangler": "^3.109.0"
+  }
+}

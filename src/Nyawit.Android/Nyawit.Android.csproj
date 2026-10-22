@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>24.0</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationId>id.my.xyverse.nyawitlive</ApplicationId>
+    <ApplicationVersion>100</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0.0</ApplicationDisplayVersion>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <AndroidCreatePackagePerAbi>false</AndroidCreatePackagePerAbi>
+    <RuntimeIdentifiers>android-arm64;android-arm</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <AndroidLinkMode>SdkOnly</AndroidLinkMode>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <RunAOTCompilation>false</RunAOTCompilation>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NyawitEngine\NyawitEngine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('Libs\arm64-v8a\libnyawit_simd.so')">
+    <AndroidNativeLibrary Include="Libs\arm64-v8a\libnyawit_simd.so" Abi="arm64-v8a" />
+  </ItemGroup>
+  <ItemGroup Condition="Exists('Libs\armeabi-v7a\libnyawit_simd.so')">
+    <AndroidNativeLibrary Include="Libs\armeabi-v7a\libnyawit_simd.so" Abi="armeabi-v7a" />
+  </ItemGroup>
+</Project>

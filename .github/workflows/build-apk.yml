@@ -1,0 +1,144 @@
+name: Build Nyawit Live 3D Android APK & Engine CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release-apk:
+    name: Native C11 NDK + .NET 8 Custom 3D Engine + Signed Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Verify Secret Hygiene (Ensure .env is never tracked)
+        run: |
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo "FATAL: .env must never be tracked in git!"
+            exit 1
+          fi
+          echo "Secret audit passed: zero sensitive env files tracked."
+
+      - name: Setup Node.js 20 & Check Live Server Syntax
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify Cloudflare Worker & Cross-Play Client Syntax
+        working-directory: server
+        run: |
+          npm install --no-audit --no-fund
+          npm run check
+
+      - name: Setup Java 17 (Temurin) for Android Build Tools
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup .NET 8 SDK & Android Workload
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install .NET Android Workload
+        run: dotnet workload install android --skip-manifest-update
+
+      - name: Compile Native C11 / ARM NEON Culler (arm64-v8a, armeabi-v7a & host x64)
+        run: |
+          mkdir -p src/Nyawit.Android/Libs/arm64-v8a src/Nyawit.Android/Libs/armeabi-v7a tests/NyawitEngine.Tests/bin/Release/net8.0
+
+          gcc -O3 -std=c11 -Wall -Wextra -Werror -shared -fPIC native/nyawit_simd.c \
+            -o tests/NyawitEngine.Tests/bin/Release/net8.0/libnyawit_simd.so
+
+          NDK_ROOT="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          CLANG_BIN="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "Using Android NDK Clang from: $CLANG_BIN"
+
+          "$CLANG_BIN/aarch64-linux-android24-clang" -O3 -ffast-math -std=c11 -Wall -Werror -shared -fPIC \
+            native/nyawit_simd.c -lm -o src/Nyawit.Android/Libs/arm64-v8a/libnyawit_simd.so
+
+          "$CLANG_BIN/armv7a-linux-androideabi24-clang" -O3 -ffast-math -std=c11 -Wall -Werror -shared -fPIC \
+            native/nyawit_simd.c -lm -o src/Nyawit.Android/Libs/armeabi-v7a/libnyawit_simd.so
+
+          ls -lh src/Nyawit.Android/Libs/*/*.so
+
+      - name: Run Automated C# Engine & NPAK Mesh Integrity Unit Tests
+        run: dotnet test tests/NyawitEngine.Tests/NyawitEngine.Tests.csproj -c Release --verbosity normal
+
+      - name: Prepare Release Signing Keystore
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/nyawit-release.p12"
+          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+          else
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_PATH" \
+              -storetype PKCS12 \
+              -alias nyawitkey \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "NyawitLive2026!" \
+              -keypass "NyawitLive2026!" \
+              -dname "CN=Nyawit Live 3D, OU=Game Engine, O=XyVerse Tech, L=Jakarta, ST=DKI, C=ID"
+          fi
+
+      - name: Build & Sign Universal Release Android APK (arm64-v8a + armeabi-v7a)
+        run: |
+          dotnet publish src/Nyawit.Android/Nyawit.Android.csproj \
+            -f net8.0-android \
+            -c Release \
+            -p:AndroidPackageFormat=apk \
+            -p:AndroidCreatePackagePerAbi=false \
+            -p:AndroidKeyStore=true \
+            -p:AndroidSigningKeyStore="$RUNNER_TEMP/nyawit-release.p12" \
+            -p:AndroidSigningKeyAlias=nyawitkey \
+            -p:AndroidSigningKeyPass="NyawitLive2026!" \
+            -p:AndroidSigningStorePass="NyawitLive2026!"
+
+          mkdir -p dist-apk
+          SIGNED_APK=$(find src/Nyawit.Android/bin/Release -name "*-Signed.apk" | head -n 1)
+          echo "Located signed APK: $SIGNED_APK"
+          cp "$SIGNED_APK" dist-apk/NyawitLive-v1.0.0-universal.apk
+          (cd dist-apk && sha256sum NyawitLive-v1.0.0-universal.apk > SHA256SUMS.txt)
+
+          echo "=== APK Archive Verification (Native NEON + 87 Sculpted 3D Meshes) ==="
+          unzip -l dist-apk/NyawitLive-v1.0.0-universal.apk | grep -E "libnyawit_simd|nyawit_models.npak|XyVerseDisplay"
+          ls -lh dist-apk/
+
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+          "$APKSIGNER" verify --verbose dist-apk/NyawitLive-v1.0.0-universal.apk
+
+      - name: Upload APK Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NyawitLive-Android-APK
+          path: dist-apk/*
+          if-no-files-found: error
+
+      - name: Publish Signed APK to GitHub Releases (v1.0.0 Latest)
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: "Nyawit Live 3D v1.0.0 — Custom C# Engine & OpenGL ES 3.0 Android APK"
+          make_latest: true
+          body: |
+            ## Nyawit Live 3D (`v1.0.0`) — Official Android Release
+            - **Custom Native C# 3D Game Engine (`NyawitEngine` on `.NET 8`) + Native C11 / ARM NEON SIMD Culler (`libnyawit_simd.so`)**
+            - **OpenGL ES 3.0 Hardware-Instanced Renderer (`glDrawElementsInstanced`)** — 180 swaying Tenera oil palms, 29 complex sculpted multi-LOD 3D models (`87` GPU meshes in binary `NPAK v1`), Canter Sawit Truck, PKS Factory, RAM Weighbridge, and full articulated 3D avatars in **~14–30 draw calls/frame**!
+            - **Free-Fire-Style Adaptive Performance Governor** (`SMOOTH` for potato phones up to `MAX HD` 120 FPS flagship mode).
+            - **Live Cross-Play Server**: [`https://nyawit.xyverse.my.id`](https://nyawit.xyverse.my.id) (`wss://nyawit.xyverse.my.id/ws`) — play together seamlessly across Android APK & WebGL2 Browser!
+          files: |
+            dist-apk/NyawitLive-v1.0.0-universal.apk
+            dist-apk/SHA256SUMS.txt

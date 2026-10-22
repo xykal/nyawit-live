@@ -1,0 +1,39 @@
+# Secrets & environment — NEVER commit
+.env
+.env.*
+!.env.example
+.dev.vars
+*.keystore
+*.jks
+*.p12
+*.pem
+secrets/
+uploads/
+
+# .NET / C# / Android build outputs
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.apk
+*.aab
+*.ap_
+*.dex
+local.properties
+
+# Native C/C++ build artifacts
+native/build/
+native/out/
+
+# Node / Cloudflare Wrangler
+node_modules/
+.wrangler/
+dist/
+coverage/
+
+# Python / temp / preview scratch
+__pycache__/
+*.pyc
+.pytest_cache/
+.tmp_renders/
+.DS_Store

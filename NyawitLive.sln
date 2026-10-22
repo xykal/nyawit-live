@@ -1,0 +1,43 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{BE9AE5BE-1218-44DD-9F34-05F8D23B5904}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NyawitEngine", "src\NyawitEngine\NyawitEngine.csproj", "{09A83B02-648B-45B5-8DC5-1FE5CBEF4818}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nyawit.Android", "src\Nyawit.Android\Nyawit.Android.csproj", "{33ABD04D-9086-4CF2-93EE-1E0FB9A0F3D9}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{504E66D6-3224-4010-8513-C3FF6E8E4B08}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NyawitEngine.Tests", "tests\NyawitEngine.Tests\NyawitEngine.Tests.csproj", "{95C22641-3F3A-4BC8-9C7F-95D9F0E3B7AE}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{09A83B02-648B-45B5-8DC5-1FE5CBEF4818}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{09A83B02-648B-45B5-8DC5-1FE5CBEF4818}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{09A83B02-648B-45B5-8DC5-1FE5CBEF4818}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{09A83B02-648B-45B5-8DC5-1FE5CBEF4818}.Release|Any CPU.Build.0 = Release|Any CPU
+		{33ABD04D-9086-4CF2-93EE-1E0FB9A0F3D9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{33ABD04D-9086-4CF2-93EE-1E0FB9A0F3D9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{33ABD04D-9086-4CF2-93EE-1E0FB9A0F3D9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{33ABD04D-9086-4CF2-93EE-1E0FB9A0F3D9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{95C22641-3F3A-4BC8-9C7F-95D9F0E3B7AE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{95C22641-3F3A-4BC8-9C7F-95D9F0E3B7AE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{95C22641-3F3A-4BC8-9C7F-95D9F0E3B7AE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{95C22641-3F3A-4BC8-9C7F-95D9F0E3B7AE}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{09A83B02-648B-45B5-8DC5-1FE5CBEF4818} = {BE9AE5BE-1218-44DD-9F34-05F8D23B5904}
+		{33ABD04D-9086-4CF2-93EE-1E0FB9A0F3D9} = {BE9AE5BE-1218-44DD-9F34-05F8D23B5904}
+		{95C22641-3F3A-4BC8-9C7F-95D9F0E3B7AE} = {504E66D6-3224-4010-8513-C3FF6E8E4B08}
+	EndGlobalSection
+EndGlobal
