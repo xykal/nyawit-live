@@ -1,5 +1,10 @@
 using System;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Android;
 using Android.App;
 using Android.Content;
@@ -172,16 +177,11 @@ public class MainActivity : Activity
 
             SetContentView(_rootLayout);
             ApplyHardwareDisplayRefreshRate(_renderer.Quality.TargetFps);
-
-            _stageReceiver = new StageBroadcastReceiver(this);
-            var filter = new IntentFilter("id.my.xyverse.nyawitlive.STAGE_CMD");
-            if (OperatingSystem.IsAndroidVersionAtLeast(33))
-                RegisterReceiver(_stageReceiver, filter, ReceiverFlags.Exported);
-            else
-                RegisterReceiver(_stageReceiver, filter);
+            StartLocalStageControlServer();
 
             _net.StartBackgroundConnect();
-            HandleStageIntent(Intent);
+            if (!string.IsNullOrWhiteSpace(Intent?.GetStringExtra("stage")))
+                ApplyStageByName(Intent.GetStringExtra("stage")!);
         }
         catch (Exception ex)
         {
@@ -518,25 +518,83 @@ public class MainActivity : Activity
             ToggleVoiceChatWithPermission();
     }
 
-    private StageBroadcastReceiver? _stageReceiver;
+    private TcpListener? _stageControlServer;
 
-    private sealed class StageBroadcastReceiver : BroadcastReceiver
+    private void StartLocalStageControlServer()
     {
-        private readonly MainActivity _owner;
-        public StageBroadcastReceiver(MainActivity owner) => _owner = owner;
-        public override void OnReceive(Context? context, Intent? intent) => _owner.HandleStageIntent(intent);
+        try
+        {
+            _stageControlServer = new TcpListener(IPAddress.Loopback, 18765);
+            _stageControlServer.Start();
+            _ = Task.Run(async () =>
+            {
+                while (_stageControlServer != null)
+                {
+                    TcpClient? client = null;
+                    try
+                    {
+                        client = await _stageControlServer.AcceptTcpClientAsync();
+                        using (client)
+                        using (var stream = client.GetStream())
+                        using (var reader = new StreamReader(stream, Encoding.UTF8, false, 1024, leaveOpen: true))
+                        {
+                            string reqLine = await reader.ReadLineAsync() ?? "";
+                            string stage = "";
+                            int qIdx = reqLine.IndexOf("?s=", StringComparison.Ordinal);
+                            if (qIdx >= 0)
+                            {
+                                string rest = reqLine[(qIdx + 3)..];
+                                int sp = rest.IndexOfAny(new[] { ' ', '&' });
+                                stage = (sp >= 0 ? rest[..sp] : rest).Trim();
+                            }
+
+                            if (!string.IsNullOrEmpty(stage))
+                            {
+                                var tcs = new TaskCompletionSource<bool>();
+                                RunOnUiThread(() =>
+                                {
+                                    try { ApplyStageByName(stage); }
+                                    finally { tcs.TrySetResult(true); }
+                                });
+                                await tcs.Task;
+
+                                int targetFrame = (_renderer?.PresentedFrameCount ?? 0) + 8;
+                                var sw = System.Diagnostics.Stopwatch.StartNew();
+                                while ((_renderer?.PresentedFrameCount ?? 0) < targetFrame && sw.ElapsedMilliseconds < 6000)
+                                {
+                                    _hud?.PostInvalidate();
+                                    await Task.Delay(60);
+                                }
+                                _hud?.PostInvalidate();
+                                await Task.Delay(180);
+                            }
+
+                            string body = $"{{\"ok\":true,\"stage\":\"{stage}\",\"frames\":{_renderer?.PresentedFrameCount ?? 0}}}";
+                            byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
+                            string hdr = $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {bodyBytes.Length}\r\nConnection: close\r\n\r\n";
+                            byte[] hdrBytes = Encoding.ASCII.GetBytes(hdr);
+                            await stream.WriteAsync(hdrBytes);
+                            await stream.WriteAsync(bodyBytes);
+                            await stream.FlushAsync();
+                        }
+                    }
+                    catch { await Task.Delay(50); }
+                }
+            });
+        }
+        catch { }
     }
 
     protected override void OnNewIntent(Intent? intent)
     {
         base.OnNewIntent(intent);
         ScheduleImmersiveFullscreen();
-        HandleStageIntent(intent);
+        if (!string.IsNullOrWhiteSpace(intent?.GetStringExtra("stage")))
+            ApplyStageByName(intent.GetStringExtra("stage")!);
     }
 
-    private void HandleStageIntent(Intent? intent)
+    private void ApplyStageByName(string stage)
     {
-        string? stage = intent?.GetStringExtra("stage");
         if (string.IsNullOrWhiteSpace(stage) || _renderer == null || _hud == null || _net == null) return;
 
         switch (stage.Trim().ToLowerInvariant())
@@ -544,40 +602,42 @@ public class MainActivity : Activity
             case "splash":
                 _hud.CloseModal();
                 _renderer.ForceStageAndProgress(AppSceneStage.Splash, 0.58f, hold: true);
-                _hud.PostInvalidate();
+                _hud.Invalidate();
                 break;
 
             case "garage":
                 _hud.CloseModal();
                 _renderer.HoldStageProgress = false;
-                _renderer.SkipSplashToLobby();
-                _renderer.ReturnToLobby();
+                _renderer.ForceStageAndProgress(AppSceneStage.Lobby, 1.0f, hold: false);
                 _renderer.LobbyOrbitYaw = 0.06f;
-                _hud.PostInvalidate();
+                _hud.Invalidate();
                 break;
 
             case "loading":
                 _hud.CloseModal();
                 _renderer.BeginWorldPreparation();
                 _renderer.ForceStageAndProgress(AppSceneStage.PreparingWorld, 0.64f, hold: true);
-                _hud.PostInvalidate();
+                _hud.Invalidate();
                 break;
 
             case "onfoot":
                 _renderer.HoldStageProgress = false;
                 _renderer.ForceStageAndProgress(AppSceneStage.Gameplay, 1.0f, hold: false);
                 ExecuteKeyShowcase(Keycode.F);
+                _hud.Invalidate();
                 break;
 
             case "canter":
                 _renderer.HoldStageProgress = false;
                 _renderer.ForceStageAndProgress(AppSceneStage.Gameplay, 1.0f, hold: false);
                 ExecuteKeyShowcase(Keycode.T);
+                _hud.Invalidate();
                 break;
 
             case "settings":
                 _renderer.HoldStageProgress = false;
                 ExecuteKeyShowcase(Keycode.P);
+                _hud.Invalidate();
                 break;
         }
     }
@@ -597,6 +657,8 @@ public class MainActivity : Activity
             _hud.CloseModal();
             _renderer.InTruck = false;
             _renderer.LockShowcaseCam = true;
+            _renderer.JoyX = 0f;
+            _renderer.JoyY = 0f;
             _renderer.Physics.Player.X = -5.6f;
             _renderer.Physics.Player.Z = 14.0f;
             _renderer.Physics.Player.Y = RigidBodyWorld.SurfaceHeightWithStructures(-5.6f, 14.0f);
@@ -610,16 +672,17 @@ public class MainActivity : Activity
             _net.Profile.Avatar.Glasses = true;
             _net.Profile.Avatar.WaistParang = true;
 
-            _renderer.Physics.MainTruck.X = -2.4f;
-            _renderer.Physics.MainTruck.Z = 10.6f;
-            _renderer.Physics.MainTruck.Y = RigidBodyWorld.SurfaceHeightWithStructures(-2.4f, 10.6f);
+            _renderer.Physics.MainTruck.X = -2.2f;
+            _renderer.Physics.MainTruck.Z = 10.4f;
+            _renderer.Physics.MainTruck.Y = RigidBodyWorld.SurfaceHeightWithStructures(-2.2f, 10.4f);
             _renderer.Physics.MainTruck.Yaw = -0.62f;
+            _renderer.Physics.MainTruck.SpeedMs = 0f;
             _renderer.Physics.MainTruck.SteerAngle = 0.34f;
             _renderer.Physics.MainTruck.VisualCargoUnits = 16;
 
             _renderer.CamYaw = 0.14f;
-            _renderer.CamPitch = 0.11f;
-            _renderer.CamDist = 3.55f;
+            _renderer.CamPitch = 0.10f;
+            _renderer.CamDist = 3.35f;
             _hud.PostInvalidate();
             return;
         }
@@ -628,17 +691,18 @@ public class MainActivity : Activity
             _hud.CloseModal();
             _renderer.InTruck = true;
             _renderer.LockShowcaseCam = true;
+            _renderer.JoyX = -0.78f;
+            _renderer.JoyY = 0f;
             _renderer.Physics.MainTruck.X = 0.0f;
             _renderer.Physics.MainTruck.Z = 14.0f;
             _renderer.Physics.MainTruck.Y = RigidBodyWorld.SurfaceHeightWithStructures(0.0f, 14.0f);
             _renderer.Physics.MainTruck.Yaw = -0.52f;
+            _renderer.Physics.MainTruck.SpeedMs = 0f;
             _renderer.Physics.MainTruck.SteerAngle = 0.36f;
             _renderer.Physics.MainTruck.VisualCargoUnits = 18;
-            _renderer.CamYaw = 0.22f;
-            _renderer.CamDist = 6.2f;
+            _renderer.CamYaw = 0.14f;
+            _renderer.CamDist = 5.9f;
             _renderer.CamPitch = 0.16f;
-            _renderer.JoyX = -0.78f;
-            _renderer.JoyY = -0.62f;
             _hud.PostInvalidate();
         }
     }

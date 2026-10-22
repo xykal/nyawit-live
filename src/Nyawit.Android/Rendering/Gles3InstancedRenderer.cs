@@ -676,13 +676,17 @@ void main() {
     private double _stageEnterSec;
     public bool HoldStageProgress { get; set; }
 
+    private int _presentedFrameCount;
+    public int PresentedFrameCount => System.Threading.Volatile.Read(ref _presentedFrameCount);
+
     public void ForceStageAndProgress(AppSceneStage stage, float progress = 0.58f, bool hold = false)
     {
         HoldStageProgress = hold;
         _stageEnterSec = _clock.Elapsed.TotalSeconds - progress * 2.2;
         if (stage == AppSceneStage.Splash) SplashProgress = progress;
         else if (stage == AppSceneStage.PreparingWorld) WorldPrepProgress = progress;
-        SetStage(stage);
+        Stage = stage;
+        OnStageChanged?.Invoke();
     }
 
     private void SetStage(AppSceneStage next)
@@ -916,6 +920,7 @@ void main() {
         Time.DeltaTime = dt;
         if (Quality.RecordFrame(dt))
             SyncRenderScaleNow();
+        System.Threading.Interlocked.Increment(ref _presentedFrameCount);
 
         if (Stage == AppSceneStage.Splash)
         {
