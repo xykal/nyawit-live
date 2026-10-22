@@ -835,12 +835,14 @@ public sealed class HudOverlayView : View
 
         if (_renderer.Quality.ShowFpsHud)
         {
-            _textPaint.Color = Color.Argb(185, 167, 243, 208);
+            string tel = $"{_renderer.Quality.CurrentFps} FPS ({_renderer.Quality.TargetFps}HZ)  •  {_renderer.Quality.Active.Label}  •  {_net.CurrentRoomId.ToUpperInvariant()}";
             _textPaint.TextSize = Dp(8.8f);
             _textPaint.TextAlign = Paint.Align.Right;
-            canvas.DrawText(
-                $"{_renderer.Quality.CurrentFps} FPS ({_renderer.Quality.TargetFps}HZ)  •  {_renderer.Quality.Active.Label}  •  {_net.CurrentRoomId.ToUpperInvariant()}",
-                w - pad, pad + btnS + Dp(14f), _textPaint);
+            float tw = _textPaint.MeasureText(tel) + Dp(16f);
+            DrawSharpPanel(canvas, w - pad - tw, pad + btnS + Dp(4f), w - pad, pad + btnS + Dp(21f),
+                Color.Argb(205, 8, 15, 20), Color.Argb(135, 74, 222, 128), 3.5f, 1.0f);
+            _textPaint.Color = Color.Argb(245, 187, 247, 208);
+            canvas.DrawText(tel, w - pad - Dp(8f), pad + btnS + Dp(15.5f), _textPaint);
         }
 
         // 4. Bottom-Left Precision Analog Joystick

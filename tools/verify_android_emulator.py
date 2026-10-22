@@ -67,8 +67,16 @@ def run(cmd, check=True, binary=False):
     return res.stdout if binary else res.stdout.decode("utf-8", errors="replace")
 
 
-def send_stage(stage_name: str, wait_sec: float):
-    out = run(["adb", "shell", "am", "start", "-W", "--activity-single-top", "-n", ACTIVITY, "--es", "stage", stage_name])
+def send_stage(stage_name: str, wait_sec: float, cold_launch: bool = False):
+    if cold_launch:
+        out = run(["adb", "shell", "am", "start", "-W", "-n", ACTIVITY, "--es", "stage", stage_name])
+    else:
+        out = run([
+            "adb", "shell", "am", "broadcast", "-f", "0x10000000",
+            "-a", "id.my.xyverse.nyawitlive.STAGE_CMD",
+            "-p", "id.my.xyverse.nyawitlive",
+            "--es", "stage", stage_name,
+        ])
     print(f"  -> Stage '{stage_name}': {out.splitlines()[0] if out else 'OK'}")
     time.sleep(wait_sec)
 
@@ -112,7 +120,7 @@ def main():
     run(["adb", "logcat", "-c"], check=False)
 
     print("=== [2/8] Cold-Launching Boot Splash Stage (Zero Stock Android Chrome) ===")
-    send_stage("splash", 5.5)
+    send_stage("splash", 5.5, cold_launch=True)
 
     pid1 = run(["adb", "shell", "pidof", "id.my.xyverse.nyawitlive"], check=False).strip()
     print(f"Live Android Process PID: '{pid1}'")

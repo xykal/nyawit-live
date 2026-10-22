@@ -172,6 +172,14 @@ public class MainActivity : Activity
 
             SetContentView(_rootLayout);
             ApplyHardwareDisplayRefreshRate(_renderer.Quality.TargetFps);
+
+            _stageReceiver = new StageBroadcastReceiver(this);
+            var filter = new IntentFilter("id.my.xyverse.nyawitlive.STAGE_CMD");
+            if (OperatingSystem.IsAndroidVersionAtLeast(33))
+                RegisterReceiver(_stageReceiver, filter, ReceiverFlags.Exported);
+            else
+                RegisterReceiver(_stageReceiver, filter);
+
             _net.StartBackgroundConnect();
             HandleStageIntent(Intent);
         }
@@ -510,6 +518,15 @@ public class MainActivity : Activity
             ToggleVoiceChatWithPermission();
     }
 
+    private StageBroadcastReceiver? _stageReceiver;
+
+    private sealed class StageBroadcastReceiver : BroadcastReceiver
+    {
+        private readonly MainActivity _owner;
+        public StageBroadcastReceiver(MainActivity owner) => _owner = owner;
+        public override void OnReceive(Context? context, Intent? intent) => _owner.HandleStageIntent(intent);
+    }
+
     protected override void OnNewIntent(Intent? intent)
     {
         base.OnNewIntent(intent);
@@ -614,12 +631,14 @@ public class MainActivity : Activity
             _renderer.Physics.MainTruck.X = 0.0f;
             _renderer.Physics.MainTruck.Z = 14.0f;
             _renderer.Physics.MainTruck.Y = RigidBodyWorld.SurfaceHeightWithStructures(0.0f, 14.0f);
-            _renderer.Physics.MainTruck.Yaw = 0.0f;
+            _renderer.Physics.MainTruck.Yaw = -0.52f;
+            _renderer.Physics.MainTruck.SteerAngle = 0.36f;
             _renderer.Physics.MainTruck.VisualCargoUnits = 18;
-            _renderer.CamDist = 6.1f;
-            _renderer.CamPitch = 0.18f;
+            _renderer.CamYaw = 0.22f;
+            _renderer.CamDist = 6.2f;
+            _renderer.CamPitch = 0.16f;
             _renderer.JoyX = -0.78f;
-            _renderer.JoyY = -0.52f;
+            _renderer.JoyY = -0.62f;
             _hud.PostInvalidate();
         }
     }
