@@ -6,7 +6,7 @@ using Android.Media;
 namespace Nyawit.AndroidClient.Audio;
 
 /// <summary>
-/// Zero-asset procedural PCM audio synthesizer for instant tactile harvesting, truck airhorn & cash SFX.
+/// Zero-asset procedural PCM audio synthesizer for instant tactile harvesting, truck airhorn &amp; cash SFX.
 /// Generates lightweight 16-bit mono buffers once at startup (~48 KB RAM total).
 /// </summary>
 public sealed class ProceduralSfxPlayer : IDisposable

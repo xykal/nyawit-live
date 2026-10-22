@@ -34,8 +34,8 @@ public struct ProjectedLabel
 /// NyawitEngine v2.0 Next-Gen OpenGL ES 3.0 Hardware-Instanced PBR-Inspired Renderer.
 /// Features:
 ///   - Atmospheric tropical sky gradient dome + glowing solar halo
-///   - 1-draw-call hardware-instanced soft ground canopy & contact shadows
-///   - Screen-space derivative (dFdx/dFdy) procedural HD micro-normal detail on terrain, roads & wet mud
+///   - 1-draw-call hardware-instanced soft ground canopy &amp; contact shadows
+///   - Screen-space derivative (dFdx/dFdy) procedural HD micro-normal detail on terrain, roads &amp; wet mud
 ///   - Animated specular canal water ripples + Fresnel sky reflections
 ///   - Palm frond Subsurface Scattering (SSS) + baked 12-ray Ambient Occlusion + HDR emissive LEDs + ACES tone mapping
 ///   - Dynamic hardware resolution scaling + SIMD multi-LOD culling (~25 draw calls/frame, zero GC churn!)

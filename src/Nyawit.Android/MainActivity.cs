@@ -18,11 +18,12 @@ using NyawitEngine.Assets;
 using NyawitEngine.Network;
 using NyawitEngine.World;
 using EGLConfig = Javax.Microedition.Khronos.Egl.EGLConfig;
+using EGLDisplay = Javax.Microedition.Khronos.Egl.EGLDisplay;
 
 namespace Nyawit.AndroidClient;
 
 /// <summary>
-/// Universal resilient EGL config selector for Qualcomm Adreno, ARM Mali, PowerVR, Xclipse & SwiftShader GPUs.
+/// Universal resilient EGL config selector for Qualcomm Adreno, ARM Mali, PowerVR, Xclipse &amp; SwiftShader GPUs.
 /// Prefers hardware 4x MSAA RGBA8888 + 24/16-bit depth when supported, gracefully stepping down to standard
 /// RGBA8888/RGB565 OpenGL ES 3.0 configs so startup NEVER throws "IllegalArgumentException: No config chosen"!
 /// </summary>
