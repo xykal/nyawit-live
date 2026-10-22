@@ -156,7 +156,7 @@ public static class PlantationWorld
         return (ferns, rocks);
     }
 
-    public static MeshLodSlice BuildSplattedTerrainMesh(int grid = 128, float span = 224f)
+    public static MeshLodSlice BuildSplattedTerrainMesh(int grid = 176, float span = 224f)
     {
         byte[] vbuf = new byte[grid * grid * NpakArchive.VertexStrideBytes];
         using (var ms = new System.IO.MemoryStream(vbuf))
@@ -169,29 +169,36 @@ public static class PlantationWorld
                 {
                     float x = -span * 0.5f + (xi / (float)(grid - 1)) * span;
                     float h = TerrainHeight(x, z);
-                    float hx = TerrainHeight(x + 1.2f, z) - TerrainHeight(x - 1.2f, z);
-                    float hz = TerrainHeight(x, z + 1.2f) - TerrainHeight(x, z - 1.2f);
-                    float nx = -hx, ny = 2.4f, nz = -hz;
+                    float hx = TerrainHeight(x + 0.9f, z) - TerrainHeight(x - 0.9f, z);
+                    float hz = TerrainHeight(x, z + 0.9f) - TerrainHeight(x, z - 0.9f);
+                    float nx = -hx, ny = 1.8f, nz = -hz;
                     float nl = MathF.Sqrt(nx * nx + ny * ny + nz * nz);
                     nx /= nl; ny /= nl; nz /= nl;
 
                     float rd = RoadFactor(x, z);
                     float md = MudFactor(x, z);
                     float yard = System.Math.Clamp(1f - (MathF.Sqrt(x * x + (z + 15f) * (z + 15f)) - 14f) / 5f, 0f, 1f);
-                    float checker = (((int)MathF.Floor(x * 0.25f) + (int)MathF.Floor(z * 0.25f)) & 1) * 0.06f;
+                    float dCanal = System.Math.Clamp(1f - MathF.Abs(z - CanalZ) / 6.2f, 0f, 1f);
+                    float lushWave = 0.5f + 0.5f * MathF.Sin(x * 0.14f + MathF.Cos(z * 0.13f) * 1.6f);
 
-                    float r = 56f + checker * 180f, g = 118f + checker * 160f, b = 46f + checker * 80f;
-                    r = r * (1f - md) + 92f * md; g = g * (1f - md) + 64f * md; b = b * (1f - md) + 42f * md;
-                    r = r * (1f - rd) + 168f * rd; g = g * (1f - rd) + 114f * rd; b = b * (1f - rd) + 74f * rd;
-                    r = r * (1f - yard) + 132f * yard; g = g * (1f - yard) + 138f * yard; b = b * (1f - yard) + 142f * yard;
+                    float r = 42f + lushWave * 28f, g = 112f + lushWave * 38f, b = 36f + lushWave * 18f;
+                    r = r * (1f - md) + 84f * md; g = g * (1f - md) + 58f * md; b = b * (1f - md) + 38f * md;
+                    r = r * (1f - rd) + 172f * rd; g = g * (1f - rd) + 122f * rd; b = b * (1f - rd) + 78f * rd;
+                    r = r * (1f - dCanal * 0.65f) + 96f * (dCanal * 0.65f);
+                    g = g * (1f - dCanal * 0.65f) + 84f * (dCanal * 0.65f);
+                    b = b * (1f - dCanal * 0.65f) + 56f * (dCanal * 0.65f);
+                    r = r * (1f - yard) + 128f * yard; g = g * (1f - yard) + 134f * yard; b = b * (1f - yard) + 142f * yard;
+                    float ao = 250f - dCanal * 48f - md * 18f;
 
                     bw.Write(x); bw.Write(h); bw.Write(z);
                     bw.Write(nx); bw.Write(ny); bw.Write(nz);
-                    bw.Write(0.1f); bw.Write(0.1f);
+                    // uv.x = road/mud splat hint, uv.y = 0.05 tags HD procedural terrain shader path!
+                    bw.Write(System.Math.Clamp(md * 0.7f + rd * 0.25f, 0f, 0.7f));
+                    bw.Write(0.05f);
                     bw.Write((byte)System.Math.Clamp((int)r, 0, 255));
                     bw.Write((byte)System.Math.Clamp((int)g, 0, 255));
                     bw.Write((byte)System.Math.Clamp((int)b, 0, 255));
-                    bw.Write((byte)245);
+                    bw.Write((byte)System.Math.Clamp((int)ao, 140, 255));
                 }
             }
         }
@@ -217,23 +224,75 @@ public static class PlantationWorld
         return new MeshLodSlice { VertexCount = grid * grid, IndexCount = triCount, VertexStream = vbuf, IndexStream = ibuf };
     }
 
-    public static MeshLodSlice BuildCanalWaterMesh()
+    public static MeshLodSlice BuildCanalWaterMesh(int segX = 64)
     {
-        byte[] vbuf = new byte[4 * NpakArchive.VertexStrideBytes];
-        (float x, float z)[] pts = [(-112f, CanalZ - 4.4f), (112f, CanalZ - 4.4f), (-112f, CanalZ + 4.4f), (112f, CanalZ + 4.4f)];
+        int vcnt = (segX + 1) * 2;
+        byte[] vbuf = new byte[vcnt * NpakArchive.VertexStrideBytes];
         using (var ms = new System.IO.MemoryStream(vbuf))
         using (var bw = new System.IO.BinaryWriter(ms))
         {
-            foreach (var (x, z) in pts)
+            for (int i = 0; i <= segX; i++)
             {
-                bw.Write(x); bw.Write(-0.82f); bw.Write(z);
-                bw.Write(0f); bw.Write(1f); bw.Write(0f);
-                bw.Write(0.1f); bw.Write(0.1f);
-                bw.Write((byte)34); bw.Write((byte)132); bw.Write((byte)148); bw.Write((byte)255);
+                float x = -112f + (i / (float)segX) * 224f;
+                for (int s = 0; s < 2; s++)
+                {
+                    float z = CanalZ + (s == 0 ? -4.5f : 4.5f);
+                    bw.Write(x); bw.Write(-0.78f); bw.Write(z);
+                    bw.Write(0f); bw.Write(1f); bw.Write(0f);
+                    bw.Write(s == 0 ? 0.0f : 0.4f);
+                    bw.Write(0.905f); // Tags animated specular water surface in shader!
+                    bw.Write((byte)24); bw.Write((byte)128); bw.Write((byte)146); bw.Write((byte)255);
+                }
             }
         }
-        byte[] ibuf = new byte[6 * sizeof(ushort)];
-        Buffer.BlockCopy(new ushort[] { 0, 2, 1, 1, 2, 3 }, 0, ibuf, 0, ibuf.Length);
-        return new MeshLodSlice { VertexCount = 4, IndexCount = 6, VertexStream = vbuf, IndexStream = ibuf };
+        int triCount = segX * 6;
+        byte[] ibuf = new byte[triCount * sizeof(ushort)];
+        using (var ims = new System.IO.MemoryStream(ibuf))
+        using (var ibw = new System.IO.BinaryWriter(ims))
+        {
+            for (int i = 0; i < segX; i++)
+            {
+                ushort b0 = (ushort)(i * 2), b1 = (ushort)(i * 2 + 1), b2 = (ushort)(i * 2 + 2), b3 = (ushort)(i * 2 + 3);
+                ibw.Write(b0); ibw.Write(b1); ibw.Write(b2);
+                ibw.Write(b2); ibw.Write(b1); ibw.Write(b3);
+            }
+        }
+        return new MeshLodSlice { VertexCount = vcnt, IndexCount = triCount, VertexStream = vbuf, IndexStream = ibuf };
+    }
+
+    public static MeshLodSlice BuildSoftShadowDiscMesh(int seg = 16)
+    {
+        int vcnt = seg + 1;
+        byte[] vbuf = new byte[vcnt * NpakArchive.VertexStrideBytes];
+        using (var ms = new System.IO.MemoryStream(vbuf))
+        using (var bw = new System.IO.BinaryWriter(ms))
+        {
+            bw.Write(0f); bw.Write(0.045f); bw.Write(0f);
+            bw.Write(0f); bw.Write(1f); bw.Write(0f);
+            bw.Write(0f); bw.Write(0f);
+            bw.Write((byte)8); bw.Write((byte)16); bw.Write((byte)12); bw.Write((byte)168);
+
+            for (int i = 0; i < seg; i++)
+            {
+                float a = i * (MathF.PI * 2f / seg);
+                bw.Write(MathF.Cos(a)); bw.Write(0.045f); bw.Write(MathF.Sin(a));
+                bw.Write(0f); bw.Write(1f); bw.Write(0f);
+                bw.Write(1f); bw.Write(0f);
+                bw.Write((byte)8); bw.Write((byte)16); bw.Write((byte)12); bw.Write((byte)0);
+            }
+        }
+        int triCount = seg * 3;
+        byte[] ibuf = new byte[triCount * sizeof(ushort)];
+        using (var ims = new System.IO.MemoryStream(ibuf))
+        using (var ibw = new System.IO.BinaryWriter(ims))
+        {
+            for (int i = 0; i < seg; i++)
+            {
+                ushort i1 = (ushort)(1 + i);
+                ushort i2 = (ushort)(1 + ((i + 1) % seg));
+                ibw.Write((ushort)0); ibw.Write(i2); ibw.Write(i1);
+            }
+        }
+        return new MeshLodSlice { VertexCount = vcnt, IndexCount = triCount, VertexStream = vbuf, IndexStream = ibuf };
     }
 }

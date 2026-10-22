@@ -1009,7 +1009,7 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
 
     if (url.pathname === "/download/apk") {
-      return Response.redirect(`https://github.com/${env.GITHUB_REPO || "xykal/nyawit-live"}/releases/latest/download/NyawitLive-v1.0.0-universal.apk`, 302);
+      return Response.redirect(`https://github.com/${env.GITHUB_REPO || "xykal/nyawit-live"}/releases/latest/download/NyawitLive-v2.0.0-universal.apk`, 302);
     }
 
     if (url.pathname === "/ws" || url.pathname.startsWith("/api/") || url.pathname.startsWith("/s/")) {

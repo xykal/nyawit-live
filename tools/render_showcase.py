@@ -178,12 +178,12 @@ def main() -> None:
 
     lib = load_npak(npak_path)
     cards = [
-        ("POHON SAWIT TENERA DAN TBS EMAS", "LOD0 9344 TRIS / LOD2 952 TRIS", assemble_palm(lib, True), (9.2, 6.2, 10.5), (0.2, 4.4, 0.2)),
-        ("TRUK CANTER KEBUN MUATAN TBS", "KABIN AERODINAMIS / BAK KAYU SAWIT", assemble_truck(lib), (5.0, 3.0, 5.3), (0.0, 1.15, 0.1)),
-        ("AVATAR JUARA TURNAMEN MINGGUAN", "MAHKOTA EMAS / SAYAP / SABIT NAGA", assemble_harvester(lib, (0.14, 0.16, 0.22), "hat_crown_gold", "back_wings_gold", "tool_egrek_dragon"), (2.8, 2.2, 3.8), (0.0, 1.42, 0.0)),
-        ("AVATAR PEMANEN CAPING PRO", "CAPING BAMBU / KERANJANG / EGREK", assemble_harvester(lib, (0.16, 0.72, 0.42), "hat_caping", "back_basket", "tool_egrek"), (2.7, 2.1, 3.5), (0.0, 1.42, 0.0)),
-        ("PABRIK KELAPA SAWIT PKS DAN RAM", "CEROBONG UAP / SILO CPO / TIMBANGAN", [(*lib["pks_factory"][0], mat_trs(0, 0, -2.5), (1, 1, 1)), (*lib["weighbridge_ram"][0], mat_trs(0, 0, 6.8), (1, 1, 1))], (16.5, 11.5, 19.5), (0.5, 3.8, 1.0)),
-        ("CELENG HUTAN DAN ANGKONG SAWIT", "HAZARD LIAR / GEROBAK ANGKUT TBS", [(*lib["celeng_boar"][0], mat_trs(-0.9, 0, 0.2, ry=0.35), (1, 1, 1)), (*lib["angkong_cart"][0], mat_trs(0.95, 0, -0.1, ry=-0.4), (1, 1, 1))], (3.2, 2.1, 3.4), (0.0, 0.55, 0.0)),
+        ("POHON SAWIT TENERA DAN TBS EMAS", "LOD0 18K TRIS / MULTI-LOD HD", assemble_palm(lib, True), (9.8, 6.4, 11.2), (0.2, 4.3, 0.2)),
+        ("TRUK CANTER KEBUN MUATAN TBS", "KABIN OLENG HD / BASURI / LED", assemble_truck(lib), (5.0, 3.0, 5.4), (0.0, 1.15, 0.1)),
+        ("AVATAR SULTAN TURNAMEN MINGGUAN", "MAHKOTA EMAS / SAYAP PHOENIX / NAGA", assemble_harvester(lib, (0.12, 0.14, 0.22), "hat_crown_gold", "back_wings_gold", "tool_egrek_dragon"), (3.7, 2.7, 4.9), (0.0, 1.78, 0.0)),
+        ("AVATAR PEMANEN CAPING PRO", "CAPING BAMBU / KERANJANG / EGREK", assemble_harvester(lib, (0.14, 0.74, 0.44), "hat_caping", "back_basket", "tool_egrek"), (3.4, 2.6, 4.6), (0.0, 1.72, 0.0)),
+        ("PABRIK KELAPA SAWIT PKS DAN RAM", "CEROBONG UAP / 3 SILO CPO / LED RAM", [(*lib["pks_factory"][0], mat_trs(0, 0, -2.8), (1, 1, 1)), (*lib["weighbridge_ram"][0], mat_trs(0, 0, 7.0), (1, 1, 1))], (20.5, 14.5, 24.5), (0.4, 5.4, 0.8)),
+        ("CELENG LIAR DAN ANGKONG SAWIT", "HAZARD HUTAN / GEROBAK ANGKUT TBS", [(*lib["celeng_boar"][0], mat_trs(-0.92, 0, 0.2, ry=0.45), (1, 1, 1)), (*lib["angkong_cart"][0], mat_trs(0.95, 0, -0.1, ry=-0.4), (1, 1, 1))], (3.2, 2.1, 3.5), (0.0, 0.55, 0.0)),
     ]
 
     W, H = 1800, 1120

@@ -6,18 +6,17 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationId>id.my.xyverse.nyawitlive</ApplicationId>
-    <ApplicationVersion>100</ApplicationVersion>
-    <ApplicationDisplayVersion>1.0.0</ApplicationDisplayVersion>
+    <ApplicationVersion>200</ApplicationVersion>
+    <ApplicationDisplayVersion>2.0.0</ApplicationDisplayVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <AndroidCreatePackagePerAbi>false</AndroidCreatePackagePerAbi>
     <UseMonoRuntime>true</UseMonoRuntime>
-    <RuntimeIdentifiers>android-arm64;android-arm</RuntimeIdentifiers>
+    <RuntimeIdentifiers>android-arm64;android-arm;android-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
-    <AndroidLinkMode>SdkOnly</AndroidLinkMode>
-    <PublishTrimmed>true</PublishTrimmed>
-    <TrimMode>partial</TrimMode>
+    <AndroidLinkMode>None</AndroidLinkMode>
+    <PublishTrimmed>false</PublishTrimmed>
     <RunAOTCompilation>false</RunAOTCompilation>
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
@@ -31,5 +30,8 @@
   </ItemGroup>
   <ItemGroup Condition="Exists('Libs\armeabi-v7a\libnyawit_simd.so')">
     <AndroidNativeLibrary Include="Libs\armeabi-v7a\libnyawit_simd.so" Abi="armeabi-v7a" />
+  </ItemGroup>
+  <ItemGroup Condition="Exists('Libs\x86_64\libnyawit_simd.so')">
+    <AndroidNativeLibrary Include="Libs\x86_64\libnyawit_simd.so" Abi="x86_64" />
   </ItemGroup>
 </Project>

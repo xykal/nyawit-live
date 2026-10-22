@@ -144,83 +144,209 @@ function hexToRgb(hex) {
   return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
 }
 
-// --- GLSL ES 3.00 Shaders (Shared design with Native C# Gles3Renderer.cs!) ---
+// --- Next-Gen GLSL ES 3.00 Shaders (100% Parity with Native C# Gles3InstancedRenderer.cs v2.0!) ---
+const VS_SKY = `#version 300 es
+precision highp float;
+const vec2 kQuad[4] = vec2[4](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0), vec2(1.0, 1.0));
+uniform mat4 uInvVP;
+out vec3 vRay;
+void main() {
+  vec2 p = kQuad[gl_VertexID];
+  vec4 farW = uInvVP * vec4(p, 1.0, 1.0);
+  vec4 nearW = uInvVP * vec4(p, -1.0, 1.0);
+  vRay = farW.xyz / max(farW.w, 1e-5) - nearW.xyz / max(nearW.w, 1e-5);
+  gl_Position = vec4(p, 0.9999, 1.0);
+}`;
+
+const FS_SKY = `#version 300 es
+precision highp float;
+in vec3 vRay;
+uniform vec3 uSkyZenith;
+uniform vec3 uSkyHorizon;
+uniform vec3 uSunDir;
+uniform vec3 uSunColor;
+out vec4 fragColor;
+void main() {
+  vec3 d = normalize(vRay);
+  float up = clamp(d.y * 1.15 + 0.06, 0.0, 1.0);
+  vec3 col = mix(uSkyHorizon, uSkyZenith, pow(up, 0.62));
+  float sd = max(dot(d, normalize(uSunDir)), 0.0);
+  col += uSunColor * (pow(sd, 12.0) * 0.28 + smoothstep(0.9965, 0.9994, sd) * 1.85);
+  col = (col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14);
+  fragColor = vec4(pow(clamp(col, 0.0, 1.0), vec3(0.4545)), 1.0);
+}`;
+
+const VS_SHADOW = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=3) in vec4 aCol;
+layout(location=4) in vec4 iRow0;
+layout(location=5) in vec4 iRow1;
+layout(location=6) in vec4 iRow2;
+layout(location=7) in vec4 iTintWind;
+uniform mat4 uVP;
+out float vAlpha;
+void main() {
+  vec4 p = vec4(aPos, 1.0);
+  vec3 wp = vec3(dot(iRow0, p), dot(iRow1, p), dot(iRow2, p));
+  vAlpha = aCol.a * iTintWind.r;
+  gl_Position = uVP * vec4(wp, 1.0);
+}`;
+
+const FS_SHADOW = `#version 300 es
+precision highp float;
+in float vAlpha;
+out vec4 fragColor;
+void main() {
+  fragColor = vec4(0.02, 0.05, 0.04, clamp(vAlpha * 0.56, 0.0, 0.62));
+}`;
+
 const VS_INSTANCED = `#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aNrm;
 layout(location=2) in vec2 aUV;
-layout(location=3) in vec4 aCol;      // rgb + baked AO in alpha
+layout(location=3) in vec4 aCol;
 layout(location=4) in vec4 iRow0;
 layout(location=5) in vec4 iRow1;
 layout(location=6) in vec4 iRow2;
-layout(location=7) in vec4 iTintWind; // rgb dye + wind factor
+layout(location=7) in vec4 iTintWind;
 
 uniform mat4 uVP;
 uniform float uTime;
 
-out vec3 vNrm;
-out vec3 vAlbedo;
-out float vAO;
-out vec3 vWorld;
+out vec3 vNormal;
+out vec3 vWorldPos;
+out vec4 vColor;
+out vec3 vTint;
+out vec2 vUV;
 
 void main() {
-  vec3 lp = aPos;
-  if (iTintWind.w > 0.001) {
-    float sway = sin(uTime * 2.15 + iRow0.w * 0.21 + iRow2.w * 0.17 + lp.z * 0.55);
-    float gust = cos(uTime * 1.35 + iRow2.w * 0.13);
-    float amp = iTintWind.w * (0.04 + 0.075 * max(0.0, lp.z + lp.y * 0.35));
-    lp.x += sway * amp;
-    lp.y += gust * amp * 0.45;
+  vec4 localPos = vec4(aPos, 1.0);
+  vec3 worldPos = vec3(dot(iRow0, localPos), dot(iRow1, localPos), dot(iRow2, localPos));
+  float windAmp = iTintWind.w;
+  if (windAmp > 0.001) {
+    float h = max(0.0, aPos.y + length(aPos.xz) * 0.42);
+    float gust = sin(uTime * 2.15 + iRow0.w * 0.14 + iRow2.w * 0.11);
+    float flutter = cos(uTime * 4.30 + aPos.x * 2.4 + iRow2.w * 0.17);
+    worldPos.x += gust * 0.052 * h * windAmp;
+    worldPos.z += flutter * 0.028 * h * windAmp;
+    worldPos.y -= abs(gust) * 0.012 * h * windAmp;
   }
-  vec3 wp = vec3(
-    dot(iRow0.xyz, lp) + iRow0.w,
-    dot(iRow1.xyz, lp) + iRow1.w,
-    dot(iRow2.xyz, lp) + iRow2.w
+  mat3 rotScale = mat3(
+    iRow0.x, iRow1.x, iRow2.x,
+    iRow0.y, iRow1.y, iRow2.y,
+    iRow0.z, iRow1.z, iRow2.z
   );
-  vec3 wn = normalize(vec3(
-    dot(iRow0.xyz, aNrm),
-    dot(iRow1.xyz, aNrm),
-    dot(iRow2.xyz, aNrm)
-  ));
-  float dye = step(0.75, aUV.x);
-  vAlbedo = aCol.rgb * mix(vec3(1.0), iTintWind.rgb, dye);
-  vAO = aCol.a;
-  vNrm = wn;
-  vWorld = wp;
-  gl_Position = uVP * vec4(wp, 1.0);
+  vNormal = normalize(rotScale * aNrm);
+  vWorldPos = worldPos;
+  vColor = aCol;
+  vTint = iTintWind.rgb;
+  vUV = aUV;
+  gl_Position = uVP * vec4(worldPos, 1.0);
 }`;
 
 const FS_LIT = `#version 300 es
-precision mediump float;
-in vec3 vNrm;
-in vec3 vAlbedo;
-in float vAO;
-in vec3 vWorld;
+precision highp float;
+in vec3 vNormal;
+in vec3 vWorldPos;
+in vec4 vColor;
+in vec3 vTint;
+in vec2 vUV;
 
 uniform vec3 uCamPos;
 uniform vec3 uSunDir;
+uniform vec3 uSunColor;
+uniform vec3 uSkyTop;
+uniform vec3 uGroundBounce;
 uniform vec3 uFogCol;
-uniform float uStorm;
+uniform float uFogDensity;
+uniform float uTime;
+uniform float uDetailStrength;
 
 out vec4 fragColor;
 
-void main() {
-  vec3 n = normalize(vNrm);
-  float ndl = max(dot(n, uSunDir), 0.0);
-  vec3 skyCol = mix(vec3(0.42, 0.52, 0.48), vec3(0.24, 0.28, 0.34), uStorm);
-  vec3 groundCol = vec3(0.20, 0.16, 0.11);
-  vec3 hemi = mix(groundCol, skyCol, n.y * 0.5 + 0.5);
-  vec3 viewDir = normalize(uCamPos - vWorld);
-  float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0) * 0.22;
-  vec3 sunCol = mix(vec3(1.08, 1.00, 0.86), vec3(0.62, 0.68, 0.82), uStorm);
-  vec3 lit = vAlbedo * (hemi + sunCol * ndl * 0.88 + rim) * (0.48 + 0.52 * vAO);
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
 
-  float dist = length(uCamPos - vWorld);
-  float fogF = clamp((dist - 58.0) / 96.0, 0.0, 0.88);
-  vec3 col = mix(lit, uFogCol, fogF);
-  col = pow(clamp(col, 0.0, 1.0), vec3(0.92));
-  fragColor = vec4(col, 1.0);
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash21(i);
+  float b = hash21(i + vec2(1.0, 0.0));
+  float c = hash21(i + vec2(0.0, 1.0));
+  float d = hash21(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+void main() {
+  vec3 N = normalize(vNormal);
+  vec3 L = normalize(uSunDir);
+  vec3 V = normalize(uCamPos - vWorldPos);
+  float dist = length(uCamPos - vWorldPos);
+
+  vec3 effTint = mix(vec3(1.0), vTint, step(0.75, vUV.x));
+  vec3 base = pow(max(vColor.rgb, vec3(0.001)), vec3(2.15)) * pow(max(effTint, vec3(0.001)), vec3(1.6));
+  float ao = mix(0.22, 1.0, vColor.a);
+  float gloss = vUV.y;
+
+  if (vUV.y < 0.12 && dist < 38.0 && uDetailStrength > 0.01) {
+    float fade = uDetailStrength * (1.0 - smoothstep(14.0, 38.0, dist));
+    float n1 = vnoise(vWorldPos.xz * 2.6);
+    float n2 = vnoise(vWorldPos.xz * 9.5);
+    float micro = (n1 - 0.5) * 0.28 + (n2 - 0.5) * 0.16;
+    base *= (1.0 + micro * fade);
+    float hDetail = n1 * 0.65 + n2 * 0.35;
+    vec3 dN = vec3(dFdx(hDetail), 0.0, dFdy(hDetail)) * 3.2 * fade;
+    N = normalize(N - dN);
+    gloss = mix(0.14, 0.80, clamp(vUV.x * 1.35 * n1, 0.0, 1.0));
+  }
+
+  if (vUV.y > 0.895 && vUV.y < 0.915) {
+    float w1 = sin(vWorldPos.x * 1.35 + uTime * 2.2 + sin(vWorldPos.z * 1.8) * 0.8);
+    float w2 = cos(vWorldPos.z * 2.65 - uTime * 1.7 + vWorldPos.x * 0.7);
+    N = normalize(vec3(w1 * 0.15, 1.0, w2 * 0.17));
+    float fres = pow(1.0 - max(dot(N, V), 0.0), 3.2);
+    base = mix(vec3(0.012, 0.095, 0.135), uSkyTop * 0.85, clamp(fres * 0.85 + 0.12, 0.0, 1.0));
+    float foam = smoothstep(3.55, 4.45, abs(vWorldPos.z + 48.0));
+    base = mix(base, vec3(0.55, 0.72, 0.78), foam * 0.55);
+    gloss = 0.92;
+  }
+
+  if (gloss >= 0.94) {
+    vec3 hdrEm = base * 3.2;
+    float fogEm = smoothstep(52.0, 190.0, dist) * 0.75;
+    vec3 outEm = mix(hdrEm, uFogCol, fogEm);
+    outEm = (outEm * (2.51 * outEm + 0.03)) / (outEm * (2.43 * outEm + 0.59) + 0.14);
+    fragColor = vec4(pow(clamp(outEm, 0.0, 1.0), vec3(0.4545)), 1.0);
+    return;
+  }
+
+  vec3 H = normalize(L + V);
+  float ndl = max(dot(N, L), 0.0);
+  float wrapNdl = max(dot(N, L) * 0.65 + 0.35, 0.0);
+  vec3 hemi = mix(uGroundBounce, uSkyTop, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
+
+  float isFoliage = step(0.55, gloss) * (1.0 - step(0.68, gloss));
+  float sss = isFoliage * pow(clamp(dot(-V, L) * 0.5 + 0.5, 0.0, 1.0), 2.6) * 0.65;
+
+  float shininess = mix(16.0, 110.0, clamp(gloss, 0.0, 1.0));
+  float specStrength = mix(0.05, 0.95, clamp(gloss, 0.0, 1.0)) * ao;
+  float spec = pow(max(dot(N, H), 0.0), shininess) * specStrength;
+  float rim = pow(1.0 - max(dot(N, V), 0.0), 3.8) * 0.14 * ao;
+
+  vec3 lit = base * (hemi * ao + uSunColor * (ndl * 1.15 + wrapNdl * 0.22 * ao + sss))
+           + uSunColor * spec * 0.45
+           + uSkyTop * rim;
+
+  float fogAmt = smoothstep(48.0, 195.0, dist) * (0.82 + uFogDensity * 12.0);
+  vec3 hdr = mix(lit, uFogCol, clamp(fogAmt, 0.0, 0.88));
+  vec3 mapped = (hdr * (2.51 * hdr + 0.03)) / (hdr * (2.43 * hdr + 0.59) + 0.14);
+  fragColor = vec4(pow(clamp(mapped, 0.0, 1.0), vec3(0.4545)), 1.0);
 }`;
 
 // --- Audio FX Synthesizer (Crisp WebAudio procedural SFX!) ---
@@ -263,10 +389,10 @@ function playSfx(kind) {
 
 // --- Application & Engine State ---
 const QUALITY_PRESETS = [
-  { name: "SMOOTH", scale: 0.65, lod0: 18, lod1: 42, maxDist: 105, ferns: false },
-  { name: "STD", scale: 0.82, lod0: 26, lod1: 58, maxDist: 135, ferns: true },
-  { name: "ULTRA", scale: 1.0, lod0: 36, lod1: 78, maxDist: 168, ferns: true },
-  { name: "MAX", scale: Math.min(window.devicePixelRatio || 1, 1.5), lod0: 52, lod1: 110, maxDist: 210, ferns: true },
+  { name: "SMOOTH", scale: 0.65, maxH: 540, lod0: 16, lod1: 38, maxDist: 102, ferns: false, detail: 0.25 },
+  { name: "STD", scale: 0.85, maxH: 720, lod0: 24, lod1: 54, maxDist: 132, ferns: true, detail: 0.70 },
+  { name: "ULTRA", scale: 1.0, maxH: 900, lod0: 34, lod1: 76, maxDist: 168, ferns: true, detail: 1.0 },
+  { name: "MAX", scale: Math.min(window.devicePixelRatio || 1, 1.5), maxH: 1080, lod0: 46, lod1: 104, maxDist: 205, ferns: true, detail: 1.0 },
 ];
 
 const state = {
@@ -321,6 +447,7 @@ const state = {
   input: { jx: 0, jy: 0, keys: new Set() },
   net: { connected: false, pingMs: 24, ws: null },
 };
+window.__nyawit = { state };
 
 // Scatter decorative ferns & boulders deterministically
 {
@@ -538,24 +665,48 @@ function compileShader(type, src) {
   return sh;
 }
 
-const prog = gl.createProgram();
-gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VS_INSTANCED));
-gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FS_LIT));
-gl.linkProgram(prog);
+function buildProgram(vsSrc, fsSrc) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compileShader(gl.VERTEX_SHADER, vsSrc));
+  gl.attachShader(p, compileShader(gl.FRAGMENT_SHADER, fsSrc));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+const skyProg = buildProgram(VS_SKY, FS_SKY);
+const skyVao = gl.createVertexArray();
+const uSky = {
+  invVp: gl.getUniformLocation(skyProg, "uInvVP"),
+  zenith: gl.getUniformLocation(skyProg, "uSkyZenith"),
+  horizon: gl.getUniformLocation(skyProg, "uSkyHorizon"),
+  sunDir: gl.getUniformLocation(skyProg, "uSunDir"),
+  sunColor: gl.getUniformLocation(skyProg, "uSunColor"),
+};
+
+const shadowProg = buildProgram(VS_SHADOW, FS_SHADOW);
+const uShadowVp = gl.getUniformLocation(shadowProg, "uVP");
+
+const prog = buildProgram(VS_INSTANCED, FS_LIT);
 const uLoc = {
   vp: gl.getUniformLocation(prog, "uVP"),
   time: gl.getUniformLocation(prog, "uTime"),
   camPos: gl.getUniformLocation(prog, "uCamPos"),
   sunDir: gl.getUniformLocation(prog, "uSunDir"),
+  sunColor: gl.getUniformLocation(prog, "uSunColor"),
+  skyTop: gl.getUniformLocation(prog, "uSkyTop"),
+  groundBounce: gl.getUniformLocation(prog, "uGroundBounce"),
   fogCol: gl.getUniformLocation(prog, "uFogCol"),
-  storm: gl.getUniformLocation(prog, "uStorm"),
+  fogDensity: gl.getUniformLocation(prog, "uFogDensity"),
+  detailStrength: gl.getUniformLocation(prog, "uDetailStrength"),
 };
 
-const MAX_INSTANCES = 512;
+const MAX_INSTANCES = 1024;
 const sharedInstanceBuffer = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, sharedInstanceBuffer);
 gl.bufferData(gl.ARRAY_BUFFER, MAX_INSTANCES * 64, gl.DYNAMIC_DRAW);
 const scratchInst = new Float32Array(MAX_INSTANCES * 16);
+const shadowScratch = new Float32Array(MAX_INSTANCES * 16);
 
 const gpuMeshes = new Map();
 
@@ -623,8 +774,8 @@ async function loadNpakGpuArchive() {
 }
 
 function buildTerrainAndWaterMeshes() {
-  // Build rich multi-biome vertex-splatted 3D plantation terrain mesh + flowing canal water ribbon!
-  const N = 128;
+  // Build high-density 136x136 multi-biome splatted 3D terrain + 64-seg canal water + soft contact shadow disc!
+  const N = 136;
   const span = 224.0;
   const vbuf = new ArrayBuffer(N * N * 36);
   const dv = new DataView(vbuf);
@@ -634,38 +785,35 @@ function buildTerrainAndWaterMeshes() {
     for (let xi = 0; xi < N; xi++) {
       const x = -span * 0.5 + (xi / (N - 1)) * span;
       const h = terrainHeight(x, z);
-      const hx = terrainHeight(x + 1.2, z) - terrainHeight(x - 1.2, z);
-      const hz = terrainHeight(x, z + 1.2) - terrainHeight(x, z - 1.2);
-      let nx = -hx, ny = 2.4, nz = -hz;
+      const hx = terrainHeight(x + 0.9, z) - terrainHeight(x - 0.9, z);
+      const hz = terrainHeight(x, z + 0.9) - terrainHeight(x, z - 0.9);
+      let nx = -hx, ny = 1.8, nz = -hz;
       const nl = Math.hypot(nx, ny, nz);
       nx /= nl; ny /= nl; nz /= nl;
 
       const rd = roadFactor(x, z);
       const md = mudFactor(x, z);
       const yard = Math.max(0, Math.min(1, 1.0 - (Math.hypot(x, z + 15.0) - 14.0) / 5.0));
-      const checker = ((Math.floor(x * 0.25) + Math.floor(z * 0.25)) & 1) * 0.06;
+      const dCanal = Math.max(0, Math.min(1, 1.0 - Math.abs(z - CANAL_Z) / 6.2));
+      const lushWave = 0.5 + 0.5 * Math.sin(x * 0.14 + Math.cos(z * 0.13) * 1.6);
 
-      let r = 56 + checker * 180, g = 118 + checker * 160, b = 46 + checker * 80;
-      // Blend wet mud patches
-      r = r * (1 - md) + 92 * md;
-      g = g * (1 - md) + 64 * md;
-      b = b * (1 - md) + 42 * md;
-      // Blend compacted red-laterite estate road
-      r = r * (1 - rd) + 168 * rd;
-      g = g * (1 - rd) + 114 * rd;
-      b = b * (1 - rd) + 74 * rd;
-      // Blend concrete PKS apron around weighbridge
-      r = r * (1 - yard) + 132 * yard;
-      g = g * (1 - yard) + 138 * yard;
-      b = b * (1 - yard) + 142 * yard;
+      let r = 42 + lushWave * 28, g = 112 + lushWave * 38, b = 36 + lushWave * 18;
+      r = r * (1 - md) + 84 * md; g = g * (1 - md) + 58 * md; b = b * (1 - md) + 38 * md;
+      r = r * (1 - rd) + 172 * rd; g = g * (1 - rd) + 122 * rd; b = b * (1 - rd) + 78 * rd;
+      r = r * (1 - dCanal * 0.65) + 96 * (dCanal * 0.65);
+      g = g * (1 - dCanal * 0.65) + 84 * (dCanal * 0.65);
+      b = b * (1 - dCanal * 0.65) + 56 * (dCanal * 0.65);
+      r = r * (1 - yard) + 128 * yard; g = g * (1 - yard) + 134 * yard; b = b * (1 - yard) + 142 * yard;
+      const ao = Math.max(140, Math.min(255, 250 - dCanal * 48 - md * 18));
 
       dv.setFloat32(vo, x, true); dv.setFloat32(vo + 4, h, true); dv.setFloat32(vo + 8, z, true);
       dv.setFloat32(vo + 12, nx, true); dv.setFloat32(vo + 16, ny, true); dv.setFloat32(vo + 20, nz, true);
-      dv.setFloat32(vo + 24, 0.1, true); dv.setFloat32(vo + 28, 0.1, true);
+      dv.setFloat32(vo + 24, Math.min(0.7, md * 0.7 + rd * 0.25), true);
+      dv.setFloat32(vo + 28, 0.05, true);
       dv.setUint8(vo + 32, Math.min(255, r));
       dv.setUint8(vo + 33, Math.min(255, g));
       dv.setUint8(vo + 34, Math.min(255, b));
-      dv.setUint8(vo + 35, 245);
+      dv.setUint8(vo + 35, ao);
       vo += 36;
     }
   }
@@ -680,19 +828,49 @@ function buildTerrainAndWaterMeshes() {
   }
   gpuMeshes.set("_terrain", { name: "_terrain", radius: 200, lods: [createGpuVao(new Uint8Array(vbuf), new Uint8Array(idx.buffer), idx.length)] });
 
-  // Flowing tropical canal water sheet along z = CANAL_Z
-  const wv = new ArrayBuffer(4 * 36);
+  const segX = 64;
+  const wv = new ArrayBuffer((segX + 1) * 2 * 36);
   const wdv = new DataView(wv);
-  const corners = [[-112, CANAL_Z - 4.4], [112, CANAL_Z - 4.4], [-112, CANAL_Z + 4.4], [112, CANAL_Z + 4.4]];
-  corners.forEach(([cx, cz], i) => {
-    const o = i * 36;
-    wdv.setFloat32(o, cx, true); wdv.setFloat32(o + 4, -0.82, true); wdv.setFloat32(o + 8, cz, true);
-    wdv.setFloat32(o + 12, 0, true); wdv.setFloat32(o + 16, 1, true); wdv.setFloat32(o + 20, 0, true);
-    wdv.setFloat32(o + 24, 0.1, true); wdv.setFloat32(o + 28, 0.1, true);
-    wdv.setUint8(o + 32, 34); wdv.setUint8(o + 33, 132); wdv.setUint8(o + 34, 148); wdv.setUint8(o + 35, 255);
-  });
-  const widx = new Uint16Array([0, 2, 1, 1, 2, 3]);
-  gpuMeshes.set("_water", { name: "_water", radius: 150, lods: [createGpuVao(new Uint8Array(wv), new Uint8Array(widx.buffer), 6)] });
+  let wo = 0;
+  for (let i = 0; i <= segX; i++) {
+    const cx = -112 + (i / segX) * 224;
+    for (let s = 0; s < 2; s++) {
+      wdv.setFloat32(wo, cx, true); wdv.setFloat32(wo + 4, -0.78, true); wdv.setFloat32(wo + 8, CANAL_Z + (s === 0 ? -4.5 : 4.5), true);
+      wdv.setFloat32(wo + 12, 0, true); wdv.setFloat32(wo + 16, 1, true); wdv.setFloat32(wo + 20, 0, true);
+      wdv.setFloat32(wo + 24, s === 0 ? 0.0 : 0.4, true); wdv.setFloat32(wo + 28, 0.905, true);
+      wdv.setUint8(wo + 32, 24); wdv.setUint8(wo + 33, 128); wdv.setUint8(wo + 34, 146); wdv.setUint8(wo + 35, 255);
+      wo += 36;
+    }
+  }
+  const widx = new Uint16Array(segX * 6);
+  let wio = 0;
+  for (let i = 0; i < segX; i++) {
+    const b0 = i * 2, b1 = i * 2 + 1, b2 = i * 2 + 2, b3 = i * 2 + 3;
+    widx[wio++] = b0; widx[wio++] = b1; widx[wio++] = b2;
+    widx[wio++] = b2; widx[wio++] = b1; widx[wio++] = b3;
+  }
+  gpuMeshes.set("_water", { name: "_water", radius: 150, lods: [createGpuVao(new Uint8Array(wv), new Uint8Array(widx.buffer), widx.length)] });
+
+  const sSeg = 16;
+  const sv = new ArrayBuffer((sSeg + 1) * 36);
+  const sdv = new DataView(sv);
+  const putShadowVert = (vi, sx, sz, alpha) => {
+    const o = vi * 36;
+    sdv.setFloat32(o, sx, true); sdv.setFloat32(o + 4, 0.045, true); sdv.setFloat32(o + 8, sz, true);
+    sdv.setFloat32(o + 12, 0, true); sdv.setFloat32(o + 16, 1, true); sdv.setFloat32(o + 20, 0, true);
+    sdv.setFloat32(o + 24, 0, true); sdv.setFloat32(o + 28, 0, true);
+    sdv.setUint8(o + 32, 8); sdv.setUint8(o + 33, 16); sdv.setUint8(o + 34, 12); sdv.setUint8(o + 35, alpha);
+  };
+  putShadowVert(0, 0, 0, 168);
+  for (let i = 0; i < sSeg; i++) {
+    const a = (i * Math.PI * 2) / sSeg;
+    putShadowVert(1 + i, Math.cos(a), Math.sin(a), 0);
+  }
+  const sidx = new Uint16Array(sSeg * 3);
+  for (let i = 0; i < sSeg; i++) {
+    sidx[i * 3] = 0; sidx[i * 3 + 1] = 1 + ((i + 1) % sSeg); sidx[i * 3 + 2] = 1 + i;
+  }
+  gpuMeshes.set("_shadow", { name: "_shadow", radius: 4, lods: [createGpuVao(new Uint8Array(sv), new Uint8Array(sidx.buffer), sidx.length)] });
 }
 
 let frameDrawCalls = 0;
@@ -783,7 +961,32 @@ function stageActorVisual(x, y, z, yaw, walkPhase, swingT, inTruck, cargo, av) {
   enqueuePart(toolKey, wx, wy, wz, 0.28 + (swingT > 0 ? Math.sin(swingT * Math.PI) * 1.15 : 0), yaw, 0, 1.0);
 }
 
-// --- Simulation, Camera & Minimap Loop ---
+const mInvVP = new Float32Array(16);
+function matInvert4(out, m) {
+  const inv = mInvVP;
+  inv[0] = m[5]*m[10]*m[15] - m[5]*m[11]*m[14] - m[9]*m[6]*m[15] + m[9]*m[7]*m[14] + m[13]*m[6]*m[11] - m[13]*m[7]*m[10];
+  inv[4] = -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15] - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
+  inv[8] = m[4]*m[9]*m[15] - m[4]*m[11]*m[13] - m[8]*m[5]*m[15] + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
+  inv[12] = -m[4]*m[9]*m[14] + m[4]*m[10]*m[13] + m[8]*m[5]*m[14] - m[8]*m[6]*m[13] - m[12]*m[5]*m[10] + m[12]*m[6]*m[9];
+  inv[1] = -m[1]*m[10]*m[15] + m[1]*m[11]*m[14] + m[9]*m[2]*m[15] - m[9]*m[3]*m[14] - m[13]*m[2]*m[11] + m[13]*m[3]*m[10];
+  inv[5] = m[0]*m[10]*m[15] - m[0]*m[11]*m[14] - m[8]*m[2]*m[15] + m[8]*m[3]*m[14] + m[12]*m[2]*m[11] - m[12]*m[3]*m[10];
+  inv[9] = -m[0]*m[9]*m[15] + m[0]*m[11]*m[13] + m[8]*m[1]*m[15] - m[8]*m[3]*m[13] - m[12]*m[1]*m[11] + m[12]*m[3]*m[9];
+  inv[13] = m[0]*m[9]*m[14] - m[0]*m[10]*m[13] - m[8]*m[1]*m[14] + m[8]*m[2]*m[13] + m[12]*m[1]*m[10] - m[12]*m[2]*m[9];
+  inv[2] = m[1]*m[6]*m[15] - m[1]*m[7]*m[14] - m[5]*m[2]*m[15] + m[5]*m[3]*m[14] + m[13]*m[2]*m[7] - m[13]*m[3]*m[6];
+  inv[6] = -m[0]*m[6]*m[15] + m[0]*m[7]*m[14] + m[4]*m[2]*m[15] - m[4]*m[3]*m[14] - m[12]*m[2]*m[7] + m[12]*m[3]*m[6];
+  inv[10] = m[0]*m[5]*m[15] - m[0]*m[7]*m[13] - m[4]*m[1]*m[15] + m[4]*m[3]*m[13] + m[12]*m[1]*m[7] - m[12]*m[3]*m[5];
+  inv[14] = -m[0]*m[5]*m[14] + m[0]*m[6]*m[13] + m[4]*m[1]*m[14] - m[4]*m[2]*m[13] - m[12]*m[1]*m[6] + m[12]*m[2]*m[5];
+  inv[3] = -m[1]*m[6]*m[11] + m[1]*m[7]*m[10] + m[5]*m[2]*m[11] - m[5]*m[3]*m[10] - m[9]*m[2]*m[7] + m[9]*m[3]*m[6];
+  inv[7] = m[0]*m[6]*m[11] - m[0]*m[7]*m[10] - m[4]*m[2]*m[11] + m[4]*m[3]*m[10] + m[8]*m[2]*m[7] - m[8]*m[3]*m[6];
+  inv[11] = -m[0]*m[5]*m[11] + m[0]*m[7]*m[10] + m[4]*m[1]*m[11] - m[4]*m[3]*m[10] - m[8]*m[1]*m[7] + m[8]*m[3]*m[5];
+  inv[15] = m[0]*m[5]*m[10] - m[0]*m[6]*m[9] - m[4]*m[1]*m[10] + m[4]*m[2]*m[9] + m[8]*m[1]*m[6] - m[8]*m[2]*m[5];
+  const det = m[0]*inv[0] + m[1]*inv[4] + m[2]*inv[8] + m[3]*inv[12];
+  if (Math.abs(det) > 1e-8) {
+    const id = 1.0 / det;
+    for (let i = 0; i < 16; i++) out[i] = inv[i] * id;
+  }
+  return out;
+}
 const mProj = new Float32Array(16);
 const mView = new Float32Array(16);
 const mVP = new Float32Array(16);
@@ -849,8 +1052,9 @@ function frame(nowMs) {
   prevTime = nowMs;
 
   const q = QUALITY_PRESETS[state.quality];
-  const targetW = Math.max(320, Math.floor(window.innerWidth * q.scale));
-  const targetH = Math.max(200, Math.floor(window.innerHeight * q.scale));
+  const capScale = Math.min(q.scale, (q.maxH || 1080) / Math.max(1, window.innerHeight));
+  const targetW = Math.max(320, Math.floor(window.innerWidth * capScale));
+  const targetH = Math.max(200, Math.floor(window.innerHeight * capScale));
   if (canvas.width !== targetW || canvas.height !== targetH) {
     canvas.width = targetW;
     canvas.height = targetH;
@@ -952,34 +1156,113 @@ function frame(nowMs) {
   matLookAt(mView, eyeX, eyeY, eyeZ, p.x, p.y + (p.inTruck ? 1.85 : 1.55), p.z);
   matMul(mVP, mProj, mView);
 
-  // 3. Hardware-Instanced OpenGL ES 3.0 / WebGL2 Render Pass
+  // 3. Hardware-Instanced OpenGL ES 3.0 / WebGL2 Next-Gen HD Render Pass
   frameDrawCalls = 0;
-  const isStorm = state.event.kind === "HUJAN_BADAI" ? 1.0 : 0.0;
-  const fogR = isStorm ? 0.24 : 0.56, fogG = isStorm ? 0.30 : 0.72, fogB = isStorm ? 0.36 : 0.68;
+  const storm = state.event.kind === "HUJAN_BADAI";
+  const goldRush = state.event.kind === "DEMAM_SAWIT_EMAS";
+  matInvert4(mInvVP, mVP);
 
   gl.viewport(0, 0, canvas.width, canvas.height);
-  gl.clearColor(fogR, fogG, fogB, 1.0);
+  gl.clearColor(0.24, 0.56, 0.86, 1.0);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  gl.enable(gl.DEPTH_TEST);
-  gl.enable(gl.CULL_FACE);
   gl.cullFace(gl.BACK);
+
+  // Pass 0: Atmospheric Sky Gradient + Solar Disc Halo (1 ultra-fast draw call!)
+  gl.disable(gl.DEPTH_TEST);
+  gl.depthMask(false);
+  gl.disable(gl.CULL_FACE);
+  gl.useProgram(skyProg);
+  gl.uniformMatrix4fv(uSky.invVp, false, mInvVP);
+  gl.uniform3f(uSky.sunDir, 0.48, 0.72, 0.44);
+  if (storm) {
+    gl.uniform3f(uSky.zenith, 0.03, 0.06, 0.13);
+    gl.uniform3f(uSky.horizon, 0.11, 0.16, 0.24);
+    gl.uniform3f(uSky.sunColor, 0.28, 0.34, 0.48);
+  } else if (goldRush) {
+    gl.uniform3f(uSky.zenith, 0.05, 0.16, 0.46);
+    gl.uniform3f(uSky.horizon, 0.72, 0.42, 0.14);
+    gl.uniform3f(uSky.sunColor, 1.55, 0.95, 0.35);
+  } else {
+    gl.uniform3f(uSky.zenith, 0.035, 0.17, 0.58);
+    gl.uniform3f(uSky.horizon, 0.34, 0.62, 0.88);
+    gl.uniform3f(uSky.sunColor, 1.45, 1.25, 0.86);
+  }
+  gl.bindVertexArray(skyVao);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  frameDrawCalls++;
+
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthMask(true);
+  gl.enable(gl.CULL_FACE);
 
   gl.useProgram(prog);
   gl.uniformMatrix4fv(uLoc.vp, false, mVP);
   gl.uniform1f(uLoc.time, nowMs * 0.001);
   gl.uniform3f(uLoc.camPos, eyeX, eyeY, eyeZ);
-  gl.uniform3f(uLoc.sunDir, 0.45, 0.78, 0.43);
-  gl.uniform3f(uLoc.fogCol, fogR, fogG, fogB);
-  gl.uniform1f(uLoc.storm, isStorm);
+  gl.uniform3f(uLoc.sunDir, 0.48, 0.72, 0.44);
+  gl.uniform1f(uLoc.detailStrength, q.detail);
+  if (storm) {
+    gl.uniform3f(uLoc.sunColor, 0.62, 0.72, 0.95);
+    gl.uniform3f(uLoc.skyTop, 0.14, 0.20, 0.32);
+    gl.uniform3f(uLoc.groundBounce, 0.05, 0.07, 0.05);
+    gl.uniform3f(uLoc.fogCol, 0.11, 0.16, 0.24);
+    gl.uniform1f(uLoc.fogDensity, 0.0090);
+  } else if (goldRush) {
+    gl.uniform3f(uLoc.sunColor, 2.35, 1.55, 0.72);
+    gl.uniform3f(uLoc.skyTop, 0.42, 0.30, 0.22);
+    gl.uniform3f(uLoc.groundBounce, 0.14, 0.10, 0.05);
+    gl.uniform3f(uLoc.fogCol, 0.62, 0.38, 0.14);
+    gl.uniform1f(uLoc.fogDensity, 0.0040);
+  } else {
+    gl.uniform3f(uLoc.sunColor, 2.15, 1.92, 1.48);
+    gl.uniform3f(uLoc.skyTop, 0.26, 0.46, 0.76);
+    gl.uniform3f(uLoc.groundBounce, 0.09, 0.14, 0.06);
+    gl.uniform3f(uLoc.fogCol, 0.34, 0.60, 0.86);
+    gl.uniform1f(uLoc.fogDensity, 0.0035);
+  }
 
-  if (gpuMeshes.size > 2) {
-    // Pass A: Terrain & Canal Water (2 draw calls!)
+  if (gpuMeshes.size > 3) {
+    // Pass A: HD Terrain & Specular Canal Water (2 draw calls!)
     pushTRS(scratchInst, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0);
     drawMeshBatch("_terrain", 0, 1);
-    pushTRS(scratchInst, 0, 0, Math.sin(nowMs * 0.002) * 0.04, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0);
+    pushTRS(scratchInst, 0, 0, Math.sin(nowMs * 0.0014) * 0.03, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0);
     drawMeshBatch("_water", 0, 1);
 
+    // Pass A2: 1-Draw-Call Hardware-Instanced Soft Canopy & Contact Ground Shadows!
+    let cSh = 0;
+    cSh = pushTRS(shadowScratch, cSh, PKS_POS.x, terrainHeight(PKS_POS.x, PKS_POS.z), PKS_POS.z, 0, 0, 0, 7.6, 1, 6.2, 0.95, 1, 1, 0);
+    cSh = pushTRS(shadowScratch, cSh, MANDOR_POS.x, terrainHeight(MANDOR_POS.x, MANDOR_POS.z), MANDOR_POS.z, 0, 0, 0, 2.9, 1, 2.9, 0.85, 1, 1, 0);
+    cSh = pushTRS(shadowScratch, cSh, p.x, p.y, p.z, 0, p.yaw, 0, p.inTruck ? 1.45 : 0.68, 1, p.inTruck ? 2.95 : 0.68, 1.0, 1, 1, 0);
+    for (const peer of state.peers.values()) {
+      cSh = pushTRS(shadowScratch, cSh, peer.rx, peer.ry, peer.rz, 0, peer.ryaw, 0, peer.tr ? 1.45 : 0.68, 1, peer.tr ? 2.95 : 0.68, 1.0, 1, 1, 0);
+    }
+    for (const b of state.boars) {
+      cSh = pushTRS(shadowScratch, cSh, b.x, surfaceHeight(b.x, b.z), b.z, 0, b.yaw, 0, 0.72, 1, 0.98, 0.9, 1, 1, 0);
+    }
+    for (const t of state.trees) {
+      const d = Math.hypot(t.x - eyeX, t.z - eyeZ);
+      if (d > (state.quality === 0 ? q.lod1 : q.maxDist)) continue;
+      cSh = pushTRS(shadowScratch, cSh, t.x + 0.45, t.y, t.z + 0.35, 0, 0, 0, 3.35 * t.scale, 1, 3.35 * t.scale, d > q.lod1 ? 0.55 : 0.85, 1, 1, 0);
+    }
+    if (cSh > 0 && gpuMeshes.has("_shadow")) {
+      const shGpu = gpuMeshes.get("_shadow").lods[0];
+      gl.useProgram(shadowProg);
+      gl.uniformMatrix4fv(uShadowVp, false, mVP);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+      gl.bindVertexArray(shGpu.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, sharedInstanceBuffer);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, shadowScratch.subarray(0, cSh * 16));
+      gl.drawElementsInstanced(gl.TRIANGLES, shGpu.count, gl.UNSIGNED_SHORT, 0, cSh);
+      frameDrawCalls++;
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+      gl.useProgram(prog);
+    }
+
     // Pass B: Multi-LOD Instanced Tenera Oil Palms (Grouped into LOD0, LOD1, LOD2 -> max 9 ultra-fast instanced draw calls for 180 complex trees!)
+    const isStorm = storm ? 1.0 : 0.0;
     for (let lodTier = 0; lodTier < 3; lodTier++) {
       let cTrunk = 0;
       for (const t of state.trees) {

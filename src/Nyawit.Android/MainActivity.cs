@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Text;
 using Android.App;
 using Android.Content;
@@ -6,23 +7,87 @@ using Android.Content.PM;
 using Android.Graphics;
 using Android.Opengl;
 using Android.OS;
+using Android.Runtime;
 using Android.Views;
 using Android.Widget;
+using Javax.Microedition.Khronos.Egl;
 using Nyawit.AndroidClient.Audio;
 using Nyawit.AndroidClient.Rendering;
 using Nyawit.AndroidClient.UI;
 using NyawitEngine.Assets;
 using NyawitEngine.Network;
 using NyawitEngine.World;
+using EGLConfig = Javax.Microedition.Khronos.Egl.EGLConfig;
 
 namespace Nyawit.AndroidClient;
+
+/// <summary>
+/// Universal resilient EGL config selector for Qualcomm Adreno, ARM Mali, PowerVR, Xclipse & SwiftShader GPUs.
+/// Prefers hardware 4x MSAA RGBA8888 + 24/16-bit depth when supported, gracefully stepping down to standard
+/// RGBA8888/RGB565 OpenGL ES 3.0 configs so startup NEVER throws "IllegalArgumentException: No config chosen"!
+/// </summary>
+public sealed class SafeGles3ConfigChooser : Java.Lang.Object, GLSurfaceView.IEGLConfigChooser
+{
+    private const int EglRenderableType = 0x3040;
+    private const int EglOpenGlEs3Bit = 0x0040;
+    private const int EglOpenGlEs2Bit = 0x0004;
+
+    public SafeGles3ConfigChooser() { }
+    public SafeGles3ConfigChooser(IntPtr handle, JniHandleOwnership transfer) : base(handle, transfer) { }
+
+    public EGLConfig ChooseConfig(IEGL10? egl, EGLDisplay? display)
+    {
+        if (egl == null || display == null)
+            throw new InvalidOperationException("EGL display unavailable");
+
+        int[][] candidates =
+        [
+            // Tier 1: Hardware 4x MSAA + 24/16-bit depth + RGB888 (crisp anti-aliased edges on mobile GPUs!)
+            [
+                EGL10.EglRedSize, 8, EGL10.EglGreenSize, 8, EGL10.EglBlueSize, 8,
+                EGL10.EglDepthSize, 16,
+                EGL10.EglSampleBuffers, 1, EGL10.EglSamples, 4,
+                EglRenderableType, EglOpenGlEs3Bit,
+                EGL10.EglNone
+            ],
+            // Tier 2: Standard universal RGB888 + 16-bit depth OpenGL ES 3.0
+            [
+                EGL10.EglRedSize, 8, EGL10.EglGreenSize, 8, EGL10.EglBlueSize, 8,
+                EGL10.EglDepthSize, 16,
+                EglRenderableType, EglOpenGlEs3Bit,
+                EGL10.EglNone
+            ],
+            // Tier 3: Broad ES2/ES3 compatible RGB565 + 16-bit depth (budget GPUs & emulators)
+            [
+                EGL10.EglRedSize, 5, EGL10.EglGreenSize, 6, EGL10.EglBlueSize, 5,
+                EGL10.EglDepthSize, 16,
+                EglRenderableType, EglOpenGlEs2Bit,
+                EGL10.EglNone
+            ],
+        ];
+
+        var configs = new EGLConfig[4];
+        int[] num = new int[1];
+        foreach (var spec in candidates)
+        {
+            if (egl.EglChooseConfig(display, spec, configs, configs.Length, num) && num[0] > 0 && configs[0] != null)
+                return configs[0];
+        }
+
+        int[] fallback = [EGL10.EglNone];
+        if (egl.EglChooseConfig(display, fallback, configs, configs.Length, num) && num[0] > 0 && configs[0] != null)
+            return configs[0];
+
+        throw new InvalidOperationException("No compatible EGL config available");
+    }
+}
 
 [Activity(
     Label = "Nyawit Live 3D",
     MainLauncher = true,
     Exported = true,
     ScreenOrientation = ScreenOrientation.SensorLandscape,
-    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.KeyboardHidden)]
+    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.SmallestScreenSize | ConfigChanges.ScreenLayout | ConfigChanges.KeyboardHidden | ConfigChanges.Density)]
 public class MainActivity : Activity
 {
     private GLSurfaceView? _glView;
@@ -35,52 +100,101 @@ public class MainActivity : Activity
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
-        EnableImmersiveFullscreen();
 
-        _prefs = GetSharedPreferences("nyawit_live_prefs", FileCreationMode.Private);
-
-        // Load sculpted 29-model multi-LOD NPAK archive from APK assets
-        NpakArchive archive;
-        using (var assetStream = Assets!.Open("Meshes/nyawit_models.npak"))
-        {
-            archive = NpakArchive.Load(assetStream);
-        }
-
-        Typeface displayFont = Typeface.DefaultBold!;
-        try { displayFont = Typeface.CreateFromAsset(Assets, "Fonts/XyVerseDisplay-Semibold.otf")!; } catch { }
-
-        Bitmap? smallBrandMark = null;
         try
         {
-            using var markStream = Assets.Open("Brand/mark_kecil_transparan_putih.png");
-            smallBrandMark = BitmapFactory.DecodeStream(markStream);
+            _prefs = GetSharedPreferences("nyawit_live_prefs", FileCreationMode.Private);
+
+            // Fast buffered burst read of the 29-model multi-LOD NPAK archive into MemoryStream
+            NpakArchive archive;
+            using (var assetStream = Assets!.Open("Meshes/nyawit_models.npak"))
+            using (var mem = new MemoryStream(6 * 1024 * 1024))
+            {
+                assetStream.CopyTo(mem);
+                mem.Position = 0;
+                archive = NpakArchive.Load(mem);
+            }
+
+            Typeface displayFont = Typeface.DefaultBold!;
+            try { displayFont = Typeface.CreateFromAsset(Assets, "Fonts/XyVerseDisplay-Semibold.otf") ?? Typeface.DefaultBold!; } catch { }
+
+            Bitmap? smallBrandMark = null;
+            try
+            {
+                using var markStream = Assets.Open("Brand/mark_kecil_transparan_putih.png");
+                smallBrandMark = BitmapFactory.DecodeStream(markStream);
+            }
+            catch { }
+
+            var trees = PlantationWorld.GenerateTrees();
+            _net = new LiveMultiplayerSession(trees);
+            RestoreLocalProfile(_net.Profile);
+
+            _sfx = new ProceduralSfxPlayer();
+            _renderer = new Gles3InstancedRenderer(this, archive, trees, _net);
+
+            _glView = new GLSurfaceView(this);
+            _glView.SetEGLContextClientVersion(3);
+            _glView.SetEGLConfigChooser(new SafeGles3ConfigChooser());
+            _glView.PreserveEGLContextOnPause = true;
+            _glView.SetRenderer(_renderer);
+            _glView.RenderMode = Rendermode.Continuously;
+
+            _renderer.OnRenderScaleChanged += scale => RunOnUiThread(() => ApplyHardwareRenderScale(scale));
+
+            _hud = new HudOverlayView(this, _renderer, _net, displayFont, smallBrandMark);
+            WireGameplayAndModalEvents();
+
+            var root = new FrameLayout(this);
+            root.SetBackgroundColor(Color.Rgb(11, 13, 16));
+            root.AddView(_glView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+            root.AddView(_hud, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+
+            // CRITICAL ANDROID 11–16 FIX: ALWAYS call SetContentView(root) BEFORE touching WindowInsetsController / DecorView!
+            SetContentView(root);
+            ScheduleImmersiveFullscreen();
+
+            _net.StartBackgroundConnect();
+            _hud.ShowToast("Selamat datang di Kebun Nyawit Live 3D HD!");
+        }
+        catch (Exception ex)
+        {
+            Android.Util.Log.Error("NyawitLive3D", $"Startup exception: {ex}");
+            var errView = new TextView(this)
+            {
+                Text = $"Nyawit Live 3D Diagnostic:\n{ex}",
+                TextSize = 12f
+            };
+            errView.SetTextColor(Color.White);
+            errView.SetBackgroundColor(Color.Black);
+            errView.SetPadding(32, 32, 32, 32);
+            SetContentView(errView);
+        }
+    }
+
+    private void ApplyHardwareRenderScale(float scale)
+    {
+        if (_glView?.Holder == null) return;
+        try
+        {
+            int fullW = _glView.Width;
+            int fullH = _glView.Height;
+            if (fullW <= 64 || fullH <= 64) return;
+            // Smart Free-Fire / Mobile GPU Pixel Governor: cap max render height per preset so QHD+ phones NEVER lag!
+            int maxH = scale < 0.70f ? 540 : (scale < 0.88f ? 720 : 1080);
+            float effScale = System.Math.Min(scale, System.Math.Min(1f, maxH / (float)fullH));
+            if (effScale >= 0.99f)
+            {
+                _glView.Holder.SetSizeFromLayout();
+            }
+            else
+            {
+                int sw = System.Math.Max(320, (int)(fullW * effScale) & ~1);
+                int sh = System.Math.Max(180, (int)(fullH * effScale) & ~1);
+                _glView.Holder.SetFixedSize(sw, sh);
+            }
         }
         catch { }
-
-        var trees = PlantationWorld.GenerateTrees();
-        _net = new LiveMultiplayerSession(trees);
-        RestoreLocalProfile(_net.Profile);
-
-        _sfx = new ProceduralSfxPlayer();
-        _renderer = new Gles3InstancedRenderer(this, archive, trees, _net);
-
-        _glView = new GLSurfaceView(this);
-        _glView.SetEGLContextClientVersion(3);
-        _glView.SetEGLConfigChooser(8, 8, 8, 8, 16, 0);
-        _glView.PreserveEGLContextOnPause = true;
-        _glView.SetRenderer(_renderer);
-        _glView.RenderMode = Rendermode.Continuously;
-
-        _hud = new HudOverlayView(this, _renderer, _net, displayFont, smallBrandMark);
-        WireGameplayAndModalEvents();
-
-        var root = new FrameLayout(this);
-        root.AddView(_glView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
-        root.AddView(_hud, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
-        SetContentView(root);
-
-        _net.StartBackgroundConnect();
-        _hud.ShowToast("Selamat datang di Kebun Nyawit Live 3D!");
     }
 
     private void WireGameplayAndModalEvents()
@@ -111,7 +225,7 @@ public class MainActivity : Activity
         {
             _renderer.InTruck = !_renderer.InTruck;
             _sfx.Play("horn");
-            _hud.ShowToast(_renderer.InTruck ? "Naik Truk Canter Sawit (Muatan 24 TBS)!" : "Turun jalan kaki bawa Egrek!");
+            _hud.ShowToast(_renderer.InTruck ? "Naik Truk Canter Oleng HD (Muatan 24 TBS)!" : "Turun jalan kaki bawa Egrek!");
         };
 
         _hud.OnHornPressed += () =>
@@ -119,7 +233,7 @@ public class MainActivity : Activity
             _renderer.BoostTimer = 2.6f;
             _sfx.Play("horn");
             _net.SendHorn();
-            _hud.ShowToast("TELOLET! Turbo Diesel Aktif!");
+            _hud.ShowToast("TELOLET BASURI! Turbo Diesel Aktif!");
         };
 
         _hud.OnOpenChat += ShowChatDialog;
@@ -132,7 +246,7 @@ public class MainActivity : Activity
     private void ShowChatDialog()
     {
         if (_net == null) return;
-        var layout = CreateDialogContainer(out int pad);
+        var layout = CreateDialogContainer(out _);
 
         var logText = new TextView(this) { TextSize = 12.5f };
         logText.SetTextColor(Color.Argb(255, 225, 232, 240));
@@ -239,7 +353,7 @@ public class MainActivity : Activity
             (MeshCatalog.BackBasket, "Keranjang Rotan TBS"),
             (MeshCatalog.BackPack, "Ransel Taktis Lapangan"),
             (MeshCatalog.BackCape, "Jubah Mandor Sultan"),
-            (MeshCatalog.BackWingsGold, "Sayap Emas Juara")
+            (MeshCatalog.BackWingsGold, "Sayap Phoenix Emas Juara")
         ];
         (string id, string label)[] tools =
         [
@@ -342,7 +456,7 @@ public class MainActivity : Activity
         shareBtn.Click += async (_, _) =>
         {
             _hud?.ShowToast("Menyiapkan link kartu pencapaian live...");
-            var (url, text) = await _net.CreateShareCardAsync();
+            var (_, text) = await _net.CreateShareCardAsync();
             RunOnUiThread(() =>
             {
                 var sendIntent = new Intent(Intent.ActionSend);
@@ -410,7 +524,7 @@ public class MainActivity : Activity
         p.Name = _prefs.GetString("player_name", $"Juragan{Random.Shared.Next(100, 999)}") ?? "JuraganSawit";
         p.Avatar.Hat = _prefs.GetString("av_hat", "hat_caping") ?? "hat_caping";
         p.Avatar.Back = _prefs.GetString("av_back", "back_basket") ?? "back_basket";
-        p.Avatar.Tool = _prefs.GetString("av_tool", "tool_egrek") ?? "tool_egrek";
+        p.Avatar.Tool = _prefs.GetString("av_tool", "tool_egrek") ?? "hat_egrek" switch { _ => _prefs.GetString("av_tool", "tool_egrek") ?? "tool_egrek" };
         p.Avatar.OutfitHex = _prefs.GetString("av_hex", "#27AE60") ?? "#27AE60";
     }
 
@@ -428,33 +542,44 @@ public class MainActivity : Activity
         ed.Apply();
     }
 
-    private void EnableImmersiveFullscreen()
+    private void ScheduleImmersiveFullscreen()
     {
-        if (Window == null) return;
-        Window.AddFlags(WindowManagerFlags.KeepScreenOn);
-        if (OperatingSystem.IsAndroidVersionAtLeast(30))
+        var win = Window;
+        var decor = win?.DecorView;
+        if (win == null || decor == null) return;
+
+        try { win.AddFlags(WindowManagerFlags.KeepScreenOn); } catch { }
+
+        decor.Post(() =>
         {
-            Window.SetDecorFitsSystemWindows(false);
-            var controller = Window.InsetsController;
-            if (controller != null)
+            try
             {
-                controller.Hide(WindowInsets.Type.StatusBars() | WindowInsets.Type.NavigationBars());
-                controller.SystemBarsBehavior = (int)WindowInsetsControllerBehavior.ShowTransientBarsBySwipe;
-            }
-        }
-        else
-        {
+                if (OperatingSystem.IsAndroidVersionAtLeast(30))
+                {
+                    win.SetDecorFitsSystemWindows(false);
+                    var controller = win.InsetsController;
+                    if (controller != null)
+                    {
+                        controller.Hide(WindowInsets.Type.StatusBars() | WindowInsets.Type.NavigationBars());
+                        controller.SystemBarsBehavior = (int)WindowInsetsControllerBehavior.ShowTransientBarsBySwipe;
+                    }
+                }
+                else
+                {
 #pragma warning disable CA1422, CS0618
-            Window.DecorView.SystemUiVisibility = (StatusBarVisibility)(
-                SystemUiFlags.ImmersiveSticky | SystemUiFlags.Fullscreen | SystemUiFlags.HideNavigation | SystemUiFlags.LayoutFullscreen);
+                    decor.SystemUiVisibility = (StatusBarVisibility)(
+                        SystemUiFlags.ImmersiveSticky | SystemUiFlags.Fullscreen | SystemUiFlags.HideNavigation | SystemUiFlags.LayoutFullscreen);
 #pragma warning restore CA1422, CS0618
-        }
+                }
+            }
+            catch { }
+        });
     }
 
     protected override void OnResume()
     {
         base.OnResume();
-        EnableImmersiveFullscreen();
+        ScheduleImmersiveFullscreen();
         _glView?.OnResume();
     }
 
