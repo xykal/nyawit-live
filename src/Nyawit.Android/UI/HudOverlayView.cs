@@ -410,45 +410,46 @@ public sealed class HudOverlayView : View
         }
 
         // 2. Top-Left Sharp Tactical Status & Economy Card
-        var card = new RectF(leftPad, pad, leftPad + 306 * dp, pad + 76 * dp);
+        var card = new RectF(leftPad, pad, leftPad + 246 * dp, pad + 74 * dp);
         DrawChamferedPanel(canvas, card, new Color(10, 14, 17, 224), new Color(48, 232, 138, 185), 8 * dp, accentLeft: true);
 
-        float textX = card.Left + 11 * dp;
+        float textX = card.Left + 10 * dp;
         if (_brandSmallMark != null && !_brandSmallMark.IsRecycled)
         {
-            float ms = 22 * dp;
-            canvas.DrawBitmap(_brandSmallMark, null, new RectF(textX, card.Top + 9 * dp, textX + ms, card.Top + 9 * dp + ms), null);
-            textX += ms + 8 * dp;
+            float ms = 21 * dp;
+            canvas.DrawBitmap(_brandSmallMark, null, new RectF(textX, card.Top + 8 * dp, textX + ms, card.Top + 8 * dp + ms), null);
+            textX += ms + 7 * dp;
         }
 
-        _titlePaint.TextSize = 13.0f * dp;
+        _titlePaint.TextSize = 12.6f * dp;
         _titlePaint.Color = Color.White;
-        canvas.DrawText("NYAWIT LIVE", textX, card.Top + 24 * dp, _titlePaint);
+        canvas.DrawText("NYAWIT LIVE", textX, card.Top + 23 * dp, _titlePaint);
 
-        _textPaint.TextSize = 9.4f * dp;
+        _textPaint.TextSize = 8.9f * dp;
         _textPaint.Color = _net.IsConnected ? new Color(48, 232, 138) : new Color(246, 195, 56);
         int onlineCount = 1 + _net.RemotePeerCount;
         canvas.DrawText(
             $"{(_net.IsConnected ? "ONLINE" : "OFFLINE")}  //  {onlineCount} PEMAIN  //  {_renderer.Quality.CurrentFps} FPS  //  {_renderer.LastDrawCalls} DC",
-            card.Left + 11 * dp, card.Top + 44 * dp, _textPaint);
+            card.Left + 10 * dp, card.Top + 43 * dp, _textPaint);
 
         int shownTruckCargo = System.Math.Max(_net.LocalCargo, truck.VisualCargoUnits);
         _textPaint.Color = new Color(246, 195, 56);
         canvas.DrawText(
             $"RP {_net.Profile.Coins:N0}  //  TANGAN {player.HeldTbsUnits}/6  //  BAK {shownTruckCargo}/24",
-            card.Left + 11 * dp, card.Top + 63 * dp, _textPaint);
+            card.Left + 10 * dp, card.Top + 61 * dp, _textPaint);
 
         // 3. Top-Center Event Banner + Graphics Bar + Live Canter Speed / Suspension Telemetry
-        var evRect = new RectF(w * 0.5f - 126 * dp, pad, w * 0.5f + 126 * dp, pad + 26 * dp);
+        float cxTop = w * 0.545f;
+        var evRect = new RectF(cxTop - 116 * dp, pad, cxTop + 116 * dp, pad + 26 * dp);
         DrawChamferedPanel(canvas, evRect, new Color(18, 26, 22, 218), new Color(246, 195, 56, 200), 6 * dp);
-        _textPaint.TextSize = 9.6f * dp;
+        _textPaint.TextSize = 9.4f * dp;
         _textPaint.Color = new Color(246, 195, 56);
         _textPaint.TextAlign = Paint.Align.Center;
         canvas.DrawText(_net.EventTitle.ToUpperInvariant(), evRect.CenterX(), evRect.CenterY() + 3.5f * dp, _textPaint);
 
         string[] qNames = ["SMOOTH", "STD", "ULTRA", "MAX HD"];
         float qW = 55 * dp, qGap = 4 * dp;
-        float qStartX = w * 0.5f - (qW * 4 + qGap * 3) * 0.5f;
+        float qStartX = cxTop - (qW * 4 + qGap * 3) * 0.5f;
         for (int i = 0; i < 4; i++)
         {
             var qr = new RectF(qStartX + i * (qW + qGap), pad + 30 * dp, qStartX + i * (qW + qGap) + qW, pad + 52 * dp);
@@ -470,7 +471,7 @@ public sealed class HudOverlayView : View
             int kmh = (int)MathF.Round(MathF.Abs(truck.SpeedMs) * 3.6f);
             int steerDeg = (int)MathF.Round(truck.SteerAngle * 180f / MathF.PI);
             int rollDeg = (int)MathF.Round(truck.RollRad * 180f / MathF.PI);
-            var telRect = new RectF(w * 0.5f - 126 * dp, pad + 56 * dp, w * 0.5f + 126 * dp, pad + 79 * dp);
+            var telRect = new RectF(cxTop - 118 * dp, pad + 56 * dp, cxTop + 118 * dp, pad + 79 * dp);
             DrawChamferedPanel(canvas, telRect, new Color(10, 18, 26, 224), new Color(44, 196, 248, 200), 5 * dp);
             _textPaint.TextSize = 9.0f * dp;
             _textPaint.Color = new Color(118, 224, 255);

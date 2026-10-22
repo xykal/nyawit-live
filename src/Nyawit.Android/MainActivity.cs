@@ -392,15 +392,20 @@ public class MainActivity : Activity
                         if (_renderer.InTruck) _renderer.ToggleVehicleEnterExit();
                         _renderer.JoyX = 0f;
                         _renderer.JoyY = 0f;
-                        _renderer.Physics.SpawnHarvestedGroundFruit(_renderer.PlayerX + 0.55f, _renderer.PlayerZ + 0.55f, isGold: false);
+                        // Step clearly into open sunlit clearing beside Canter & Palm Grove for unobstructed close-up!
+                        _renderer.Physics.Player.X = 5.10f;
+                        _renderer.Physics.Player.Z = 9.80f;
+                        _renderer.Physics.Player.Y = NyawitEngine.Physics.RigidBodyWorld.SurfaceHeightWithStructures(5.10f, 9.80f);
+                        _renderer.Physics.Player.Yaw = 0.24f;
+                        _renderer.Physics.SpawnHarvestedGroundFruit(5.55f, 10.25f, isGold: false);
                         for (int i = 0; i < 90; i++) _renderer.Physics.StepWorld(0.016f, false, 0f, 0f, _renderer.CamYaw, []);
                         _renderer.Physics.TryPickupGroundFruit();
                         _renderer.Physics.Player.HeldTbsUnits = System.Math.Max(1, _renderer.Physics.Player.HeldTbsUnits);
                         RunOnUiThread(() => _hud?.ShowToast("DIAMBIL 1 JANJANG TBS - ANIMASI PEGANG AKTIF"));
                         _renderer.LockShowcaseCam = true;
-                        _renderer.CamDist = 3.10f;
-                        _renderer.CamPitch = 0.05f;
-                        _renderer.CamYaw = _renderer.Physics.Player.Yaw + 0.32f;
+                        _renderer.CamDist = 2.65f;
+                        _renderer.CamPitch = 0.04f;
+                        _renderer.CamYaw = _renderer.Physics.Player.Yaw + 0.26f;
                     });
                     return true;
                 case Keycode.L:

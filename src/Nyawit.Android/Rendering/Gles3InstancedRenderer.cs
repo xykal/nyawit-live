@@ -535,7 +535,8 @@ void main() {
     private void StepWorldPreparation(float dt)
     {
         if (!_gpuReady) return;
-        WorldPrepProgress = System.Math.Min(1.0f, WorldPrepProgress + dt * 0.42f);
+        float stepDt = System.Math.Max(dt, 0.033f);
+        WorldPrepProgress = System.Math.Min(1.0f, WorldPrepProgress + stepDt * 0.44f);
 
         if (WorldPrepProgress < 0.25f)
             WorldPrepStatus = "MEMBANGUN TOPOGRAFI KEBUN SAWIT & PARIT...";
@@ -1125,7 +1126,7 @@ void main() {
         var (cr, cg, cb) = av.GetOutfitRgb();
         var chassis = Mat4Utils.BoneMat.TRS(v.X, v.Y, v.Z, rx: v.PitchRad, ry: v.Yaw, rz: v.RollRad);
 
-        int n = chassis.Emit(_instStaging, 0, cr, cg, cb);
+        int n = chassis.Emit(_instStaging, 0, 1.0f, 1.0f, 1.0f);
         DrawNamed(MeshCatalog.CanterTruckBody, 0, _instStaging, n, ref drawCalls, ref tris);
 
         // 4 Independent Suspension + Steer + Rolling Wheels!

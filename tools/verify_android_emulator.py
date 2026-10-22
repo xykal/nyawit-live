@@ -124,11 +124,11 @@ def main():
 
     print("=== [3/6] Entering World (Keycode.Enter) & Capturing 'MENYIAPKAN DUNIA' Loading Screen ===")
     run(["adb", "shell", "input", "keyevent", "66"])  # Keycode.Enter -> BeginWorldPreparation()
-    time.sleep(0.85)
+    time.sleep(1.15)
     capture_screen("dist-apk/android_v3_loading_hd.png")
 
-    # Wait until world preparation completes seamlessly into Gameplay stage
-    time.sleep(2.8)
+    # Wait until world preparation completes 100% cleanly into full Gameplay stage
+    time.sleep(4.2)
 
     print("=== [4/6] Spawning & Holding Spiky TBS in Both Hands + Hero Front-3/4 Camera (Keycode.F) ===")
     run(["adb", "shell", "input", "keyevent", "34"])  # Keycode.F -> MaxHD + Spawn/Pickup TBS + Two-Hand Hold
