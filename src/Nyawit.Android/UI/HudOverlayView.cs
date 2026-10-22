@@ -92,9 +92,15 @@ public sealed class HudOverlayView : View
             }
         }
 
-        // 2. Top-Left XyVerse Live HUD & Economy Bar
+        // 2. Top-Left XyVerse Live HUD & Economy Bar (respects punch-hole safe inset!)
         float pad = 12 * dp;
-        var card = new RectF(pad, pad, pad + 308 * dp, pad + 76 * dp);
+        float cutoutLeft = 0f;
+        if (OperatingSystem.IsAndroidVersionAtLeast(28))
+        {
+            cutoutLeft = RootWindowInsets?.DisplayCutout?.SafeInsetLeft ?? 0f;
+        }
+        float leftPad = System.Math.Max(pad, cutoutLeft + 8 * dp);
+        var card = new RectF(leftPad, pad, leftPad + 308 * dp, pad + 76 * dp);
         DrawGlassCard(canvas, card, new Color(11, 13, 16, 212), new Color(255, 255, 255, 48), 14 * dp);
 
         float textX = card.Left + 12 * dp;

@@ -549,7 +549,17 @@ public class MainActivity : Activity
         var decor = win?.DecorView;
         if (win == null || decor == null) return;
 
-        try { win.AddFlags(WindowManagerFlags.KeepScreenOn); } catch { }
+        try
+        {
+            win.AddFlags(WindowManagerFlags.KeepScreenOn);
+            if (OperatingSystem.IsAndroidVersionAtLeast(28) && win.Attributes != null)
+            {
+                var lp = win.Attributes;
+                lp.LayoutInDisplayCutoutMode = LayoutInDisplayCutoutMode.ShortEdges;
+                win.Attributes = lp;
+            }
+        }
+        catch { }
 
         decor.Post(() =>
         {
@@ -557,7 +567,9 @@ public class MainActivity : Activity
             {
                 if (OperatingSystem.IsAndroidVersionAtLeast(30))
                 {
+#pragma warning disable CA1422
                     win.SetDecorFitsSystemWindows(false);
+#pragma warning restore CA1422
                     var controller = win.InsetsController;
                     if (controller != null)
                     {
