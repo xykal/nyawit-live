@@ -183,14 +183,18 @@ public sealed class LiveMultiplayerSession : IDisposable
 
         byte[] buf = new byte[65536];
         using var ms = new MemoryStream();
-        WebSocketReceiveResult res;
-        do
+        while (string.IsNullOrEmpty(Profile.Id) && !ct.IsCancellationRequested)
         {
-            res = await ws.ReceiveAsync(buf, ct);
-            ms.Write(buf, 0, res.Count);
-        } while (!res.EndOfMessage);
+            ms.SetLength(0);
+            WebSocketReceiveResult res;
+            do
+            {
+                res = await ws.ReceiveAsync(buf, ct);
+                ms.Write(buf, 0, res.Count);
+            } while (!res.EndOfMessage);
 
-        ProcessServerMessage(Encoding.UTF8.GetString(ms.ToArray()), 0.0);
+            ProcessServerMessage(Encoding.UTF8.GetString(ms.ToArray()), 0.0);
+        }
         try { await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "ok", ct); } catch { }
         return !string.IsNullOrEmpty(Profile.Id);
     }
