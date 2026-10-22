@@ -45,25 +45,25 @@ public sealed class SafeGles3ConfigChooser : Java.Lang.Object, GLSurfaceView.IEG
         [
             // Tier 1: Hardware 4x MSAA + 24/16-bit depth + RGB888 (crisp anti-aliased edges on mobile GPUs!)
             [
-                EGL10.EglRedSize, 8, EGL10.EglGreenSize, 8, EGL10.EglBlueSize, 8,
-                EGL10.EglDepthSize, 16,
-                EGL10.EglSampleBuffers, 1, EGL10.EglSamples, 4,
+                IEGL10.EglRedSize, 8, IEGL10.EglGreenSize, 8, IEGL10.EglBlueSize, 8,
+                IEGL10.EglDepthSize, 16,
+                IEGL10.EglSampleBuffers, 1, IEGL10.EglSamples, 4,
                 EglRenderableType, EglOpenGlEs3Bit,
-                EGL10.EglNone
+                IEGL10.EglNone
             ],
             // Tier 2: Standard universal RGB888 + 16-bit depth OpenGL ES 3.0
             [
-                EGL10.EglRedSize, 8, EGL10.EglGreenSize, 8, EGL10.EglBlueSize, 8,
-                EGL10.EglDepthSize, 16,
+                IEGL10.EglRedSize, 8, IEGL10.EglGreenSize, 8, IEGL10.EglBlueSize, 8,
+                IEGL10.EglDepthSize, 16,
                 EglRenderableType, EglOpenGlEs3Bit,
-                EGL10.EglNone
+                IEGL10.EglNone
             ],
             // Tier 3: Broad ES2/ES3 compatible RGB565 + 16-bit depth (budget GPUs & emulators)
             [
-                EGL10.EglRedSize, 5, EGL10.EglGreenSize, 6, EGL10.EglBlueSize, 5,
-                EGL10.EglDepthSize, 16,
+                IEGL10.EglRedSize, 5, IEGL10.EglGreenSize, 6, IEGL10.EglBlueSize, 5,
+                IEGL10.EglDepthSize, 16,
                 EglRenderableType, EglOpenGlEs2Bit,
-                EGL10.EglNone
+                IEGL10.EglNone
             ],
         ];
 
@@ -75,7 +75,7 @@ public sealed class SafeGles3ConfigChooser : Java.Lang.Object, GLSurfaceView.IEG
                 return configs[0];
         }
 
-        int[] fallback = [EGL10.EglNone];
+        int[] fallback = [IEGL10.EglNone];
         if (egl.EglChooseConfig(display, fallback, configs, configs.Length, num) && num[0] > 0 && configs[0] != null)
             return configs[0];
 
@@ -160,7 +160,7 @@ public class MainActivity : Activity
         }
         catch (Exception ex)
         {
-            Android.Util.Log.Error("NyawitLive3D", $"Startup exception: {ex}");
+            global::Android.Util.Log.Error("NyawitLive3D", $"Startup exception: {ex}");
             var errView = new TextView(this)
             {
                 Text = $"Nyawit Live 3D Diagnostic:\n{ex}",
