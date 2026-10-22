@@ -529,20 +529,20 @@ def build_canter_truck_body(lod: int) -> MeshPart:
 
     # 3. Center Black Honeycomb Grille + Chrome Bezel & 3-Diamond Crest!
     parts.append(make_quad(
-        (-0.48, 0.80, 2.225), (0.48, 0.80, 2.225),
-        (0.51, 1.11, 2.238), (-0.51, 1.11, 2.238),
+        (-0.48, 0.80, 2.262), (0.48, 0.80, 2.262),
+        (0.51, 1.11, 2.272), (-0.51, 1.11, 2.272),
         UV_CANTER_GRILLE, col=c_chrome
     ))
 
-    # 4. Swept-Back Crystal Multi-Reflector Headlamps + Outer Amber Turn Signals (mirrored UVs so amber sits outside!)
+    # 4. Swept-Back Crystal Multi-Reflector Headlamps + Outer Amber Turn Signals (cleanly proud of cab corners!)
     parts.append(make_quad(
-        (-0.92, 0.81, 2.175), (-0.50, 0.80, 2.226),
-        (-0.52, 1.13, 2.238), (-0.93, 1.15, 2.165),
+        (-0.93, 0.81, 2.222), (-0.50, 0.80, 2.264),
+        (-0.52, 1.13, 2.274), (-0.935, 1.15, 2.212),
         UV_CANTER_HEADLAMP, col=c_lamp, flip_u=True
     ))
     parts.append(make_quad(
-        (0.50, 0.80, 2.226), (0.92, 0.81, 2.175),
-        (0.93, 1.15, 2.165), (0.52, 1.13, 2.238),
+        (0.50, 0.80, 2.264), (0.93, 0.81, 2.222),
+        (0.935, 1.15, 2.212), (0.52, 1.13, 2.274),
         UV_CANTER_HEADLAMP, col=c_lamp, flip_u=False
     ))
 

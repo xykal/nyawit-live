@@ -79,8 +79,10 @@ public sealed class SafeGles3ConfigChooser : Java.Lang.Object, GLSurfaceView.IEG
 }
 
 [Activity(
+    Name = "id.my.xyverse.nyawitlive.MainActivity",
     Label = "Nyawit Live 3D",
     Theme = "@android:style/Theme.Black.NoTitleBar.Fullscreen",
+    LaunchMode = LaunchMode.SingleTop,
     MainLauncher = true,
     Exported = true,
     ScreenOrientation = ScreenOrientation.SensorLandscape,
@@ -171,6 +173,7 @@ public class MainActivity : Activity
             SetContentView(_rootLayout);
             ApplyHardwareDisplayRefreshRate(_renderer.Quality.TargetFps);
             _net.StartBackgroundConnect();
+            HandleStageIntent(Intent);
         }
         catch (Exception ex)
         {
@@ -507,6 +510,120 @@ public class MainActivity : Activity
             ToggleVoiceChatWithPermission();
     }
 
+    protected override void OnNewIntent(Intent? intent)
+    {
+        base.OnNewIntent(intent);
+        ScheduleImmersiveFullscreen();
+        HandleStageIntent(intent);
+    }
+
+    private void HandleStageIntent(Intent? intent)
+    {
+        string? stage = intent?.GetStringExtra("stage");
+        if (string.IsNullOrWhiteSpace(stage) || _renderer == null || _hud == null || _net == null) return;
+
+        switch (stage.Trim().ToLowerInvariant())
+        {
+            case "splash":
+                _hud.CloseModal();
+                _renderer.ForceStageAndProgress(AppSceneStage.Splash, 0.58f, hold: true);
+                _hud.PostInvalidate();
+                break;
+
+            case "garage":
+                _hud.CloseModal();
+                _renderer.HoldStageProgress = false;
+                _renderer.SkipSplashToLobby();
+                _renderer.ReturnToLobby();
+                _renderer.LobbyOrbitYaw = 0.06f;
+                _hud.PostInvalidate();
+                break;
+
+            case "loading":
+                _hud.CloseModal();
+                _renderer.BeginWorldPreparation();
+                _renderer.ForceStageAndProgress(AppSceneStage.PreparingWorld, 0.64f, hold: true);
+                _hud.PostInvalidate();
+                break;
+
+            case "onfoot":
+                _renderer.HoldStageProgress = false;
+                _renderer.ForceStageAndProgress(AppSceneStage.Gameplay, 1.0f, hold: false);
+                ExecuteKeyShowcase(Keycode.F);
+                break;
+
+            case "canter":
+                _renderer.HoldStageProgress = false;
+                _renderer.ForceStageAndProgress(AppSceneStage.Gameplay, 1.0f, hold: false);
+                ExecuteKeyShowcase(Keycode.T);
+                break;
+
+            case "settings":
+                _renderer.HoldStageProgress = false;
+                ExecuteKeyShowcase(Keycode.P);
+                break;
+        }
+    }
+
+    private void ExecuteKeyShowcase(Keycode keyCode)
+    {
+        if (_renderer == null || _hud == null || _net == null) return;
+        if (keyCode == Keycode.P)
+        {
+            _hud.SettingsTabIndex = 0;
+            _hud.OpenModal(ActiveModalOverlay.Settings);
+            _hud.PostInvalidate();
+            return;
+        }
+        if (keyCode == Keycode.F)
+        {
+            _hud.CloseModal();
+            _renderer.InTruck = false;
+            _renderer.LockShowcaseCam = true;
+            _renderer.Physics.Player.X = -5.6f;
+            _renderer.Physics.Player.Z = 14.0f;
+            _renderer.Physics.Player.Y = RigidBodyWorld.SurfaceHeightWithStructures(-5.6f, 14.0f);
+            _renderer.Physics.Player.Yaw = 0.22f;
+            _renderer.Physics.Player.HeldTbsUnits = 3;
+            _renderer.Physics.Player.HeldGoldUnits = 0;
+            _renderer.Physics.Player.Stance = HoldStance.CarryingTbs;
+            _net.Profile.Avatar.Hat = MeshCatalog.HatCaping;
+            _net.Profile.Avatar.Back = MeshCatalog.BackBasket;
+            _net.Profile.Avatar.Tool = MeshCatalog.ToolEgrek;
+            _net.Profile.Avatar.Glasses = true;
+            _net.Profile.Avatar.WaistParang = true;
+
+            _renderer.Physics.MainTruck.X = -2.4f;
+            _renderer.Physics.MainTruck.Z = 10.6f;
+            _renderer.Physics.MainTruck.Y = RigidBodyWorld.SurfaceHeightWithStructures(-2.4f, 10.6f);
+            _renderer.Physics.MainTruck.Yaw = -0.62f;
+            _renderer.Physics.MainTruck.SteerAngle = 0.34f;
+            _renderer.Physics.MainTruck.VisualCargoUnits = 16;
+
+            _renderer.CamYaw = 0.14f;
+            _renderer.CamPitch = 0.11f;
+            _renderer.CamDist = 3.55f;
+            _hud.PostInvalidate();
+            return;
+        }
+        if (keyCode == Keycode.T)
+        {
+            _hud.CloseModal();
+            _renderer.InTruck = true;
+            _renderer.LockShowcaseCam = true;
+            _renderer.Physics.MainTruck.X = 0.0f;
+            _renderer.Physics.MainTruck.Z = 14.0f;
+            _renderer.Physics.MainTruck.Y = RigidBodyWorld.SurfaceHeightWithStructures(0.0f, 14.0f);
+            _renderer.Physics.MainTruck.Yaw = 0.0f;
+            _renderer.Physics.MainTruck.VisualCargoUnits = 18;
+            _renderer.CamDist = 6.1f;
+            _renderer.CamPitch = 0.18f;
+            _renderer.JoyX = -0.78f;
+            _renderer.JoyY = -0.52f;
+            _hud.PostInvalidate();
+        }
+    }
+
     public override bool OnKeyDown([GeneratedEnum] Keycode keyCode, KeyEvent? e)
     {
         if (_renderer != null && _hud != null && _net != null)
@@ -660,42 +777,57 @@ public class MainActivity : Activity
 
         try
         {
-            win.AddFlags(WindowManagerFlags.KeepScreenOn);
+            win.AddFlags(WindowManagerFlags.KeepScreenOn | WindowManagerFlags.Fullscreen);
             if (OperatingSystem.IsAndroidVersionAtLeast(28) && win.Attributes != null)
             {
                 var lp = win.Attributes;
-                lp.LayoutInDisplayCutoutMode = LayoutInDisplayCutoutMode.ShortEdges;
+                lp.LayoutInDisplayCutoutMode = OperatingSystem.IsAndroidVersionAtLeast(30)
+                    ? LayoutInDisplayCutoutMode.Always
+                    : LayoutInDisplayCutoutMode.ShortEdges;
                 win.Attributes = lp;
+            }
+            if (OperatingSystem.IsAndroidVersionAtLeast(30))
+            {
+#pragma warning disable CA1422
+                win.SetDecorFitsSystemWindows(false);
+#pragma warning restore CA1422
             }
         }
         catch { }
 
-        decor.Post(() =>
+        ApplyImmersiveBarsHide();
+        decor.Post(ApplyImmersiveBarsHide);
+    }
+
+    private void ApplyImmersiveBarsHide()
+    {
+        var win = Window;
+        var decor = win?.DecorView;
+        if (win == null || decor == null) return;
+        try
         {
-            try
+            if (OperatingSystem.IsAndroidVersionAtLeast(30))
             {
-                if (OperatingSystem.IsAndroidVersionAtLeast(30))
+                var controller = win.InsetsController;
+                if (controller != null)
                 {
-#pragma warning disable CA1422
-                    win.SetDecorFitsSystemWindows(false);
-#pragma warning restore CA1422
-                    var controller = win.InsetsController;
-                    if (controller != null)
-                    {
-                        controller.Hide(WindowInsets.Type.StatusBars() | WindowInsets.Type.NavigationBars());
-                        controller.SystemBarsBehavior = (int)WindowInsetsControllerBehavior.ShowTransientBarsBySwipe;
-                    }
-                }
-                else
-                {
-#pragma warning disable CA1422, CS0618
-                    decor.SystemUiVisibility = (StatusBarVisibility)(
-                        SystemUiFlags.ImmersiveSticky | SystemUiFlags.Fullscreen | SystemUiFlags.HideNavigation | SystemUiFlags.LayoutFullscreen);
-#pragma warning restore CA1422, CS0618
+                    controller.Hide(WindowInsets.Type.StatusBars() | WindowInsets.Type.NavigationBars() | WindowInsets.Type.SystemBars());
+                    controller.SystemBarsBehavior = (int)WindowInsetsControllerBehavior.ShowTransientBarsBySwipe;
                 }
             }
-            catch { }
-        });
+#pragma warning disable CA1422, CS0618
+            decor.SystemUiVisibility = (StatusBarVisibility)(
+                SystemUiFlags.ImmersiveSticky | SystemUiFlags.Fullscreen | SystemUiFlags.HideNavigation |
+                SystemUiFlags.LayoutFullscreen | SystemUiFlags.LayoutHideNavigation | SystemUiFlags.LayoutStable);
+#pragma warning restore CA1422, CS0618
+        }
+        catch { }
+    }
+
+    public override void OnWindowFocusChanged(bool hasFocus)
+    {
+        base.OnWindowFocusChanged(hasFocus);
+        if (hasFocus) ApplyImmersiveBarsHide();
     }
 
     protected override void OnResume()

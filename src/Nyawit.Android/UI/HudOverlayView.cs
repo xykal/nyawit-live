@@ -447,6 +447,8 @@ public sealed class HudOverlayView : View
         }
     }
 
+    private int GetEffectiveViewportWidth() => Width;
+
     protected override void OnDraw(Canvas? canvas)
     {
         if (canvas == null) return;
@@ -454,7 +456,7 @@ public sealed class HudOverlayView : View
         if (_renderer == null || _net == null) return;
 
         _hitCount = 0;
-        int w = Width, h = Height;
+        int w = GetEffectiveViewportWidth(), h = Height;
         if (w <= 0 || h <= 0) return;
 
         if (_renderer.Stage == AppSceneStage.Splash)

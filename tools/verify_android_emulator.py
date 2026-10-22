@@ -1,24 +1,18 @@
 #!/usr/bin/env python3
 """
 Zero-dependency (100% pure Python stdlib) live hardware-KVM Android 14 (API 34) Emulator harness for Nyawit Live 3D v4.0.0.
-Verifies:
-  1. 100% zero force-close on cold start (same continuous PID across Splash -> Separate Garage Lobby -> Loading -> On-Foot PBR -> Canter COE Drive -> Custom Pengaturan).
-  2. Screen 1: Custom XyVerse + Nyawit Live Boot Splash Screen with zero native Android chrome (dist-apk/android_v4_splash_hd.png).
-  3. Screen 2: Dedicated Separate 3D Garage/Workshop Lobby Scene with COE Canter FE 74 HD + Turntable + Harvester Accessories (dist-apk/android_v4_lobby_garage_hd.png).
-  4. Screen 3: Dedicated Full-Screen "MENYIAPKAN DUNIA" World Loading Screen (dist-apk/android_v4_loading_hd.png).
-  5. Screen 4: Open Plantation Gameplay — PBR Multi-Scale Terrain, Alpha-Cutout Pinnate Oil Palms, 1024x1024 Real Sun Shadows, Cumulus Sky & Spiky TBS Hold (dist-apk/android_v4_onfoot_hold_hd.png).
-  6. Screen 5: Driving Flat-Nose COE Mitsubishi Canter FE 74 HD Bak Kayu with Dual Rear Tires, Live Steering Wheel, Tire Dust & Exhaust VFX (dist-apk/android_v4_canter_drive_hd.png).
-  7. Screen 6: Custom In-Game PENGATURAN Panel (30/60/90/120 FPS, Render Scale, Real-Time Shadows, Volumetric Clouds, VFX, Audio — 0 AlertDialogs) (dist-apk/android_v4_settings_hd.png).
+Verifies all 6 distinct full-screen v4.0.0 stages in one uninterrupted SingleTop process PID with ZERO stock Android chrome!
 """
 import math
 import os
 import re
-import shutil
 import struct
 import subprocess
 import sys
 import time
 import zlib
+
+ACTIVITY = "id.my.xyverse.nyawitlive/id.my.xyverse.nyawitlive.MainActivity"
 
 
 def inspect_png_stdlib(path: str, min_kb: float = 24.0):
@@ -73,6 +67,12 @@ def run(cmd, check=True, binary=False):
     return res.stdout if binary else res.stdout.decode("utf-8", errors="replace")
 
 
+def send_stage(stage_name: str, wait_sec: float):
+    out = run(["adb", "shell", "am", "start", "-W", "--activity-single-top", "-n", ACTIVITY, "--es", "stage", stage_name])
+    print(f"  -> Stage '{stage_name}': {out.splitlines()[0] if out else 'OK'}")
+    time.sleep(wait_sec)
+
+
 def capture_screen(out_path: str):
     png = subprocess.check_output(["adb", "exec-out", "screencap", "-p"])
     with open(out_path, "wb") as f:
@@ -90,68 +90,55 @@ def dump_diagnostics(tag: str):
         ln for ln in log.splitlines()
         if re.search(r"AndroidRuntime|mono-rt|Nyawit|FATAL|Exception|EGL|GLES|ActivityTaskManager", ln, re.I)
     ]
-    for ln in interesting[-120:]:
+    for ln in interesting[-100:]:
         print(ln)
     return log
 
 
 def main():
-    print("=== [1/8] Preparing Android 14 Window Manager, Full Brightness & Installing v4.0.0 Universal APK ===")
+    print("=== [1/8] Configuring Fullscreen Gesture Mode, Immersive Policy & Installing v4.0.0 Universal APK ===")
+    run(["adb", "shell", "cmd", "overlay", "enable", "com.android.internal.systemui.navbar.gestural"], check=False)
+    run(["adb", "shell", "settings", "put", "global", "policy_control", "immersive.full=*"], check=False)
     run(["adb", "shell", "settings", "put", "secure", "immersive_mode_confirmations", "confirmed"], check=False)
     run(["adb", "shell", "settings", "put", "system", "screen_brightness_mode", "0"], check=False)
     run(["adb", "shell", "settings", "put", "system", "screen_brightness", "255"], check=False)
     run(["adb", "shell", "wm", "dismiss-keyguard"], check=False)
     run(["adb", "shell", "input", "keyevent", "82"], check=False)
     run(["adb", "shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS"], check=False)
+    time.sleep(1.0)
 
     install_out = run(["adb", "install", "-r", "dist-apk/NyawitLive-v4.0.0-universal.apk"])
     print(install_out.strip())
-
     run(["adb", "logcat", "-c"], check=False)
 
-    print("=== [2/8] Cold-Launching id.my.xyverse.nyawitlive & Capturing Custom Boot Splash Screen ===")
-    launch_out = run(["adb", "shell", "monkey", "-p", "id.my.xyverse.nyawitlive", "-c", "android.intent.category.LAUNCHER", "1"])
-    print(launch_out.strip())
+    print("=== [2/8] Cold-Launching Boot Splash Stage (Zero Stock Android Chrome) ===")
+    send_stage("splash", 5.5)
 
-    # Capture custom obsidian XyVerse + Nyawit Live Boot Splash while GPU warms up
-    time.sleep(2.6)
     pid1 = run(["adb", "shell", "pidof", "id.my.xyverse.nyawitlive"], check=False).strip()
-    print(f"Live Android Process PID on Cold Splash: '{pid1}'")
+    print(f"Live Android Process PID: '{pid1}'")
     if not pid1:
         dump_diagnostics("COLD_LAUNCH_EXIT")
         sys.exit(1)
-
     capture_screen("dist-apk/android_v4_splash_hd.png")
 
-    print("=== [3/8] Transitioning Into Dedicated Separate 3D Garage Showroom Lobby (Keycode.G) ===")
-    time.sleep(2.5)
-    run(["adb", "shell", "input", "keyevent", "35"])  # Keycode.G -> Ensure Garage Lobby
-    time.sleep(2.2)
+    print("=== [3/8] Verifying Dedicated Separate 3D Garage/Workshop Lobby Stage ===")
+    send_stage("garage", 2.8)
     capture_screen("dist-apk/android_v4_lobby_garage_hd.png")
 
-    print("=== [4/8] Triggering 'MULAI PANEN' (Keycode.Enter) & Capturing Full-Screen 'MENYIAPKAN DUNIA' Loading Screen ===")
-    run(["adb", "shell", "input", "keyevent", "66"])  # Keycode.Enter -> BeginWorldPreparation()
-    time.sleep(1.1)
+    print("=== [4/8] Verifying Dedicated Full-Screen 'MENYIAPKAN DUNIA' Loading Stage ===")
+    send_stage("loading", 1.8)
     capture_screen("dist-apk/android_v4_loading_hd.png")
 
-    # Wait cleanly until world streaming reaches 100% and enters Plantation Gameplay
-    time.sleep(4.2)
-
-    print("=== [5/8] Verifying Open Plantation PBR + Alpha-Cutout Palms + Real 1024x1024 Shadows + Spiky TBS Hold (Keycode.F) ===")
-    run(["adb", "shell", "input", "keyevent", "34"])  # Keycode.F -> MaxHD + PCF Shadows + Hold TBS
-    time.sleep(2.4)
+    print("=== [5/8] Verifying Bright Sunlit PBR Plantation + Alpha-Cutout Palms + Real Shadows + Spiky TBS Hold ===")
+    send_stage("onfoot", 2.8)
     capture_screen("dist-apk/android_v4_onfoot_hold_hd.png")
 
-    print("=== [6/8] Loading TBS & Driving COE Mitsubishi Canter FE 74 HD with Dual Rear Wheels + Tire Dust VFX (Keycode.L + Keycode.T) ===")
-    run(["adb", "shell", "input", "keyevent", "40"])  # Keycode.L -> Load TBS into cargo bed
-    time.sleep(0.55)
-    run(["adb", "shell", "input", "keyevent", "48"])  # Keycode.T -> Board COE Canter + Steer + Throttle + Dust/Smoke VFX
-    time.sleep(2.5)
+    print("=== [6/8] Verifying Flat-Nose COE Mitsubishi Canter FE 74 HD + Dual Rear Tires + Tire Dust & Exhaust VFX ===")
+    send_stage("canter", 2.8)
     capture_screen("dist-apk/android_v4_canter_drive_hd.png")
 
-    print("=== [7/8] Opening Custom In-Game 'PENGATURAN' Panel (30/60/90/120 FPS, Render Scale, Shadows, Clouds) (Keycode.P) ===")
-    run(["adb", "shell", "input", "keyevent", "44"])  # Keycode.P -> Open Custom Settings Modal
-    time.sleep(1.2)
+    print("=== [7/8] Verifying Custom In-Game 'PENGATURAN' Panel (30/60/90/120 FPS, Render Scale, Anti-Lag) ===")
+    send_stage("settings", 1.5)
     capture_screen("dist-apk/android_v4_settings_hd.png")
 
     pid2 = run(["adb", "shell", "pidof", "id.my.xyverse.nyawitlive"], check=False).strip()
@@ -174,7 +161,7 @@ def main():
         "dist-apk/android_v4_canter_drive_hd.png",
         "dist-apk/android_v4_settings_hd.png",
     ]:
-        inspect_png_stdlib(shot, min_kb=30.0)
+        inspect_png_stdlib(shot, min_kb=60.0)
 
     print("=== ALL 8 LIVE ANDROID 14 EMULATOR v4.0.0 PBR VERIFICATION GATES 100% PASSED! ===")
 

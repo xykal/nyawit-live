@@ -673,10 +673,23 @@ void main() {
         SetStage(AppSceneStage.Lobby);
     }
 
+    private double _stageEnterSec;
+    public bool HoldStageProgress { get; set; }
+
+    public void ForceStageAndProgress(AppSceneStage stage, float progress = 0.58f, bool hold = false)
+    {
+        HoldStageProgress = hold;
+        _stageEnterSec = _clock.Elapsed.TotalSeconds - progress * 2.2;
+        if (stage == AppSceneStage.Splash) SplashProgress = progress;
+        else if (stage == AppSceneStage.PreparingWorld) WorldPrepProgress = progress;
+        SetStage(stage);
+    }
+
     private void SetStage(AppSceneStage next)
     {
         if (Stage == next) return;
         Stage = next;
+        _stageEnterSec = _clock.Elapsed.TotalSeconds;
         OnStageChanged?.Invoke();
     }
 
@@ -795,8 +808,21 @@ void main() {
 
         GLES30.GlEnable(GLES30.GlDepthTest);
         GLES30.GlDisable(0x0B44);
+
+        string gpuRenderer = GLES30.GlGetString(GLES30.GlRenderer) ?? "";
+        if (gpuRenderer.Contains("SwiftShader", StringComparison.OrdinalIgnoreCase) ||
+            gpuRenderer.Contains("llvmpipe", StringComparison.OrdinalIgnoreCase))
+        {
+            // Software CPU rasterizer detected: optimize render scale & single-tap shadow filter for high FPS!
+            Quality.CustomRenderScale ??= 0.72f;
+            if (Quality.ShadowTier == ShadowQualityTier.High)
+                Quality.ShadowTier = ShadowQualityTier.Medium;
+            SyncRenderScaleNow();
+        }
+
         _gpuReady = true;
         _lastTimeSec = _clock.Elapsed.TotalSeconds;
+        _stageEnterSec = _lastTimeSec;
     }
 
     private int UploadPbrAtlasTexture()
@@ -923,8 +949,12 @@ void main() {
     private void StepBootSplash(float dt)
     {
         if (!_gpuReady) return;
-        float stepDt = System.Math.Min(dt, 0.033f);
-        SplashProgress = System.Math.Min(1.0f, SplashProgress + stepDt * 0.34f);
+        if (!HoldStageProgress)
+        {
+            if (_stageEnterSec <= 0.001) _stageEnterSec = _clock.Elapsed.TotalSeconds;
+            float elapsed = (float)(_clock.Elapsed.TotalSeconds - _stageEnterSec);
+            SplashProgress = System.Math.Clamp(elapsed / 2.2f, 0.05f, 1.0f);
+        }
         if (SplashProgress < 0.35f)
             SplashStatus = "INISIALISASI SHADER PBR & SHADOW MAP...";
         else if (SplashProgress < 0.72f)
@@ -932,15 +962,18 @@ void main() {
         else
             SplashStatus = "MEMBUKA GARASI SHOWROOM SAWIT...";
 
-        if (SplashProgress >= 1.0f)
+        if (!HoldStageProgress && SplashProgress >= 1.0f)
             SetStage(AppSceneStage.Lobby);
     }
 
     private void StepWorldPreparation(float dt)
     {
         if (!_gpuReady) return;
-        float stepDt = System.Math.Max(dt, 0.032f);
-        WorldPrepProgress = System.Math.Min(1.0f, WorldPrepProgress + stepDt * 0.48f);
+        if (!HoldStageProgress)
+        {
+            float elapsed = (float)(_clock.Elapsed.TotalSeconds - _stageEnterSec);
+            WorldPrepProgress = System.Math.Clamp(elapsed / 2.2f, 0.05f, 1.0f);
+        }
 
         if (WorldPrepProgress < 0.28f)
             WorldPrepStatus = "MEMBANGUN TOPOGRAFI JALAN TANAH MERAH & PARIT...";
@@ -953,7 +986,7 @@ void main() {
 
         Physics.StepWorld(dt, inTruck: false, inputSide: 0f, inputForward: 0f, camYaw: CamYaw, boars: _boarsSnap);
 
-        if (WorldPrepProgress >= 1.0f)
+        if (!HoldStageProgress && WorldPrepProgress >= 1.0f)
         {
             SetStage(AppSceneStage.Gameplay);
             OnWorldReady?.Invoke();
@@ -1105,10 +1138,10 @@ void main() {
         GLES30.GlUniform1i(_uAtlas, 0);
         GLES30.GlUniform1i(_uShadowMap, 1);
         GLES30.GlUniform3f(_uSunDir, 0.28f, 0.80f, 0.53f);
-        GLES30.GlUniform3f(_uSunColor, 1.95f, 1.82f, 1.56f);
-        GLES30.GlUniform3f(_uSkyTop, 0.30f, 0.38f, 0.52f);
-        GLES30.GlUniform3f(_uGroundBounce, 0.11f, 0.10f, 0.09f);
-        GLES30.GlUniform3f(_uFogColor, 0.08f, 0.11f, 0.16f);
+        GLES30.GlUniform3f(_uSunColor, 2.85f, 2.68f, 2.32f);
+        GLES30.GlUniform3f(_uSkyTop, 0.52f, 0.62f, 0.78f);
+        GLES30.GlUniform3f(_uGroundBounce, 0.24f, 0.22f, 0.20f);
+        GLES30.GlUniform3f(_uFogColor, 0.12f, 0.16f, 0.22f);
         GLES30.GlUniform3f(_uCamPos, eyeX, eyeY, eyeZ);
         GLES30.GlUniform1f(_uFogDensity, 0.001f);
         GLES30.GlUniform1i(_uRenderMode, 0);
@@ -1266,26 +1299,27 @@ void main() {
         GLES30.GlDisable(GLES30.GlDepthTest);
         GLES30.GlUseProgram(_skyProgram);
         GLES30.GlUniformMatrix4fv(_uSkyInvVp, 1, false, _invVp, 0);
-        GLES30.GlUniform3f(_uSkySunDir, 0.48f, 0.72f, 0.44f);
+        // Vivid tropical golden-daylight sun & sky irradiance!
+        GLES30.GlUniform3f(_uSunDir, 0.48f, 0.72f, 0.44f);
         GLES30.GlUniform1f(_uSkyTime, now);
         GLES30.GlUniform1f(_uSkyClouds, Quality.CloudsEnabled ? 1f : 0f);
         if (storm)
         {
-            GLES30.GlUniform3f(_uSkyZenith, 0.03f, 0.06f, 0.13f);
-            GLES30.GlUniform3f(_uSkyHorizon, 0.14f, 0.19f, 0.26f);
-            GLES30.GlUniform3f(_uSkySunCol, 0.30f, 0.36f, 0.50f);
+            GLES30.GlUniform3f(_uSkyZenith, 0.04f, 0.08f, 0.16f);
+            GLES30.GlUniform3f(_uSkyHorizon, 0.18f, 0.24f, 0.32f);
+            GLES30.GlUniform3f(_uSkySunCol, 0.40f, 0.48f, 0.65f);
         }
         else if (goldRush)
         {
-            GLES30.GlUniform3f(_uSkyZenith, 0.05f, 0.17f, 0.48f);
-            GLES30.GlUniform3f(_uSkyHorizon, 0.74f, 0.46f, 0.18f);
-            GLES30.GlUniform3f(_uSkySunCol, 1.50f, 0.95f, 0.38f);
+            GLES30.GlUniform3f(_uSkyZenith, 0.06f, 0.22f, 0.62f);
+            GLES30.GlUniform3f(_uSkyHorizon, 0.88f, 0.56f, 0.24f);
+            GLES30.GlUniform3f(_uSkySunCol, 1.85f, 1.25f, 0.52f);
         }
         else
         {
-            GLES30.GlUniform3f(_uSkyZenith, 0.045f, 0.20f, 0.62f);
-            GLES30.GlUniform3f(_uSkyHorizon, 0.46f, 0.68f, 0.88f);
-            GLES30.GlUniform3f(_uSkySunCol, 1.38f, 1.18f, 0.84f);
+            GLES30.GlUniform3f(_uSkyZenith, 0.065f, 0.28f, 0.82f);
+            GLES30.GlUniform3f(_uSkyHorizon, 0.58f, 0.80f, 0.98f);
+            GLES30.GlUniform3f(_uSkySunCol, 1.75f, 1.52f, 1.08f);
         }
         GLES30.GlBindVertexArray(_skyVao);
         GLES30.GlDrawArrays(GLES30.GlTriangleStrip, 0, 4);
@@ -1308,27 +1342,27 @@ void main() {
 
         if (storm)
         {
-            GLES30.GlUniform3f(_uSunColor, 0.65f, 0.75f, 0.98f);
-            GLES30.GlUniform3f(_uSkyTop, 0.15f, 0.21f, 0.32f);
-            GLES30.GlUniform3f(_uGroundBounce, 0.06f, 0.07f, 0.05f);
-            GLES30.GlUniform3f(_uFogColor, 0.14f, 0.19f, 0.26f);
+            GLES30.GlUniform3f(_uSunColor, 0.92f, 1.05f, 1.32f);
+            GLES30.GlUniform3f(_uSkyTop, 0.22f, 0.30f, 0.44f);
+            GLES30.GlUniform3f(_uGroundBounce, 0.09f, 0.11f, 0.08f);
+            GLES30.GlUniform3f(_uFogColor, 0.18f, 0.24f, 0.32f);
             GLES30.GlUniform1f(_uFogDensity, 0.009f);
         }
         else if (goldRush)
         {
-            GLES30.GlUniform3f(_uSunColor, 2.25f, 1.55f, 0.74f);
-            GLES30.GlUniform3f(_uSkyTop, 0.42f, 0.32f, 0.24f);
-            GLES30.GlUniform3f(_uGroundBounce, 0.13f, 0.09f, 0.05f);
-            GLES30.GlUniform3f(_uFogColor, 0.66f, 0.44f, 0.20f);
+            GLES30.GlUniform3f(_uSunColor, 3.10f, 2.15f, 1.05f);
+            GLES30.GlUniform3f(_uSkyTop, 0.56f, 0.44f, 0.34f);
+            GLES30.GlUniform3f(_uGroundBounce, 0.20f, 0.15f, 0.09f);
+            GLES30.GlUniform3f(_uFogColor, 0.78f, 0.54f, 0.26f);
             GLES30.GlUniform1f(_uFogDensity, 0.004f);
         }
         else
         {
-            GLES30.GlUniform3f(_uSunColor, 2.08f, 1.88f, 1.46f);
-            GLES30.GlUniform3f(_uSkyTop, 0.28f, 0.46f, 0.74f);
-            GLES30.GlUniform3f(_uGroundBounce, 0.10f, 0.12f, 0.07f);
-            GLES30.GlUniform3f(_uFogColor, 0.48f, 0.68f, 0.86f);
-            GLES30.GlUniform1f(_uFogDensity, 0.0035f);
+            GLES30.GlUniform3f(_uSunColor, 2.95f, 2.68f, 2.12f);
+            GLES30.GlUniform3f(_uSkyTop, 0.44f, 0.66f, 0.96f);
+            GLES30.GlUniform3f(_uGroundBounce, 0.18f, 0.22f, 0.14f);
+            GLES30.GlUniform3f(_uFogColor, 0.58f, 0.78f, 0.95f);
+            GLES30.GlUniform1f(_uFogDensity, 0.0030f);
         }
 
         // 1. Multi-Scale Splatmapped Terrain (Mode 1) & Canal Water (Mode 0)
