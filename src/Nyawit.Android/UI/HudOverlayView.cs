@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Android.Content;
 using Android.Graphics;
+using Path = global::Android.Graphics.Path;
 using Android.Runtime;
 using Android.Views;
 using Nyawit.AndroidClient.Audio;
