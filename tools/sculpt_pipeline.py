@@ -841,10 +841,10 @@ def build_char_head(lod: int) -> MeshPart:
         (0.252, 0.084, 0.094),
         (0.272, 0.042, 0.048),
     ]):
-        # Pull hair back behind face for front angles |a| < 1.15 below forehead (hy < 0.19)!
-        front_mask = np.clip(1.15 - np.abs(hang), 0.0, 1.0)
-        tuck = front_mask * (0.048 if hy < 0.18 else 0.008)
-        pts = np.stack([np.sin(hang) * (hrx - tuck * 0.35), np.full_like(hang, hy), -0.010 + np.cos(hang) * (hrz - tuck)], axis=1)
+        # Pull hair cleanly behind front face hemisphere so zero dark hair ever clips temples or brows!
+        front_mask = np.clip(1.45 - np.abs(hang), 0.0, 1.0)
+        tuck = front_mask * (0.068 if hy < 0.19 else 0.012)
+        pts = np.stack([np.sin(hang) * (hrx - tuck * 0.45), np.full_like(hang, hy), -0.012 + np.cos(hang) * (hrz - tuck)], axis=1)
         hair_rings.append(pts)
     hair = make_loft(hair_rings, UV_HAIR, col=rgba(255, 255, 255, 78))
 
@@ -967,15 +967,15 @@ def build_hat_crown_gold(lod: int) -> MeshPart:
 
 
 def build_acc_glasses(lod: int) -> MeshPart:
-    """Wraparound UV Tactical Sunglasses on Head bone (eye height y = 0.145)!"""
-    frame = rgba(24, 26, 30, 145)
-    lens  = rgba(30, 44, 62, 238)
+    """Wraparound UV Tactical Cyan-Tinted Sunglasses on Head bone (solid glossy lenses, never cutout)!"""
+    frame = rgba(24, 26, 30, 155)
+    lens  = rgba(32, 168, 196, 242)
     parts = [
-        make_box(0.195, 0.010, 0.012, UV_STEEL, frame, center=(0.0, 0.158, 0.104)),
-        make_box(0.072, 0.034, 0.010, UV_CANTER_GLASS, lens, center=(-0.048, 0.142, 0.106)),
-        make_box(0.072, 0.034, 0.010, UV_CANTER_GLASS, lens, center=( 0.048, 0.142, 0.106)),
-        make_box(0.008, 0.008, 0.115, UV_STEEL, frame, center=(-0.096, 0.152, 0.048)),
-        make_box(0.008, 0.008, 0.115, UV_STEEL, frame, center=( 0.096, 0.152, 0.048)),
+        make_box(0.195, 0.012, 0.014, UV_STEEL, frame, center=(0.0, 0.158, 0.106)),
+        make_box(0.074, 0.036, 0.012, UV_CONCRETE_CLEAN, lens, center=(-0.048, 0.142, 0.108)),
+        make_box(0.074, 0.036, 0.012, UV_CONCRETE_CLEAN, lens, center=( 0.048, 0.142, 0.108)),
+        make_box(0.009, 0.009, 0.115, UV_STEEL, frame, center=(-0.096, 0.152, 0.048)),
+        make_box(0.009, 0.009, 0.115, UV_STEEL, frame, center=( 0.096, 0.152, 0.048)),
     ]
     return merge_parts(parts)
 
@@ -1241,7 +1241,7 @@ def build_weighbridge_ram(lod: int) -> MeshPart:
         # Operator cabin beside scale
         make_box(2.1, 2.45, 2.3, UV_CONCRETE_CLEAN, rgba(238, 242, 246, 85), center=(3.35, 1.22, 0.0)),
         make_box(2.4, 0.16, 2.6, UV_CORRUGATED, rgba(42, 132, 84, 125), center=(3.35, 2.52, 0.0)),
-        make_box(0.08, 0.85, 1.35, UV_CANTER_SIDE_GLS, rgba(255, 255, 255, 215), center=(2.28, 1.55, 0.0)),
+        make_box(0.08, 0.85, 1.35, UV_CONCRETE_CLEAN, rgba(64, 196, 214, 225), center=(2.28, 1.55, 0.0)),
         # Overhead gantry + glowing emerald LED weight indicator board
         make_box(0.14, 3.6, 0.14, UV_STEEL, rgba(44, 50, 58, 120), center=(-2.15, 1.8, -1.8)),
         make_box(0.14, 3.6, 0.14, UV_STEEL, rgba(44, 50, 58, 120), center=( 2.15, 1.8, -1.8)),
