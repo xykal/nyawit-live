@@ -74,6 +74,7 @@ public sealed class HudOverlayView : View
     private readonly Typeface _uiBoldFont = Typeface.Create("sans-serif-condensed", TypefaceStyle.Bold) ?? Typeface.DefaultBold!;
     private readonly Bitmap? _brandSmallMark;
     private readonly Bitmap? _brandWideLogo;
+    private readonly Bitmap? _gameLogo;
 
     private readonly Paint _fillPaint = new(PaintFlags.AntiAlias);
     private readonly Paint _strokePaint = new(PaintFlags.AntiAlias);
@@ -159,6 +160,13 @@ public sealed class HudOverlayView : View
         _displayFont = displayFont;
         _brandSmallMark = brandSmallMark;
         _brandWideLogo = brandWideLogo;
+        try
+        {
+            using var glStream = context.Assets?.Open("Brand/nyawit_game_logo.png");
+            if (glStream != null)
+                _gameLogo = BitmapFactory.DecodeStream(glStream, null, new BitmapFactory.Options { InScaled = false });
+        }
+        catch { }
 
         _strokePaint.SetStyle(Paint.Style.Stroke);
         _iconPaint.SetStyle(Paint.Style.Stroke);
@@ -508,37 +516,38 @@ public sealed class HudOverlayView : View
 
     private void DrawBootSplashScreen(Canvas canvas, int w, int h)
     {
-        _fillPaint.Color = Color.Argb(255, 9, 11, 13);
+        _fillPaint.Color = Color.Argb(255, 9, 13, 12);
         canvas.DrawRect(0, 0, w, h, _fillPaint);
 
         // Crisp subtle architectural border lines
-        _strokePaint.Color = Color.Argb(70, 52, 211, 153);
+        _strokePaint.Color = Color.Argb(75, 52, 211, 153);
         _strokePaint.StrokeWidth = Dp(1.2f);
         canvas.DrawRect(Dp(20f), Dp(18f), w - Dp(20f), h - Dp(18f), _strokePaint);
 
-        float centerY = h * 0.44f;
-        if (_brandWideLogo != null)
+        float centerY = h * 0.36f;
+        if (_gameLogo != null)
         {
-            float logoH = Dp(44f);
-            float logoW = _brandWideLogo.Width * (logoH / _brandWideLogo.Height);
-            _srcRect.Set(0, 0, _brandWideLogo.Width, _brandWideLogo.Height);
-            _dstRect.Set((w - logoW) * 0.5f, centerY - Dp(82f), (w + logoW) * 0.5f, centerY - Dp(82f) + logoH);
-            canvas.DrawBitmap(_brandWideLogo, _srcRect, _dstRect, null);
+            float gs = System.Math.Min(Dp(138f), h * 0.36f);
+            _srcRect.Set(0, 0, _gameLogo.Width, _gameLogo.Height);
+            _dstRect.Set((w - gs) * 0.5f, centerY - gs * 0.52f, (w + gs) * 0.5f, centerY + gs * 0.48f);
+            canvas.DrawBitmap(_gameLogo, _srcRect, _dstRect, null);
+        }
+        else
+        {
+            _titlePaint.Color = Color.White;
+            _titlePaint.TextSize = Dp(36f);
+            _titlePaint.TextAlign = Paint.Align.Center;
+            canvas.DrawText("NYAWIT LIVE", w * 0.5f, centerY, _titlePaint);
         }
 
-        _titlePaint.Color = Color.White;
-        _titlePaint.TextSize = Dp(38f);
-        _titlePaint.TextAlign = Paint.Align.Center;
-        canvas.DrawText("NYAWIT LIVE", w * 0.5f, centerY + Dp(6f), _titlePaint);
-
-        _textPaint.Color = Color.Argb(235, 74, 222, 128);
-        _textPaint.TextSize = Dp(11.5f);
+        _textPaint.Color = Color.Argb(240, 250, 204, 21);
+        _textPaint.TextSize = Dp(11f);
         _textPaint.TextAlign = Paint.Align.Center;
-        canvas.DrawText("SIMULASI KEBUN SAWIT & TRUK CANTER PBR MULTIPLAYER", w * 0.5f, centerY + Dp(32f), _textPaint);
+        canvas.DrawText("SIMULASI KEBUN SAWIT & TRUK CANTER PBR MULTIPLAYER", w * 0.5f, centerY + Dp(82f), _textPaint);
 
         // Precision chamfered progress bar
         float barW = System.Math.Min(w * 0.46f, Dp(410f));
-        float bl = (w - barW) * 0.5f, bt = h * 0.72f, bb = bt + Dp(12f);
+        float bl = (w - barW) * 0.5f, bt = h * 0.66f, bb = bt + Dp(12f);
         DrawSharpPanel(canvas, bl, bt, bl + barW, bb, Color.Argb(255, 18, 25, 30), Color.Argb(180, 52, 211, 153), 4f, 1.2f);
 
         float fillW = System.Math.Max(Dp(12f), (barW - Dp(4f)) * System.Math.Clamp(_renderer!.SplashProgress, 0.04f, 1f));
@@ -546,28 +555,44 @@ public sealed class HudOverlayView : View
         canvas.DrawRect(bl + Dp(2f), bt + Dp(2f), bl + Dp(2f) + fillW, bb - Dp(2f), _fillPaint);
 
         _textPaint.Color = Color.Argb(205, 190, 210, 218);
-        _textPaint.TextSize = Dp(10f);
-        canvas.DrawText(_renderer.SplashStatus, w * 0.5f, bt + Dp(30f), _textPaint);
+        _textPaint.TextSize = Dp(9.5f);
+        canvas.DrawText(_renderer.SplashStatus, w * 0.5f, bt + Dp(26f), _textPaint);
+
+        // Official Developer Studio Credit Footer: XYVERSE TECH (monochrome studio mark)
+        float footY = h - Dp(34f);
+        if (_brandWideLogo != null)
+        {
+            float lh = Dp(20f);
+            float lw = _brandWideLogo.Width * (lh / _brandWideLogo.Height);
+            _textPaint.Color = Color.Argb(165, 148, 163, 184);
+            _textPaint.TextSize = Dp(8.5f);
+            _textPaint.TextAlign = Paint.Align.Right;
+            canvas.DrawText("DEVELOPED BY", w * 0.5f - Dp(8f), footY + Dp(4f), _textPaint);
+            _srcRect.Set(0, 0, _brandWideLogo.Width, _brandWideLogo.Height);
+            _dstRect.Set(w * 0.5f + Dp(4f), footY - lh * 0.58f, w * 0.5f + Dp(4f) + lw, footY + lh * 0.42f);
+            canvas.DrawBitmap(_brandWideLogo, _srcRect, _dstRect, null);
+        }
     }
 
     private void DrawSeparateGarageLobbyUi(Canvas canvas, int w, int h)
     {
         float pad = Dp(16f);
 
-        // Top-Left: Brand + Dedicated Garage Showroom Title + Player Economy Card
+        // Top-Left: Official NYAWIT LIVE Game Icon + Dedicated Garage Showroom Title
         float topH = Dp(50f);
-        float brandW = Dp(248f);
+        float brandW = Dp(252f);
         DrawSharpPanel(canvas, pad, pad, pad + brandW, pad + topH,
             Color.Argb(224, 10, 16, 20), Color.Argb(215, 52, 211, 153), 7f, 1.5f);
 
         float textX = pad + Dp(14f);
-        if (_brandSmallMark != null)
+        var headerIcon = _gameLogo ?? _brandSmallMark;
+        if (headerIcon != null)
         {
-            float ms = Dp(28f);
-            _srcRect.Set(0, 0, _brandSmallMark.Width, _brandSmallMark.Height);
-            _dstRect.Set(pad + Dp(11f), pad + (topH - ms) * 0.5f, pad + Dp(11f) + ms, pad + (topH + ms) * 0.5f);
-            canvas.DrawBitmap(_brandSmallMark, _srcRect, _dstRect, null);
-            textX = pad + Dp(48f);
+            float ms = Dp(34f);
+            _srcRect.Set(0, 0, headerIcon.Width, headerIcon.Height);
+            _dstRect.Set(pad + Dp(9f), pad + (topH - ms) * 0.5f, pad + Dp(9f) + ms, pad + (topH + ms) * 0.5f);
+            canvas.DrawBitmap(headerIcon, _srcRect, _dstRect, null);
+            textX = pad + Dp(50f);
         }
         _titlePaint.Color = Color.White;
         _titlePaint.TextSize = Dp(16.5f);

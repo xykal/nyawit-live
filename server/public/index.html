@@ -3,12 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>NYAWIT LIVE 3D - MULTIPLAYER, CHAT &amp; VOICE API SERVER</title>
-  <meta name="description" content="Official Dedicated Multiplayer, Global Chat, Real-Time Voice Relay &amp; Leaderboard API Server for Nyawit Live 3D Native C# Android APK." />
-  <meta property="og:title" content="NYAWIT LIVE 3D - NATIVE ANDROID APK &amp; LIVE API SERVER" />
-  <meta property="og:description" content="Dedicated Authoritative Multiplayer, Lobby Rooms, Global Chat &amp; Voice Chat Server. Download Official Universal Android APK v4.0.0." />
-  <meta property="og:image" content="/assets/og_banner.png" />
-  <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon_website_32.png" />
+  <title>NYAWIT LIVE 3D — Official Game Portal &amp; Multiplayer Server | XyVerse Tech</title>
+  <meta name="description" content="Nyawit Live 3D — Game Simulasi Kebun Sawit &amp; Truk Canter Multiplayer Android dengan Voice Chat Real-Time. Dikembangkan oleh XyVerse Tech." />
+  <meta property="og:title" content="NYAWIT LIVE 3D — Simulasi Kebun Sawit &amp; Truk Canter Multiplayer (APK Resmi v4.0.0)" />
+  <meta property="og:description" content="Panen TBS pakai Egrek, angkut pakai Angkong &amp; Truk Fuso Canter Bak Kayu, mabar Open Kebun + Voice Chat Real-Time! Dikembangkan oleh XyVerse Tech." />
+  <meta property="og:image" content="https://nyawit.xyverse.my.id/assets/og_banner.png" />
+  <meta property="og:url" content="https://nyawit.xyverse.my.id" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" type="image/png" sizes="64x64" href="/assets/favicon_nyawit_64.png" />
   <style>
     @font-face {
       font-family: 'XyVerse Display';
@@ -40,8 +42,14 @@
       border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 28px;
       gap: 16px; flex-wrap: wrap;
     }
-    .brand { display: flex; align-items: center; gap: 14px; }
-    .brand img { height: 34px; display: block; }
+    .game-brand { display: flex; align-items: center; gap: 14px; }
+    .game-brand img { width: 54px; height: 54px; border-radius: 12px; display: block; }
+    .game-brand-title { font-family: 'XyVerse Display', sans-serif; font-size: 20px; letter-spacing: .04em; text-transform: uppercase; }
+    .game-brand-sub { font-size: 11.5px; color: var(--ok); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .studio-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .studio-credit { display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: var(--panel); border: 1px solid var(--line); }
+    .studio-credit span { font-size: 10.5px; color: var(--muted); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .studio-credit img { height: 22px; display: block; }
     .tag {
       display: inline-flex; align-items: center; gap: 8px;
       padding: 6px 12px; background: var(--panel); border: 1px solid var(--line);
@@ -96,6 +104,12 @@
     }
     .chat-item { padding: 8px 10px; background: var(--bg); border-left: 2px solid var(--ok); font-size: 12.5px; }
     .chat-item b { color: var(--accent); }
+    .footer {
+      margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--line);
+      display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+      font-size: 12px; color: var(--muted);
+    }
+    .footer img { height: 24px; display: block; }
     code { font-family: monospace; color: var(--ok); font-size: 12px; }
     svg.ico { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; flex-shrink: 0; }
   </style>
@@ -103,19 +117,29 @@
 <body>
   <div class="wrap">
     <div class="topbar">
-      <div class="brand">
-        <img src="/brand/logo_utama_horizontal_transparan_putih.png" alt="XyVerse Tech" />
+      <div class="game-brand">
+        <img src="/assets/nyawit_game_logo.png" alt="Logo Game Nyawit Live" />
+        <div>
+          <div class="game-brand-title">NYAWIT LIVE 3D</div>
+          <div class="game-brand-sub">OFFICIAL MULTIPLAYER &amp; VOICE SERVER HUB</div>
+        </div>
       </div>
-      <div class="tag"><span class="dot"></span> <span id="srvState">DEDICATED API + VOICE RELAY ONLINE</span></div>
+      <div class="studio-bar">
+        <div class="studio-credit">
+          <span>DEVELOPED BY</span>
+          <img src="/brand/logo_utama_horizontal_transparan_putih.png" alt="XyVerse Tech" />
+        </div>
+        <div class="tag"><span class="dot"></span> <span id="srvState">DEDICATED API + VOICE RELAY ONLINE</span></div>
+      </div>
     </div>
 
     <section class="hero">
       <div>
-        <div class="eyebrow">NATIVE C# ANDROID ENGINE | DEDICATED CLOUDFLARE BACKEND</div>
-        <h1>NYAWIT LIVE 3D SERVER HUB</h1>
+        <div class="eyebrow">OFFICIAL RELEASE v4.0.0 | BY XYVERSE TECH</div>
+        <h1>NYAWIT LIVE 3D</h1>
         <p class="desc">
-          Domain ini dikhususkan sebagai Server Otoritatif Multiplayer Real-Time, Lobby Room Kebun, Global Chat,
-          Voice Chat Relay rendah-latensi, Global Leaderboard, dan Turnamen Mingguan khusus aplikasi Android Native C# PBR Realistic Edition (APK v4.0.0).
+          Game simulasi kebun kelapa sawit &amp; truk Canter multiplayer 3D untuk Android yang dikembangkan resmi oleh <strong>XyVerse Tech</strong>.
+          Server ini menangani sinkronisasi Multiplayer Real-Time, Lobby Room Kebun, Global Chat, Voice Chat Relay rendah-latensi, Global Leaderboard, dan Turnamen Mingguan.
         </p>
         <div class="btn-row">
           <a class="btn btn-primary" href="/download/apk">
@@ -166,6 +190,14 @@
         <div class="list" id="chatList"></div>
       </section>
     </div>
+
+    <footer class="footer">
+      <div><strong>NYAWIT LIVE 3D</strong> &mdash; Official Android Simulation Game (`id.my.xyverse.nyawitlive`)</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span>STUDIO PENGEMBANG:</span>
+        <img src="/brand/logo_utama_horizontal_transparan_putih.png" alt="XyVerse Tech" />
+      </div>
+    </footer>
   </div>
   <script type="module" src="/app.js"></script>
 </body>
