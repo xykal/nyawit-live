@@ -415,31 +415,38 @@ void main() {
 
     vec3 H = normalize(L + V);
     float ndl = max(dot(N, L), 0.0);
+    // Stylized Genshin / Blender Half-Lambert Ramp: prevents muddy black shadows while preserving crisp 3D bevel contrast!
+    float halfLambert = pow(clamp(dot(N, L) * 0.5 + 0.5, 0.0, 1.0), 1.65);
+    float celBand = mix(halfLambert, smoothstep(0.30, 0.72, halfLambert), 0.35);
+
     // Subsurface botanical translucency for oil palm fronds & ferns!
     float isBotanical = step(0.75, 1.0 - abs(fract(vUV.x) - 0.125)) * step(0.25, vUV.y) * (1.0 - step(0.50, vUV.y));
-    float sss = (uRenderMode == 0 ? 1.0 : 0.0) * isBotanical * pow(clamp(dot(-V, L) * 0.5 + 0.5, 0.0, 1.0), 2.4) * 0.52;
+    float sss = (uRenderMode == 0 ? 1.0 : 0.0) * isBotanical * pow(clamp(dot(-V, L) * 0.5 + 0.5, 0.0, 1.0), 2.2) * 0.62;
 
     float shadow = computeSunShadow(N, L, dist);
-    // Overhead drifting cumulus cloud light dapples across the vast plantation!
     if (uCloudsOn > 0.5) {
         float cWave = sin(vWorldPos.x * 0.042 + uTime * 0.32) * cos(vWorldPos.z * 0.038 + uTime * 0.21);
-        shadow *= mix(0.80, 1.05, cWave * 0.5 + 0.5);
+        shadow *= mix(0.84, 1.05, cWave * 0.5 + 0.5);
     }
 
-    vec3 hemi = mix(uGroundBounce, uSkyTop, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
-    float shininess = mix(14.0, 96.0, clamp(gloss, 0.0, 1.0));
+    vec3 hemi = mix(uGroundBounce * 1.18, uSkyTop * 1.12, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
+    float shininess = mix(18.0, 108.0, clamp(gloss, 0.0, 1.0));
     float spec = pow(max(dot(N, H), 0.0), shininess) * gloss * shadow;
-    float rim = pow(1.0 - max(dot(N, V), 0.0), 4.0) * 0.10;
+    // Signature ArtStation / Blender Stylized Fresnel Silhouette Rim Highlight!
+    float rim = pow(1.0 - max(dot(N, V), 0.0), 3.2) * (0.20 + 0.18 * clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
 
-    vec3 lit = base * (hemi + uSunColor * (ndl * shadow * 1.18 + 0.10 + sss))
-             + uSunColor * spec * 0.52
-             + uSkyTop * rim;
+    vec3 lit = base * (hemi + uSunColor * (mix(0.16, 1.0, shadow) * celBand * 1.12 + sss))
+             + uSunColor * spec * 0.58
+             + mix(uSkyTop, uSunColor * 0.55, 0.35) * rim;
 
-    float fogAmt = smoothstep(54.0, 205.0, dist) * (0.78 + uFogDensity * 10.0);
-    vec3 hdr = mix(lit, uFogColor, clamp(fogAmt, 0.0, 0.86));
+    float fogAmt = smoothstep(58.0, 210.0, dist) * (0.74 + uFogDensity * 10.0);
+    vec3 hdr = mix(lit, uFogColor, clamp(fogAmt, 0.0, 0.84));
 
     vec3 mapped = (hdr * (2.51 * hdr + 0.03)) / (hdr * (2.43 * hdr + 0.59) + 0.14);
-    fragColor = vec4(pow(clamp(mapped, 0.0, 1.0), vec3(0.4545)), 1.0);
+    vec3 srgbOut = pow(clamp(mapped, 0.0, 1.0), vec3(0.4545));
+    float lumaOut = dot(srgbOut, vec3(0.2126, 0.7152, 0.0722));
+    srgbOut = clamp(mix(vec3(lumaOut), srgbOut, 1.10), 0.0, 1.0);
+    fragColor = vec4(srgbOut, 1.0);
 }";
 
     private readonly Context? _context;

@@ -122,7 +122,7 @@ jobs:
               -dname "CN=Nyawit Live 3D, OU=Game Engine, O=XyVerse Tech, L=Jakarta, ST=DKI, C=ID"
           fi
 
-      - name: Build & Sign True Universal v4.0.0 Release Android APK (arm64-v8a + armeabi-v7a + x86_64)
+      - name: Build & Sign True Universal v5.0.0 Release Android APK (arm64-v8a + armeabi-v7a + x86_64)
         run: |
           dotnet publish src/Nyawit.Android/Nyawit.Android.csproj \
             -f net10.0-android \
@@ -138,19 +138,21 @@ jobs:
           mkdir -p dist-apk
           SIGNED_APK=$(find src/Nyawit.Android/bin/Release -name "*-Signed.apk" | head -n 1)
           echo "Located signed APK: $SIGNED_APK"
+          cp "$SIGNED_APK" dist-apk/NyawitLive-v5.0.0-universal.apk
           cp "$SIGNED_APK" dist-apk/NyawitLive-v4.0.0-universal.apk
           cp "$SIGNED_APK" dist-apk/NyawitLive-v3.0.0-universal.apk
           cp "$SIGNED_APK" dist-apk/NyawitLive-v2.0.0-universal.apk
-          (cd dist-apk && sha256sum NyawitLive-v4.0.0-universal.apk NyawitLive-v3.0.0-universal.apk > SHA256SUMS.txt)
+          cp blender/nyawit_stylized_v5.blend dist-apk/nyawit_stylized_v5.blend
+          (cd dist-apk && sha256sum NyawitLive-v5.0.0-universal.apk NyawitLive-v4.0.0-universal.apk nyawit_stylized_v5.blend > SHA256SUMS.txt)
 
-          echo "=== APK Archive Verification (3 Native ABIs + 2048x2048 PBR Atlas + 123 NPAK v4.0 Meshes) ==="
-          unzip -l dist-apk/NyawitLive-v4.0.0-universal.apk | grep -E "libnyawit_simd|nyawit_models.npak|nyawit_pbr_atlas.png|XyVerseDisplay"
+          echo "=== APK Archive Verification (3 Native ABIs + Hand-Painted Stylized 2048x2048 Atlas + 123 NPAK v5.0 Meshes) ==="
+          unzip -l dist-apk/NyawitLive-v5.0.0-universal.apk | grep -E "libnyawit_simd|nyawit_models.npak|nyawit_pbr_atlas.png|XyVerseDisplay"
           ls -lh dist-apk/
 
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
-          "$APKSIGNER" verify --verbose dist-apk/NyawitLive-v4.0.0-universal.apk
+          "$APKSIGNER" verify --verbose dist-apk/NyawitLive-v5.0.0-universal.apk
 
-      - name: Boot Real Android 14 (API 34) Emulator & Verify All 6 v4.0 PBR Screens (Splash, Garage Lobby, Loading, On-Foot, Canter COE, Settings)
+      - name: Boot Real Android 14 (API 34) Emulator & Verify All 6 v5.0 Stylized 3D Screens
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -162,27 +164,27 @@ jobs:
           disable-animations: true
           script: python3 tools/verify_android_emulator.py
 
-      - name: Upload Verified v4.0.0 APK & Live Android 14 Screenshots Artifact
+      - name: Upload Verified v5.0.0 APK, Blender .blend & Live Android 14 Screenshots Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: NyawitLive-v4-Verified-Android-Bundle
+          name: NyawitLive-v5-Verified-Android-Bundle
           path: dist-apk/*
           if-no-files-found: warn
 
-      - name: Publish Verified v4.0.0 Universal APK to GitHub Releases
+      - name: Publish Verified v5.0.0 Universal APK & Blender 4.2 Scene to GitHub Releases
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v4.0.0
-          name: "Nyawit Live 3D v4.0.0 — Photorealistic PBR, 1024x1024 Real Shadows, Separate Garage Lobby, Splash & 60-120 FPS"
+          tag_name: v5.0.0
+          name: "Nyawit Live 3D v5.0.0 — Blender 4.2 Stylized 3D Overhaul, Hand-Painted 2K Atlas, Hollow Cabin & 60-120 FPS"
           make_latest: true
           body: |
-            ## Nyawit Live 3D (`v4.0.0`) — Photorealistic PBR, Real-Time Shadows, Separate 3D Garage Lobby & 60-120 FPS Optimization
-            - **Photorealistic Reference-Accurate 3D Models & `2048x2048` Mipmapped PBR Texture Atlas (`NPAK v4.0` — `41` Models x `3` LODs = `123` GPU Meshes)**: Authentic flat-nose Cab-Over-Engine **Mitsubishi Fuso Canter FE 74 HD Bak Kayu** with `"BM 8899 XY"` plate, dual rear tires, live-rotating steering wheel, 88-leaflet alpha-cutout oil palm fronds, trunk ferns, glossy crimson-orange TBS bunches, and full Indonesian harvester outfits & accessories (`Caping`, `Helm Proyek`, `Kacamata Hitam`, `Sarung Parang`, `Keranjang Rotan`, `Ransel`, `Egrek`, `Dodos`, `Tojok`).
-            - **Real `1024x1024` Directional Sun Shadow Mapping (`PCF`), Multi-Scale Laterite/Grass Splat Terrain, Volumetric Cumulus Clouds & Particle VFX**: Dynamic palm frond & vehicle shadows, multi-scale red-brown Sumatran harvest roads, drifting sky clouds, tire dust plumes, diesel exhaust smoke, and harvest chaff bursts.
-            - **Zero Stock Android UI + 4 Clean Dedicated Stages**: Custom XyVerse Boot Splash Screen -> Separate Isolated 3D Garage/Workshop Lobby -> Full-Screen `"MENYIAPKAN DUNIA"` Loading Screen -> Uncluttered Gameplay HUD + Custom In-Game **`PENGATURAN`** Modal (`30 / 60 / 90 / 120 FPS`, `PreferredDisplayModeId`, Render Scale, Shadow Quality, Clouds, VFX, Audio).
+            ## Nyawit Live 3D (`v5.0.0`) — Blender 4.2 Stylized 3D Art Overhaul, Hand-Painted 2048x2048 Atlas & Half-Lambert Rim Lighting
+            - **Authentic Blender 4.2 Stylized 3D Art & Clean Topology (`nyawit_stylized_v5.blend` + `NPAK v5.0`)**: Rebuilt in genuine **Blender 4.2.5 LTS (`bpy`/`bmesh`)** with beveled hard surfaces, hollow 3D Canter cabin revealing 3D tan ribbed seats & rotating steering wheel through turquoise cel-reflection glass, plank-by-plank Meranti `Bak Kayu` & wooden wheelbarrow `Angkong`, clustered multi-berry crimson TBS bunches, feathered S-curve oil palms, and seamless `SkinModifier + Subsurf` quad character topology.
+            - **Hand-Painted Stylized `2048x2048` Texture Atlas + Stylized Half-Lambert / Fresnel Sky-Rim OpenGL ES 3.0 Shader**: Zero gritty noise, crisp painted bevel highlights, terracotta 8-spoke truck rims, subsurface palm frond glow, real `1024x1024` directional PCF shadows, and locked `60–120 FPS` mobile performance.
           files: |
+            dist-apk/NyawitLive-v5.0.0-universal.apk
             dist-apk/NyawitLive-v4.0.0-universal.apk
-            dist-apk/NyawitLive-v3.0.0-universal.apk
+            dist-apk/nyawit_stylized_v5.blend
             dist-apk/SHA256SUMS.txt

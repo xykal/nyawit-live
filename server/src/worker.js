@@ -1010,7 +1010,7 @@ export class PlantationHub extends DurableObject {
         ok: true,
         game: "Nyawit Live 3D",
         mode: "DEDICATED_MULTIPLAYER_VOICE_API",
-        apkVersion: "4.0.0",
+        apkVersion: "5.0.0",
         onlineRealPlayers: this.sessions.size,
         onlineTotalInWorld: this.sessions.size + (this.sessions.size < 6 ? this.bots.length : 0),
         features: ["MULTIPLAYER_SYNC_8HZ", "LOBBY_ROOMS", "GLOBAL_AND_ROOM_CHAT", "REALTIME_VOICE_RELAY", "GLOBAL_LEADERBOARD", "WEEKLY_TOURNAMENT"],
@@ -1104,7 +1104,7 @@ a.apk{display:block;text-align:center;padding:15px 18px;background:#F59E0B;color
         <div class="stat"><b>${pKg} Kg</b><span>Total Setoran TBS</span></div>
         <div class="stat"><b>${pScore}</b><span>Skor Kompetitif</span></div>
       </div>
-      <a class="apk" href="/download/apk">DOWNLOAD OFFICIAL ANDROID APK (v4.0.0)</a>
+      <a class="apk" href="/download/apk">DOWNLOAD OFFICIAL ANDROID APK (v5.0.0)</a>
       <div class="brand">
         <span>XYVERSE MULTIPLAYER &amp; VOICE BACKEND</span>
         <img src="/brand/logo_utama_horizontal_transparan_putih.png" alt="XyVerse Tech">
@@ -1126,7 +1126,7 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
 
     if (url.pathname === "/download/apk") {
-      return Response.redirect(`https://github.com/${env.GITHUB_REPO || "xykal/nyawit-live"}/releases/latest/download/NyawitLive-v4.0.0-universal.apk`, 302);
+      return Response.redirect(`https://github.com/${env.GITHUB_REPO || "xykal/nyawit-live"}/releases/latest/download/NyawitLive-v5.0.0-universal.apk`, 302);
     }
 
     if (url.pathname === "/api/rooms") {

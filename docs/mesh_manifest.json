@@ -46,17 +46,17 @@
     },
     {
       "name": "tbs_bunch",
-      "radius": 0.403,
+      "radius": 0.399,
       "lods": [
         {
           "lod": 0,
-          "verts": 218,
-          "tris": 400
+          "verts": 838,
+          "tris": 1420
         },
         {
           "lod": 1,
-          "verts": 109,
-          "tris": 190
+          "verts": 358,
+          "tris": 576
         },
         {
           "lod": 2,
@@ -109,22 +109,22 @@
     },
     {
       "name": "canter_truck_body",
-      "radius": 3.292,
+      "radius": 3.333,
       "lods": [
         {
           "lod": 0,
-          "verts": 1703,
-          "tris": 1484
+          "verts": 3674,
+          "tris": 5256
         },
         {
           "lod": 1,
-          "verts": 1703,
-          "tris": 1484
+          "verts": 3674,
+          "tris": 5256
         },
         {
           "lod": 2,
-          "verts": 774,
-          "tris": 572
+          "verts": 1842,
+          "tris": 2324
         }
       ]
     },
@@ -172,12 +172,12 @@
     },
     {
       "name": "truck_cargo_heap",
-      "radius": 2.317,
+      "radius": 2.295,
       "lods": [
         {
           "lod": 0,
-          "verts": 1811,
-          "tris": 3160
+          "verts": 5795,
+          "tris": 9336
         },
         {
           "lod": 1,
@@ -197,18 +197,18 @@
       "lods": [
         {
           "lod": 0,
-          "verts": 396,
-          "tris": 640
+          "verts": 1070,
+          "tris": 1728
         },
         {
           "lod": 1,
-          "verts": 396,
-          "tris": 640
+          "verts": 766,
+          "tris": 1216
         },
         {
           "lod": 2,
-          "verts": 396,
-          "tris": 640
+          "verts": 766,
+          "tris": 1216
         }
       ]
     },
@@ -344,8 +344,8 @@
       "lods": [
         {
           "lod": 0,
-          "verts": 1421,
-          "tris": 1692
+          "verts": 1919,
+          "tris": 2464
         },
         {
           "lod": 1,
@@ -697,7 +697,7 @@
     },
     {
       "name": "back_basket",
-      "radius": 0.39,
+      "radius": 0.387,
       "lods": [
         {
           "lod": 0,
@@ -864,8 +864,8 @@
       ]
     }
   ],
-  "total_lod0_tris": 18940,
-  "total_lod1_tris": 12556,
-  "total_lod2_tris": 8866,
-  "binary_bytes": 1386520
+  "total_lod0_tris": 31768,
+  "total_lod1_tris": 17290,
+  "total_lod2_tris": 11194,
+  "binary_bytes": 1929760
 }
