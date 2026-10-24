@@ -79,10 +79,22 @@ def sync_stage(stage_name: str):
 
 
 def capture_screen(out_path: str):
-    png = subprocess.check_output(["adb", "exec-out", "screencap", "-p"], timeout=25)
-    with open(out_path, "wb") as f:
-        f.write(png)
-    log_msg(f"Captured {out_path} ({len(png):,} bytes)")
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    remote_tmp = "/data/local/tmp/nyawit_frame.png"
+    last_err = None
+    for attempt in range(1, 4):
+        try:
+            run(["adb", "shell", "screencap", "-p", remote_tmp], check=True, timeout=22)
+            run(["adb", "pull", remote_tmp, out_path], check=True, timeout=22)
+            sz = os.path.getsize(out_path)
+            if sz > 4096:
+                log_msg(f"Captured {out_path} ({sz:,} bytes on attempt {attempt})")
+                return
+        except Exception as ex:
+            last_err = ex
+            log_msg(f"  [screencap retry {attempt}] {ex}")
+            time.sleep(1.0)
+    raise RuntimeError(f"Failed to capture {out_path}: {last_err}")
 
 
 def dump_diagnostics(tag: str):

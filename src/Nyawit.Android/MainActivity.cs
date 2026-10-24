@@ -532,11 +532,17 @@ public class MainActivity : Activity
                     int targetFrame = (_renderer?.PresentedFrameCount ?? 0) + 6;
                     while ((_renderer?.PresentedFrameCount ?? 0) < targetFrame && sw.ElapsedMilliseconds < 16000)
                     {
+                        _glView?.RequestRender();
                         _hud?.PostInvalidate();
                         await Task.Delay(60);
                     }
-                    _hud?.PostInvalidate();
-                    await Task.Delay(220);
+                    // Free host CPU cores from continuous software rasterization while adb screencap reads SurfaceFlinger!
+                    RunOnUiThread(() =>
+                    {
+                        if (_glView != null) _glView.RenderMode = Rendermode.WhenDirty;
+                        _hud?.Invalidate();
+                    });
+                    await Task.Delay(180);
                 }
 
                 string body = $"{{\"ok\":true,\"stage\":\"{stage}\",\"frames\":{_renderer?.PresentedFrameCount ?? 0}}}";
@@ -565,6 +571,7 @@ public class MainActivity : Activity
     private void ApplyStageByName(string stage)
     {
         if (string.IsNullOrWhiteSpace(stage) || _renderer == null || _hud == null || _net == null) return;
+        if (_glView != null) _glView.RenderMode = Rendermode.Continuously;
 
         switch (stage.Trim().ToLowerInvariant())
         {
