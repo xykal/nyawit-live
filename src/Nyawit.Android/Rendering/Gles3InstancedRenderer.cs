@@ -150,27 +150,27 @@ void main() {
     vec3 col = mix(uSkyHorizon, uSkyZenith, pow(up, 0.58));
 
     // Volumetric Tropical Cumulus Cloud Deck + Sunlit Silver-Gold Lining!
-    if (uCloudsOn > 0.5 && d.y > 0.015) {
+    if (uCloudsOn > 0.05 && d.y > 0.012) {
         vec2 uvC = d.xz / (d.y + 0.14);
         vec2 drift = vec2(uTime * 0.022, uTime * 0.011);
         float dens = fbmCloud(uvC * 0.95 + drift);
         float detail = fbmCloud(uvC * 2.65 - drift * 1.4);
-        float cloud = smoothstep(0.46, 0.63, dens * 0.78 + detail * 0.26);
+        float cloud = smoothstep(0.42, 0.59, dens * 0.78 + detail * 0.26);
         // Directional derivative toward sun for realistic self-shadowed cloud bellies!
         float densSun = fbmCloud((uvC + L.xz * 0.14) * 0.95 + drift);
-        float lit = clamp(0.45 + (dens - densSun) * 4.2, 0.10, 1.12);
+        float lit = clamp(0.46 + (dens - densSun) * 4.4, 0.08, 1.15);
         float sd = max(dot(d, L), 0.0);
-        vec3 cloudDark = uSkyHorizon * 0.34;
-        vec3 cloudBright = mix(uSkyHorizon * 1.72, vec3(0.92, 0.95, 0.98), 0.56) + uSunColor * pow(sd, 5.0) * 0.28;
+        vec3 cloudDark = mix(uSkyZenith * 0.75, uSkyHorizon * 0.34, 0.45);
+        vec3 cloudBright = mix(uSkyHorizon * 1.95, vec3(1.16, 1.21, 1.28), 0.62) + uSunColor * pow(sd, 5.0) * 0.32;
         vec3 cCol = mix(cloudDark, cloudBright, lit);
-        float horizonFade = smoothstep(0.012, 0.20, d.y);
-        col = mix(col, cCol, cloud * 0.94 * horizonFade);
+        float horizonFade = smoothstep(0.008, 0.085, d.y);
+        col = mix(col, cCol, cloud * 0.95 * uCloudsOn * horizonFade);
     }
 
     float sd = max(dot(d, L), 0.0);
     col += uSunColor * (pow(sd, 10.0) * 0.14 + pow(sd, 96.0) * 0.42 + smoothstep(0.9972, 0.9996, sd) * 1.45);
     // Atmospheric horizon mist scatter
-    col = mix(col, uSkyHorizon * 1.02, pow(1.0 - clamp(abs(d.y) * 2.5, 0.0, 1.0), 4.0) * 0.52);
+    col = mix(col, uSkyHorizon * 1.02, pow(1.0 - clamp(abs(d.y) * 3.2, 0.0, 1.0), 4.0) * 0.28);
     col = (col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14);
     fragColor = vec4(pow(clamp(col, 0.0, 1.0), vec3(0.4545)), 1.0);
 }";
@@ -939,8 +939,20 @@ void main() {
     {
         HoldStageProgress = hold;
         _stageEnterSec = _clock.Elapsed.TotalSeconds - progress * 2.2;
-        if (stage == AppSceneStage.Splash) SplashProgress = progress;
-        else if (stage == AppSceneStage.PreparingWorld) WorldPrepProgress = progress;
+        if (stage == AppSceneStage.Splash)
+        {
+            SplashProgress = progress;
+        }
+        else if (stage == AppSceneStage.PreparingWorld)
+        {
+            SplashProgress = 1.0f;
+            WorldPrepProgress = progress;
+        }
+        else
+        {
+            SplashProgress = 1.0f;
+            WorldPrepProgress = 1.0f;
+        }
         Stage = stage;
         OnStageChanged?.Invoke();
     }
@@ -1055,7 +1067,10 @@ void main() {
         GLES30.GlBufferData(GLES30.GlArrayBuffer, byteCap, initByteBuf, GLES30.GlDynamicDraw);
 
         _atlasTexId = UploadPbrAtlasTexture();
-        CreateHardwareShadowMapFbo();
+        if (!SafeGles3ConfigChooser.IsSoftwareEmulator)
+            CreateHardwareShadowMapFbo();
+        else
+            _shadowMapFbo = 0;
 
         _gpuMeshes.Clear();
         foreach (var kv in _archive.Meshes)
@@ -1650,7 +1665,8 @@ void main() {
         GLES30.GlUniformMatrix4fv(_uSkyInvVp, 1, false, _invVp, 0);
         GLES30.GlUniform3f(_uSkySunDir, 0.48f, 0.72f, 0.44f);
         GLES30.GlUniform1f(_uSkyTime, now);
-        GLES30.GlUniform1f(_uSkyClouds, Quality.CloudsEnabled ? 1f : 0f);
+        float skyCloudFactor = !Quality.CloudsEnabled ? 0f : (Quality.Atmosphere == AtmospherePreset.KarhutlaSmoke ? 0.24f : 1f);
+        GLES30.GlUniform1f(_uSkyClouds, skyCloudFactor);
         if (storm)
         {
             GLES30.GlUniform3f(_uSkyZenith, 0.03f, 0.06f, 0.12f);
@@ -1756,12 +1772,26 @@ void main() {
         c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, 0, MathF.Sin(now * 1.4f) * 0.03f, 0, 0, 0, 0, 1, 1, 1);
         DrawGpuHandle(_waterGpu, _instStaging, c, ref drawCalls, ref tris);
 
-        // Soft grounding contact AO discs (plus distant tree canopy discs beyond the 34m shadow map!)
+        // Soft grounding contact AO discs + directional sun-projected shadow silhouettes!
         int nSh = 0;
-        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.MainTruck.X, Physics.MainTruck.Y, Physics.MainTruck.Z, 0, Physics.MainTruck.Yaw, 0, 1.45f, 1f, 2.95f, 0.72f);
-        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.YardTruck.X, Physics.YardTruck.Y, Physics.YardTruck.Z, 0, Physics.YardTruck.Yaw, 0, 1.45f, 1f, 2.95f, 0.72f);
+        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.MainTruck.X, Physics.MainTruck.Y, Physics.MainTruck.Z, 0, Physics.MainTruck.Yaw, 0, 1.48f, 1f, 3.00f, 0.85f);
+        nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.YardTruck.X, Physics.YardTruck.Y, Physics.YardTruck.Z, 0, Physics.YardTruck.Yaw, 0, 1.48f, 1f, 3.00f, 0.85f);
+        if (activeShadowMode == 0)
+        {
+            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.MainTruck.X - 0.56f, Physics.MainTruck.Y, Physics.MainTruck.Z - 0.50f, 0, Physics.MainTruck.Yaw, 0, 1.62f, 1f, 3.18f, 0.68f);
+            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, Physics.YardTruck.X - 0.56f, Physics.YardTruck.Y, Physics.YardTruck.Z - 0.50f, 0, Physics.YardTruck.Yaw, 0, 1.62f, 1f, 3.18f, 0.68f);
+        }
         if (!InTruck)
-            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, PlayerX, Physics.Player.GroundedY, PlayerZ, 0, Physics.Player.Yaw, 0, 0.62f, 1f, 0.62f, 0.78f);
+        {
+            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, PlayerX, Physics.Player.GroundedY, PlayerZ, 0, Physics.Player.Yaw, 0, 0.60f, 1f, 0.60f, 0.88f);
+            if (activeShadowMode == 0)
+                nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, PlayerX - 0.36f, Physics.Player.GroundedY, PlayerZ - 0.32f, 0, Physics.Player.Yaw, 0, 0.68f, 1f, 0.94f, 0.62f);
+        }
+        for (int a = 0; a < Physics.Angkongs.Length; a++)
+        {
+            ref var ak = ref Physics.Angkongs[a];
+            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, ak.X, ak.Y, ak.Z, 0, ak.Yaw, 0, 0.64f, 1f, 0.92f, 0.72f);
+        }
 
         for (int i = 0; i < _trees.Count; i++)
         {
@@ -1770,7 +1800,7 @@ void main() {
             var t = _trees[i];
             float d2 = (t.X - PlayerX) * (t.X - PlayerX) + (t.Z - PlayerZ) * (t.Z - PlayerZ);
             if (activeShadowMode > 0 && d2 < 26f * 26f) continue; // Real 1024x1024 shadow map handles nearby trees!
-            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, t.X + 0.55f, t.Y, t.Z + 0.45f, 0, 0, 0, 3.25f * t.Scale, 1f, 3.25f * t.Scale, tier == 2 ? 0.52f : 0.78f);
+            nSh = Mat4Utils.WriteInstanceTRS(_shadowStaging, nSh, t.X - 1.55f, t.Y, t.Z - 1.40f, 0, 0, 0, 3.45f * t.Scale, 1f, 3.45f * t.Scale, tier == 2 ? 0.55f : 0.82f);
         }
         if (nSh > 0)
         {
@@ -2245,7 +2275,7 @@ void main() {
         GLES30.GlActiveTexture(GLES30.GlTexture0);
         GLES30.GlBindTexture(GLES30.GlTexture2d, _atlasTexId);
         GLES30.GlActiveTexture(GLES30.GlTexture1);
-        GLES30.GlBindTexture(GLES30.GlTexture2d, _shadowMapDepthTex);
+        GLES30.GlBindTexture(GLES30.GlTexture2d, _shadowMapDepthTex != 0 ? _shadowMapDepthTex : _atlasTexId);
         GLES30.GlActiveTexture(GLES30.GlTexture0);
     }
 

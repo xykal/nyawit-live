@@ -171,7 +171,7 @@ public class MainActivity : Activity
             _renderer = new Gles3InstancedRenderer(this, archive, trees, _net);
             RestoreGraphicsSettings();
             if (SafeGles3ConfigChooser.IsSoftwareEmulator)
-                _renderer.Quality.ShadowTier = ShadowQualityTier.Medium;
+                _renderer.Quality.ShadowTier = ShadowQualityTier.Off;
 
             _glView = new GLSurfaceView(this);
             _glView.SetEGLContextClientVersion(3);
@@ -554,15 +554,33 @@ public class MainActivity : Activity
                     while ((_renderer?.PresentedFrameCount ?? 0) < targetFrame && sw.ElapsedMilliseconds < 22000)
                     {
                         _glView?.RequestRender();
-                        _hud?.PostInvalidate();
-                        await Task.Delay(60);
+                        await Task.Delay(55);
                     }
-                    // Free host CPU cores from continuous software rasterization while adb screencap reads SurfaceFlinger!
+                    // Quiesce GLThread first, then synchronously flush HudOverlayView onto SurfaceFlinger across 2 UI vsyncs!
+                    var uiFlush1 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                     RunOnUiThread(() =>
                     {
                         if (_glView != null) _glView.RenderMode = Rendermode.WhenDirty;
-                        _hud?.Invalidate();
+                        if (_hud != null)
+                        {
+                            _hud.Invalidate();
+                            _hud.Post(() => uiFlush1.TrySetResult(true));
+                        }
+                        else uiFlush1.TrySetResult(true);
                     });
+                    await Task.WhenAny(uiFlush1.Task, Task.Delay(800));
+                    await Task.Delay(180);
+                    var uiFlush2 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    RunOnUiThread(() =>
+                    {
+                        if (_hud != null)
+                        {
+                            _hud.Invalidate();
+                            _hud.Post(() => uiFlush2.TrySetResult(true));
+                        }
+                        else uiFlush2.TrySetResult(true);
+                    });
+                    await Task.WhenAny(uiFlush2.Task, Task.Delay(800));
                     await Task.Delay(180);
                 }
 
@@ -592,10 +610,10 @@ public class MainActivity : Activity
     private void ApplyStageByName(string stage)
     {
         if (string.IsNullOrWhiteSpace(stage) || _renderer == null || _hud == null || _net == null) return;
-        // Lock native 1.00x Ultra, 1024x1024 Sun Shadows & Volumetric Clouds (zero EGL surface resize thrash!)
+        // Lock native 1.00x Ultra & Volumetric Clouds (skip depth-only FBO on QEMU software emulator to prevent host libOpenglRender crash)
         _renderer.Quality.SetManualPreset(GraphicsPreset.Ultra, disableAuto: true);
         if (SafeGles3ConfigChooser.IsSoftwareEmulator)
-            _renderer.Quality.ShadowTier = ShadowQualityTier.Medium;
+            _renderer.Quality.ShadowTier = ShadowQualityTier.Off;
         if (_glView != null) _glView.RenderMode = Rendermode.Continuously;
 
         switch (stage.Trim().ToLowerInvariant())
