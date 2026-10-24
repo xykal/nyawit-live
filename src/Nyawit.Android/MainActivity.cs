@@ -497,7 +497,7 @@ public class MainActivity : Activity
         {
             try
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 using var stream = client.GetStream();
                 byte[] reqBuf = new byte[1024];
                 int n = await stream.ReadAsync(reqBuf.AsMemory(0, reqBuf.Length), cts.Token);
@@ -524,15 +524,19 @@ public class MainActivity : Activity
                     });
                     await tcs.Task.WaitAsync(TimeSpan.FromSeconds(8));
 
-                    int targetFrame = (_renderer?.PresentedFrameCount ?? 0) + 6;
                     var sw = System.Diagnostics.Stopwatch.StartNew();
-                    while ((_renderer?.PresentedFrameCount ?? 0) < targetFrame && sw.ElapsedMilliseconds < 4500)
+                    while (!(_renderer?.IsGpuReady ?? false) && sw.ElapsedMilliseconds < 14000)
+                    {
+                        await Task.Delay(80);
+                    }
+                    int targetFrame = (_renderer?.PresentedFrameCount ?? 0) + 6;
+                    while ((_renderer?.PresentedFrameCount ?? 0) < targetFrame && sw.ElapsedMilliseconds < 16000)
                     {
                         _hud?.PostInvalidate();
                         await Task.Delay(60);
                     }
                     _hud?.PostInvalidate();
-                    await Task.Delay(160);
+                    await Task.Delay(220);
                 }
 
                 string body = $"{{\"ok\":true,\"stage\":\"{stage}\",\"frames\":{_renderer?.PresentedFrameCount ?? 0}}}";
@@ -573,6 +577,8 @@ public class MainActivity : Activity
             case "garage":
                 _hud.CloseModal();
                 _renderer.HoldStageProgress = false;
+                _renderer.Quality.Atmosphere = AtmospherePreset.SemiEnbCold;
+                _renderer.Quality.OutlineTier = AnimeOutlineTier.Bold;
                 _renderer.ForceStageAndProgress(AppSceneStage.Lobby, 1.0f, hold: false);
                 _renderer.LobbyOrbitYaw = 0.06f;
                 _hud.Invalidate();
@@ -611,17 +617,17 @@ public class MainActivity : Activity
                 _hud.CloseModal();
                 _renderer.InTruck = true;
                 _renderer.LockShowcaseCam = true;
-                _renderer.JoyX = -0.45f;
+                _renderer.JoyX = -0.55f;
                 _renderer.JoyY = 0f;
-                _renderer.Physics.MainTruck.X = 1.2f;
-                _renderer.Physics.MainTruck.Z = 2.2f;
-                _renderer.Physics.MainTruck.Y = RigidBodyWorld.SurfaceHeightWithStructures(1.2f, 2.2f);
-                _renderer.Physics.MainTruck.Yaw = -0.35f;
+                _renderer.Physics.MainTruck.X = -3.8f;
+                _renderer.Physics.MainTruck.Z = 11.4f;
+                _renderer.Physics.MainTruck.Y = RigidBodyWorld.SurfaceHeightWithStructures(-3.8f, 11.4f);
+                _renderer.Physics.MainTruck.Yaw = 2.66f;
                 _renderer.Physics.MainTruck.SpeedMs = 0f;
-                _renderer.Physics.MainTruck.SteerAngle = 0.28f;
+                _renderer.Physics.MainTruck.SteerAngle = -0.30f;
                 _renderer.Physics.MainTruck.VisualCargoUnits = 18;
                 _renderer.SeedShowcaseTireTracks();
-                _renderer.CamYaw = 0.33f;
+                _renderer.CamYaw = 3.34f;
                 _renderer.CamDist = 6.2f;
                 _renderer.CamPitch = 0.16f;
                 _hud.Invalidate();

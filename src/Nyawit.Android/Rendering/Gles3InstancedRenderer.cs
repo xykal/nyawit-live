@@ -644,6 +644,7 @@ void main() {
     public int LastTriangles { get; private set; }
     public int SurfaceWidth => _surfaceWidth;
     public int SurfaceHeight => _surfaceHeight;
+    public bool IsGpuReady => _gpuReady;
 
     private int _surfaceWidth = 1280, _surfaceHeight = 720;
     private float _appliedScale = -1f;
