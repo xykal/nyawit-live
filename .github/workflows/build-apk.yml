@@ -174,7 +174,7 @@ jobs:
           ram-size: 2560M
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: python3 tools/verify_android_emulator.py
+          script: NYAWIT_APK_PATH="dist-apk/NyawitLive-v6.0.0-universal.apk" python3 tools/verify_android_emulator.py
 
       - name: Upload Verified v6.0.0 Universal APK & Live Android 14 Screenshots Artifact
         if: always()
