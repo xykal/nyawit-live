@@ -58,10 +58,10 @@ jobs:
         env:
           SKIP_LIVE_NET_TEST: "1"
         run: |
-          mkdir -p tests/NyawitEngine.Tests/bin/Release/net8.0
+          mkdir -p tests/NyawitEngine.Tests/bin/Release/net10.0
           gcc -O3 -std=c11 -Wall -Wextra -Werror -shared -fPIC native/nyawit_simd.c -lm \
-            -o tests/NyawitEngine.Tests/bin/Release/net8.0/libnyawit_simd.so
-          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/tests/NyawitEngine.Tests/bin/Release/net8.0" \
+            -o tests/NyawitEngine.Tests/bin/Release/net10.0/libnyawit_simd.so
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/tests/NyawitEngine.Tests/bin/Release/net10.0" \
             dotnet test tests/NyawitEngine.Tests/NyawitEngine.Tests.csproj -c Release --verbosity normal
 
   build-apk:

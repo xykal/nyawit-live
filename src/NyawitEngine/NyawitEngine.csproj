@@ -1,10 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework Condition="$([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('android-'))">net10.0-android</TargetFramework>
+    <SupportedOSPlatformVersion Condition="$([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('android-'))">24.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Optimize>true</Optimize>
-    <IsTrimmable>true</IsTrimmable>
+    <IsTrimmable>false</IsTrimmable>
   </PropertyGroup>
 </Project>
