@@ -529,7 +529,7 @@ public class MainActivity : Activity
                     {
                         await Task.Delay(80);
                     }
-                    int targetFrame = (_renderer?.PresentedFrameCount ?? 0) + 5;
+                    int targetFrame = (_renderer?.PresentedFrameCount ?? 0) + 3;
                     while ((_renderer?.PresentedFrameCount ?? 0) < targetFrame && sw.ElapsedMilliseconds < 22000)
                     {
                         _glView?.RequestRender();
@@ -571,9 +571,8 @@ public class MainActivity : Activity
     private void ApplyStageByName(string stage)
     {
         if (string.IsNullOrWhiteSpace(stage) || _renderer == null || _hud == null || _net == null) return;
-        // Lock flagship MaxHD (native 1.00x res, 1024x1024 PCF Sun Shadows, Volumetric Clouds & LOD0=50m) for deterministic stage captures!
-        _renderer.Quality.SetManualPreset(GraphicsPreset.MaxHD, disableAuto: true);
-        ApplyHardwareRenderScale(1.0f);
+        // Lock native 1.00x Ultra (1024x1024 PCF Sun Shadows & Volumetric Clouds, zero EGL surface resize thrash!)
+        _renderer.Quality.SetManualPreset(GraphicsPreset.Ultra, disableAuto: true);
         if (_glView != null) _glView.RenderMode = Rendermode.Continuously;
 
         switch (stage.Trim().ToLowerInvariant())

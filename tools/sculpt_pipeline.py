@@ -1029,13 +1029,13 @@ def build_char_head(lod: int) -> MeshPart:
 
     parts = [head_mesh, hair]
     if lod <= 1:
-        # 5 tapered 3D anime forehead bangs & temple sideburn locks (stay cleanly above y=0.172 so eyes remain 100% clear!)
+        # 5 tapered 3D anime forehead bangs & temple sideburn locks (stay cleanly above y=0.192 so brows & eyes remain 100% clear!)
         bang_specs = [
-            (-0.068, 0.215, 0.078, -0.078, 0.148, 0.068, 0.018),
-            (-0.036, 0.222, 0.094, -0.042, 0.176, 0.098, 0.017),
-            ( 0.002, 0.224, 0.098,  0.008, 0.178, 0.103, 0.018),
-            ( 0.038, 0.222, 0.094,  0.046, 0.176, 0.097, 0.017),
-            ( 0.068, 0.215, 0.078,  0.078, 0.148, 0.068, 0.018),
+            (-0.072, 0.218, 0.074, -0.082, 0.156, 0.062, 0.016),
+            (-0.036, 0.226, 0.092, -0.040, 0.193, 0.096, 0.014),
+            ( 0.002, 0.228, 0.096,  0.006, 0.195, 0.100, 0.015),
+            ( 0.038, 0.226, 0.092,  0.042, 0.193, 0.095, 0.014),
+            ( 0.072, 0.218, 0.074,  0.082, 0.156, 0.062, 0.016),
         ]
         for x0, y0, z0, x1, y1, z1, r0 in bang_specs:
             parts.append(make_tube_segment((x0, y0, z0), (x1, y1, z1), r0, 0.004, UV_HAIR, seg=5, col=rgba(255, 255, 255, 84), ball_caps=False))

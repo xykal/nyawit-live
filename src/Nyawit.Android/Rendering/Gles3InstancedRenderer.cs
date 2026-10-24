@@ -155,16 +155,16 @@ void main() {
         vec2 drift = vec2(uTime * 0.022, uTime * 0.011);
         float dens = fbmCloud(uvC * 0.95 + drift);
         float detail = fbmCloud(uvC * 2.65 - drift * 1.4);
-        float cloud = smoothstep(0.47, 0.86, dens * 0.80 + detail * 0.28);
+        float cloud = smoothstep(0.42, 0.80, dens * 0.80 + detail * 0.30);
         // Directional derivative toward sun for realistic self-shadowed cloud bellies!
-        float densSun = fbmCloud((uvC + L.xz * 0.12) * 0.95 + drift);
-        float lit = clamp(0.55 + (dens - densSun) * 3.4, 0.18, 1.15);
+        float densSun = fbmCloud((uvC + L.xz * 0.14) * 0.95 + drift);
+        float lit = clamp(0.48 + (dens - densSun) * 3.8, 0.12, 1.12);
         float sd = max(dot(d, L), 0.0);
-        vec3 cloudDark = uSkyHorizon * 0.44;
-        vec3 cloudBright = mix(uSkyHorizon * 1.36, vec3(0.90, 0.93, 0.96), 0.42) + uSunColor * pow(sd, 5.0) * 0.24;
+        vec3 cloudDark = uSkyHorizon * 0.36;
+        vec3 cloudBright = mix(uSkyHorizon * 1.65, vec3(0.92, 0.95, 0.98), 0.52) + uSunColor * pow(sd, 5.0) * 0.28;
         vec3 cCol = mix(cloudDark, cloudBright, lit);
-        float horizonFade = smoothstep(0.015, 0.24, d.y);
-        col = mix(col, cCol, cloud * 0.92 * horizonFade);
+        float horizonFade = smoothstep(0.012, 0.20, d.y);
+        col = mix(col, cCol, cloud * 0.94 * horizonFade);
     }
 
     float sd = max(dot(d, L), 0.0);
@@ -496,13 +496,14 @@ void main() {
         srgbTex = mix(srgbTex, conc, yardW * 0.90);
         base = pow(max(srgbTex * vColor.rgb, vec3(0.001)), vec3(2.2));
 
-        // Signature Bussid / GTA SA ENB Wet Rain-Slicked Sumatran Mud Road & Standing Puddles!
-        float pWave = sin(vWorldPos.x * 0.44 + cos(vWorldPos.z * 0.39) * 1.9) * 0.5
-                    + cos(vWorldPos.z * 0.61 - vWorldPos.x * 0.27) * 0.35 + 0.48;
-        puddleMask = smoothstep(0.56, 0.84, pWave + mudW * 0.22) * smoothstep(0.26, 0.72, roadW) * (1.0 - yardW * 0.75);
-        float wetSoil = clamp(roadW * 0.62 + mudW * 0.38 + puddleMask * 0.55, 0.0, 1.0);
+        // Signature Bussid / GTA SA ENB Wet Rain-Slicked Sumatran Mud Road & Irregular Rainwater Puddles!
+        float pWave = sin(vWorldPos.x * 0.57 + cos(vWorldPos.z * 0.49) * 2.1) * 0.36
+                    + cos(vWorldPos.z * 0.83 - sin(vWorldPos.x * 0.41) * 1.7) * 0.32
+                    + sin((vWorldPos.x + vWorldPos.z) * 1.15) * 0.18 + 0.46;
+        puddleMask = smoothstep(0.64, 0.88, pWave + mudW * 0.16) * smoothstep(0.62, 0.92, roadW) * (1.0 - yardW * 0.85);
+        float wetSoil = clamp(roadW * 0.58 + mudW * 0.34 + puddleMask * 0.48, 0.0, 1.0);
         // Wet soil absorbs diffuse light & shifts rich dark peat-chocolate!
-        base *= mix(1.0, 0.44, wetSoil);
+        base *= mix(1.0, 0.46, wetSoil);
 
         if (dist < 32.0) {
             float lum = dot(srgbTex, vec3(0.333));
@@ -510,7 +511,7 @@ void main() {
             N = normalize(N - vec3(dFdx(lum), 0.0, dFdy(lum)) * 2.3 * bumpFade);
         }
         N = normalize(mix(N, vec3(0.0, 1.0, 0.0), puddleMask * 0.88));
-        gloss = clamp(0.05 + wetSoil * 0.38 + puddleMask * 0.52, 0.04, 0.94);
+        gloss = clamp(0.05 + wetSoil * 0.36 + puddleMask * 0.52, 0.04, 0.94);
     } else {
         float isDyeable = step(1.5, vUV.x);
         vec2 atlasUV = vec2(vUV.x - isDyeable * 2.0, vUV.y);
@@ -555,11 +556,11 @@ void main() {
              + uSunColor * spec * 0.48
              + uSkyTop * fresnelObj * 0.42;
 
-    // ENB Wet Mud Road Puddle Sky & Canopy Reflection!
+    // ENB Wet Mud Road Puddle Sky & Canopy Reflection (dark glossy rainwater pools, zero white edge glare!)
     if (puddleMask > 0.01) {
-        float pFres = clamp(0.18 + 0.82 * pow(1.0 - max(dot(N, V), 0.0), 3.8), 0.0, 1.0);
-        vec3 puddleSky = mix(uSkyTop * 0.85, uFogColor * 0.92, 0.55) * mix(0.42, 1.0, shadow);
-        lit = mix(lit, puddleSky + uSunColor * spec * 0.85, puddleMask * pFres * 0.72);
+        float pFres = clamp(0.14 + 0.56 * pow(1.0 - max(dot(N, V), 0.0), 3.6), 0.0, 0.68);
+        vec3 puddleSky = mix(vec3(0.032, 0.026, 0.022), uSkyTop * 0.68, pFres) * mix(0.38, 1.0, shadow);
+        lit = mix(lit, puddleSky + uSunColor * spec * 0.72, puddleMask * 0.58);
     }
 
     float fogAmt = computeAtmosphereFog(dist, vWorldPos.y);
@@ -2509,7 +2510,7 @@ void main() {
 
         DrawNamed(MeshCatalog.CharTorsoHead, 0, _instStaging, torsoMat.Emit(_instStaging, 0, cr, cg, cb), ref drawCalls, ref tris);
         DrawNamed(MeshCatalog.CharHead, 0, _instStaging, headMat.Emit(_instStaging, 0), ref drawCalls, ref tris);
-        bool strainedFace = slashTimer > 0.001f || pickupTimer > 0.001f || throwTimer > 0.001f || stance == HoldStance.CarryingTbs;
+        bool strainedFace = slashTimer > 0.001f || pickupTimer > 0.001f || throwTimer > 0.001f;
         DrawNamed(strainedFace ? MeshCatalog.CharFaceStrain : MeshCatalog.CharFaceNeutral, 0, _instStaging, headMat.Emit(_instStaging, 0), ref drawCalls, ref tris);
 
         int nThigh = 0;
