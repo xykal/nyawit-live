@@ -135,21 +135,25 @@ def main():
         sync_stage("onfoot")
         capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_onfoot_hold_hd.png")
 
-        log_msg("=== [6/8] Frame-Syncing Stage 5: Canter FE 74 HD + Tire Tracks + Arrow Steering & Gas/Brake Pedals HUD ===")
+        log_msg("=== [6/9] Frame-Syncing Stage 5: Canter FE 74 HD + Anime Outline + Semi-ENB Dingin + Arrow/Pedals HUD ===")
         sync_stage("canter")
         capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_canter_drive_hd.png")
 
-        log_msg("=== [7/8] Frame-Syncing Stage 6: Custom In-Game 'PENGATURAN' Panel (FPS, Render Scale & Vehicle Control Mode) ===")
+        log_msg("=== [7/9] Frame-Syncing Stage 6: Fog Asap Karhutla Sumatra + Anime Outline + Canter Headlights ===")
+        sync_stage("karhutla")
+        capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_karhutla_hd.png")
+
+        log_msg("=== [8/9] Frame-Syncing Stage 7: Custom In-Game 'PENGATURAN' Panel (ENB Dingin / Asap Karhutla & Anime Outline) ===")
         sync_stage("settings")
         capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_settings_hd.png")
 
         pid2 = run(["adb", "shell", "pidof", "id.my.xyverse.nyawitlive"], check=False).strip()
-        log_msg(f"Live Android Process PID after all 6 frame-synced stages: '{pid2}'")
+        log_msg(f"Live Android Process PID after all 7 frame-synced stages: '{pid2}'")
         if not pid2 or pid2 != pid1:
             dump_diagnostics("GAMEPLAY_CRASH_OR_RESTART")
             sys.exit(1)
 
-        log_msg("=== [8/8] Auditing Full Android 14 Logcat & Validating All 6 Full-HD Hardware Frames ===")
+        log_msg("=== [9/9] Auditing Full Android 14 Logcat & Validating All 7 Full-HD Hardware Frames ===")
         log = dump_diagnostics("HEALTHY_RUN_SUMMARY")
         if "FATAL EXCEPTION" in log or "Startup exception:" in log:
             log_msg("ERROR: Detected unhandled exception in logcat!")
@@ -160,9 +164,10 @@ def main():
         inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_loading_hd.png", min_kb=10.0)
         inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_onfoot_hold_hd.png", min_kb=80.0)
         inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_canter_drive_hd.png", min_kb=80.0)
+        inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_karhutla_hd.png", min_kb=60.0)
         inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_settings_hd.png", min_kb=80.0)
 
-        log_msg("=== Android 14 v6.0.0 verification PASSED across all 6 stages in a single uninterrupted PID! ===")
+        log_msg("=== Android 14 v6.0.0 verification PASSED across all 7 stages in a single uninterrupted PID! ===")
     except Exception:
         dump_diagnostics("STAGE_FAILURE")
         raise

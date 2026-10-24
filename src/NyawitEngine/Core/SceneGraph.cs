@@ -43,12 +43,28 @@ public enum ShadowQualityTier
     High = 2
 }
 
+public enum AtmospherePreset
+{
+    SemiEnbCold = 0,   // Cool Cinematic Semi-ENB Dingin (Default)
+    KarhutlaSmoke = 1, // Sumatra/Riau Kabut Asap Karhutla Peatland Haze
+    TropicalSunny = 2  // Classic Equatorial Plantation Sun
+}
+
+public enum AnimeOutlineTier
+{
+    Off = 0,
+    Subtle = 1,
+    Bold = 2           // Crisp Anime Silhouette + Crease Ink Outlines (Default)
+}
+
 public sealed class QualityGovernor
 {
     public GraphicsPreset CurrentPreset { get; private set; } = GraphicsPreset.Ultra;
     public bool AutoStepDownEnabled { get; set; } = true;
     public int TargetFps { get; set; } = 60;
     public ShadowQualityTier ShadowTier { get; set; } = ShadowQualityTier.High;
+    public AtmospherePreset Atmosphere { get; set; } = AtmospherePreset.SemiEnbCold;
+    public AnimeOutlineTier OutlineTier { get; set; } = AnimeOutlineTier.Bold;
     public bool CloudsEnabled { get; set; } = true;
     public bool ParticlesEnabled { get; set; } = true;
     public bool ShowFpsHud { get; set; } = true;
@@ -73,6 +89,7 @@ public sealed class QualityGovernor
             GraphicsPreset.Standard => ShadowQualityTier.Medium,
             _ => ShadowQualityTier.High,
         };
+        OutlineTier = preset == GraphicsPreset.Smooth ? AnimeOutlineTier.Subtle : AnimeOutlineTier.Bold;
         CloudsEnabled = preset != GraphicsPreset.Smooth;
         ParticlesEnabled = preset != GraphicsPreset.Smooth;
         if (disableAuto) AutoStepDownEnabled = false;

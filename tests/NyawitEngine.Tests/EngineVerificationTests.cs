@@ -41,9 +41,11 @@ public sealed class EngineVerificationTests
             Assert.True(archive.Meshes.ContainsKey(requiredKey), $"Missing required 3D model '{requiredKey}' in nyawit_models.npak");
         }
 
+        int totalLod0Tris = 0;
         foreach (var kv in archive.Meshes)
         {
             Assert.Equal(3, kv.Value.Lods.Length);
+            totalLod0Tris += kv.Value.Lods[0].IndexCount / 3;
             Assert.True(kv.Value.Lods[0].IndexCount >= kv.Value.Lods[2].IndexCount,
                 $"Mesh {kv.Key} LOD2 must be lighter than or equal to LOD0");
             if (kv.Key != MeshCatalog.VfxPuffQuad &&
@@ -55,6 +57,16 @@ public sealed class EngineVerificationTests
                     $"Mesh {kv.Key} must be a detailed sculpted mesh (got {kv.Value.Lods[0].VertexCount} verts)");
             }
         }
+        Assert.True(totalLod0Tris >= 55_000, $"Expected high-detail v6.0.0 mesh pack (>= 55,000 LOD0 tris), got {totalLod0Tris}");
+
+        // Verify QualityGovernor defaults to Semi-ENB Dingin + Bold Anime Ink Outline
+        var qg = new QualityGovernor();
+        Assert.Equal(AtmospherePreset.SemiEnbCold, qg.Atmosphere);
+        Assert.Equal(AnimeOutlineTier.Bold, qg.OutlineTier);
+        qg.Atmosphere = AtmospherePreset.KarhutlaSmoke;
+        qg.OutlineTier = AnimeOutlineTier.Subtle;
+        Assert.Equal(AtmospherePreset.KarhutlaSmoke, qg.Atmosphere);
+        Assert.Equal(AnimeOutlineTier.Subtle, qg.OutlineTier);
     }
 
     [Fact]

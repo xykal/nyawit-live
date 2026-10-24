@@ -270,6 +270,7 @@ public class MainActivity : Activity
         _renderer.Physics.OnPhysicsSfx += clip => _sfx?.Play(clip);
 
         _hud.OnProfileModified += SaveLocalProfile;
+        _hud.OnVisualSettingsChanged += SaveGraphicsSettings;
         _hud.OnTargetFpsSelected += fps =>
         {
             ApplyHardwareDisplayRefreshRate(fps);
@@ -586,6 +587,8 @@ public class MainActivity : Activity
 
             case "onfoot":
                 _renderer.HoldStageProgress = false;
+                _renderer.Quality.Atmosphere = AtmospherePreset.SemiEnbCold;
+                _renderer.Quality.OutlineTier = AnimeOutlineTier.Bold;
                 _renderer.ForceStageAndProgress(AppSceneStage.Gameplay, 1.0f, hold: false);
                 ExecuteKeyShowcase(Keycode.F);
                 _hud.Invalidate();
@@ -593,13 +596,41 @@ public class MainActivity : Activity
 
             case "canter":
                 _renderer.HoldStageProgress = false;
+                _renderer.Quality.Atmosphere = AtmospherePreset.SemiEnbCold;
+                _renderer.Quality.OutlineTier = AnimeOutlineTier.Bold;
                 _renderer.ForceStageAndProgress(AppSceneStage.Gameplay, 1.0f, hold: false);
                 ExecuteKeyShowcase(Keycode.T);
                 _hud.Invalidate();
                 break;
 
+            case "karhutla":
+                _renderer.HoldStageProgress = false;
+                _renderer.Quality.Atmosphere = AtmospherePreset.KarhutlaSmoke;
+                _renderer.Quality.OutlineTier = AnimeOutlineTier.Bold;
+                _renderer.ForceStageAndProgress(AppSceneStage.Gameplay, 1.0f, hold: false);
+                _hud.CloseModal();
+                _renderer.InTruck = true;
+                _renderer.LockShowcaseCam = true;
+                _renderer.JoyX = -0.45f;
+                _renderer.JoyY = 0f;
+                _renderer.Physics.MainTruck.X = 1.2f;
+                _renderer.Physics.MainTruck.Z = 2.2f;
+                _renderer.Physics.MainTruck.Y = RigidBodyWorld.SurfaceHeightWithStructures(1.2f, 2.2f);
+                _renderer.Physics.MainTruck.Yaw = -0.35f;
+                _renderer.Physics.MainTruck.SpeedMs = 0f;
+                _renderer.Physics.MainTruck.SteerAngle = 0.28f;
+                _renderer.Physics.MainTruck.VisualCargoUnits = 18;
+                _renderer.SeedShowcaseTireTracks();
+                _renderer.CamYaw = 0.33f;
+                _renderer.CamDist = 6.2f;
+                _renderer.CamPitch = 0.16f;
+                _hud.Invalidate();
+                break;
+
             case "settings":
                 _renderer.HoldStageProgress = false;
+                _renderer.Quality.Atmosphere = AtmospherePreset.SemiEnbCold;
+                _renderer.Quality.OutlineTier = AnimeOutlineTier.Bold;
                 ExecuteKeyShowcase(Keycode.P);
                 _hud.Invalidate();
                 break;
@@ -613,7 +644,7 @@ public class MainActivity : Activity
         {
             _renderer.JoyX = 0f;
             _renderer.JoyY = 0f;
-            _hud.SettingsTabIndex = 2;
+            _hud.SettingsTabIndex = 1;
             _hud.OpenModal(ActiveModalOverlay.Settings);
             _hud.PostInvalidate();
             return;
@@ -775,6 +806,8 @@ public class MainActivity : Activity
         _renderer.Quality.SetManualPreset((GraphicsPreset)System.Math.Clamp(preset, 0, 3), disableAuto: false);
         _renderer.Quality.TargetFps = _prefs.GetInt("gfx_fps", 60);
         _renderer.Quality.ShadowTier = (ShadowQualityTier)System.Math.Clamp(_prefs.GetInt("gfx_shadow", 2), 0, 2);
+        _renderer.Quality.Atmosphere = (AtmospherePreset)System.Math.Clamp(_prefs.GetInt("gfx_atmosphere", 0), 0, 2);
+        _renderer.Quality.OutlineTier = (AnimeOutlineTier)System.Math.Clamp(_prefs.GetInt("gfx_outline", 2), 0, 2);
         _renderer.Quality.CloudsEnabled = _prefs.GetBoolean("gfx_clouds", true);
         _renderer.Quality.ParticlesEnabled = _prefs.GetBoolean("gfx_particles", true);
         _renderer.Quality.ShowFpsHud = _prefs.GetBoolean("gfx_show_fps", true);
@@ -787,6 +820,8 @@ public class MainActivity : Activity
         ed.PutInt("gfx_preset", (int)_renderer.Quality.CurrentPreset);
         ed.PutInt("gfx_fps", _renderer.Quality.TargetFps);
         ed.PutInt("gfx_shadow", (int)_renderer.Quality.ShadowTier);
+        ed.PutInt("gfx_atmosphere", (int)_renderer.Quality.Atmosphere);
+        ed.PutInt("gfx_outline", (int)_renderer.Quality.OutlineTier);
         ed.PutBoolean("gfx_clouds", _renderer.Quality.CloudsEnabled);
         ed.PutBoolean("gfx_particles", _renderer.Quality.ParticlesEnabled);
         ed.PutBoolean("gfx_show_fps", _renderer.Quality.ShowFpsHud);

@@ -250,7 +250,10 @@ layout(location = 7) in vec4 iTintAndWind;
 
 uniform mat4 uVP;
 uniform mat4 uLightVP;
+uniform vec3 uCamPos;
 uniform float uTime;
+uniform int uRenderMode;
+uniform float uOutlineWidth;
 
 out vec3 vNormal;
 out vec3 vWorldPos;
@@ -264,7 +267,7 @@ void main() {
     vec3 worldPos = vec3(dot(iRow0, localPos), dot(iRow1, localPos), dot(iRow2, localPos));
 
     float windAmp = iTintAndWind.w;
-    if (windAmp > 0.001 && aColor.a < 0.99) {
+    if (windAmp > 0.001 && aColor.a < 0.99 && uRenderMode != 3) {
         float h = max(0.0, aPos.y + length(aPos.xz) * 0.42);
         float gust = sin(uTime * 2.05 + iRow0.w * 0.14 + iRow2.w * 0.11);
         float flutter = cos(uTime * 3.90 + aPos.x * 2.2 + iRow2.w * 0.17);
@@ -278,11 +281,39 @@ void main() {
         iRow0.y, iRow1.y, iRow2.y,
         iRow0.z, iRow1.z, iRow2.z
     );
-    vNormal = normalize(rotScale * aNormal);
-    vWorldPos = worldPos;
+    vec3 wNrm = normalize(rotScale * aNormal);
+    vNormal = wNrm;
     vColor = aColor;
     vTintWind = iTintAndWind;
     vUV = aUV;
+
+    // Mode 3: Inverted-Hull Geometric Anime Silhouette Pass (GL_FRONT culled)
+    if (uRenderMode == 3) {
+        // Keep double-sided cab glass panes open so 3D cabin interior stays crystal clear!
+        if (aColor.a > 0.80 && aColor.a < 0.88 && aUV.y > 0.50 && aUV.y < 0.63) {
+            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+            vWorldPos = worldPos;
+            vShadowCoord = vec4(0.0);
+            return;
+        }
+        float distO = length(uCamPos - worldPos);
+        if (distO > 54.0 || uOutlineWidth <= 0.0001) {
+            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+            vWorldPos = worldPos;
+            vShadowCoord = vec4(0.0);
+            return;
+        }
+        float thick = uOutlineWidth * clamp(0.55 + distO * 0.030, 0.55, 2.25);
+        worldPos += wNrm * thick;
+        vWorldPos = worldPos;
+        vShadowCoord = vec4(0.0);
+        vec4 clipO = uVP * vec4(worldPos, 1.0);
+        clipO.z += 0.00055 * clipO.w;
+        gl_Position = clipO;
+        return;
+    }
+
+    vWorldPos = worldPos;
     vShadowCoord = uLightVP * vec4(worldPos, 1.0);
     gl_Position = uVP * vec4(worldPos, 1.0);
 }";
@@ -306,15 +337,54 @@ uniform vec3 uFogColor;
 uniform vec3 uCamPos;
 uniform float uFogDensity;
 uniform float uTime;
-uniform int uRenderMode;   // 0 = Standard PBR + Alpha-Cutout Mesh, 1 = Multi-Scale PBR Terrain, 2 = Soft Alpha VFX Puff
+uniform int uRenderMode;   // 0 = Cel-PBR Mesh, 1 = Splatmapped Terrain, 2 = Soft VFX Puff, 3 = Anime Silhouette Ink
 uniform int uShadowMode;   // 0 = Off, 1 = Single-Tap Fast Shadow, 2 = 4-Tap Soft PCF Shadow
 uniform float uCloudsOn;
+uniform float uOutlineStrength;
+uniform int uAtmoPreset;   // 0 = Semi-ENB Dingin, 1 = Fog Asap Karhutla, 2 = Tropik Cerah
 
 out vec4 fragColor;
 
 vec2 tileUv(vec2 w, vec2 cellOrigin) {
     vec2 f = clamp(fract(w), vec2(0.018), vec2(0.982));
     return cellOrigin + f * 0.25;
+}
+
+float computeAtmosphereFog(float dist, float worldY) {
+    if (uAtmoPreset == 1) {
+        // Sumatra / Riau Peatland Fire Haze ('Kabut Asap Karhutla'): thick smoky veil + low ground peat smoke!
+        float baseHaze = smoothstep(7.5, 76.0, dist) * 0.88;
+        float peatGround = exp(-max(0.0, worldY - 0.15) * 0.34) * smoothstep(4.5, 36.0, dist) * 0.24;
+        return clamp(baseHaze + peatGround, 0.0, 0.90);
+    }
+    if (uAtmoPreset == 0) {
+        // Cool Cinematic Semi-ENB Dingin morning mist
+        return clamp(smoothstep(32.0, 175.0, dist) * (0.76 + uFogDensity * 8.0), 0.0, 0.86);
+    }
+    return clamp(smoothstep(56.0, 208.0, dist) * (0.74 + uFogDensity * 10.0), 0.0, 0.84);
+}
+
+vec3 applySemiEnbGrade(vec3 hdr) {
+    vec3 mapped = (hdr * (2.51 * hdr + 0.03)) / (hdr * (2.43 * hdr + 0.59) + 0.14);
+    vec3 srgbOut = pow(clamp(mapped, 0.0, 1.0), vec3(0.4545));
+    // Crisp ENB S-curve micro-contrast
+    vec3 scurve = srgbOut * srgbOut * (3.0 - 2.0 * srgbOut);
+    srgbOut = mix(srgbOut, scurve, 0.30);
+    float luma = dot(srgbOut, vec3(0.2126, 0.7152, 0.0722));
+    if (uAtmoPreset == 0) {
+        // Semi-ENB Dingin: cool steel-cobalt shadow split-toning + crisp silver-cyan highlight lift
+        srgbOut.r *= 0.965;
+        srgbOut.b = clamp(srgbOut.b * 1.055 + (1.0 - luma) * 0.026, 0.0, 1.0);
+        srgbOut = clamp(mix(vec3(luma), srgbOut, 1.12), 0.0, 1.0);
+    } else if (uAtmoPreset == 1) {
+        // Fog Asap Karhutla: warm smoky amber-ochre split-toning
+        srgbOut.r = clamp(srgbOut.r * 1.045 + (1.0 - luma) * 0.018, 0.0, 1.0);
+        srgbOut.b *= 0.925;
+        srgbOut = clamp(mix(vec3(luma), srgbOut, 1.06), 0.0, 1.0);
+    } else {
+        srgbOut = clamp(mix(vec3(luma), srgbOut, 1.10), 0.0, 1.0);
+    }
+    return srgbOut;
 }
 
 float computeSunShadow(vec3 N, vec3 L, float camDist) {
@@ -350,7 +420,20 @@ float computeSunShadow(vec3 N, vec3 L, float camDist) {
 void main() {
     float dist = length(uCamPos - vWorldPos);
 
-    // Mode 2: Soft Volumetric Alpha Particle Puff (Tire Dust, Diesel Exhaust, Harvest Chaff, Boiler Steam!)
+    // Mode 3: Inverted-Hull Anime Silhouette Ink Outline (blended cleanly into atmospheric fog!)
+    if (uRenderMode == 3) {
+        float isDyeO = step(1.5, vUV.x);
+        vec2 uvO = vec2(vUV.x - isDyeO * 2.0, vUV.y);
+        if (texture(uAtlas, uvO).a < 0.44) discard;
+        vec3 inkHdr = (uAtmoPreset == 1) ? vec3(0.016, 0.009, 0.005) : vec3(0.004, 0.008, 0.018);
+        float fogO = computeAtmosphereFog(dist, vWorldPos.y);
+        float farFade = smoothstep(38.0, 54.0, dist);
+        vec3 outO = mix(inkHdr, uFogColor, clamp(max(fogO, farFade), 0.0, 0.96));
+        fragColor = vec4(applySemiEnbGrade(outO), 1.0);
+        return;
+    }
+
+    // Mode 2: Soft Volumetric Alpha Particle Puff (Tire Dust, Diesel Exhaust, Karhutla Smoke, Boiler Steam!)
     if (uRenderMode == 2) {
         float isDyeP = step(1.5, vUV.x);
         vec2 puv = vec2(vUV.x - isDyeP * 2.0, vUV.y);
@@ -358,8 +441,7 @@ void main() {
         float alpha = ptex.a * clamp(vTintWind.w, 0.0, 1.0);
         if (alpha < 0.02) discard;
         vec3 pcol = pow(max(ptex.rgb, vec3(0.01)), vec3(2.2)) * vTintWind.rgb;
-        vec3 mappedP = (pcol * (2.51 * pcol + 0.03)) / (pcol * (2.43 * pcol + 0.59) + 0.14);
-        fragColor = vec4(pow(clamp(mappedP, 0.0, 1.0), vec3(0.4545)), alpha);
+        fragColor = vec4(applySemiEnbGrade(pcol), alpha);
         return;
     }
 
@@ -373,13 +455,12 @@ void main() {
         float w2 = cos(vWorldPos.z * 2.55 - uTime * 1.6 + vWorldPos.x * 0.7);
         N = normalize(vec3(w1 * 0.14, 1.0, w2 * 0.16));
         float fres = pow(1.0 - max(dot(N, V), 0.0), 3.4);
-        vec3 waterAlb = mix(vec3(0.032, 0.058, 0.045), uSkyTop * 0.92, clamp(fres * 0.88 + 0.10, 0.0, 1.0));
+        vec3 deepWater = (uAtmoPreset == 0) ? vec3(0.020, 0.052, 0.075) : vec3(0.036, 0.048, 0.038);
+        vec3 waterAlb = mix(deepWater, uSkyTop * 0.95, clamp(fres * 0.88 + 0.12, 0.0, 1.0));
         vec3 Hw = normalize(L + V);
-        waterAlb += uSunColor * pow(max(dot(N, Hw), 0.0), 96.0) * 0.85;
-        float fogW = smoothstep(48.0, 190.0, dist) * 0.80;
-        vec3 outW = mix(waterAlb, uFogColor, fogW);
-        outW = (outW * (2.51 * outW + 0.03)) / (outW * (2.43 * outW + 0.59) + 0.14);
-        fragColor = vec4(pow(clamp(outW, 0.0, 1.0), vec3(0.4545)), 1.0);
+        waterAlb += uSunColor * smoothstep(0.96, 0.995, max(dot(N, Hw), 0.0)) * 0.95;
+        float fogW = computeAtmosphereFog(dist, vWorldPos.y);
+        fragColor = vec4(applySemiEnbGrade(mix(waterAlb, uFogColor, fogW)), 1.0);
         return;
     }
 
@@ -405,7 +486,6 @@ void main() {
         vec3 srgbTex = mix(grass, dirt, smoothstep(0.18, 0.78, max(roadW, mudW * 0.72)));
         srgbTex = mix(srgbTex, conc, yardW * 0.92);
         base = pow(max(srgbTex * vColor.rgb, vec3(0.002)), vec3(2.2));
-        // Subtle normal relief from luminance derivative on nearby ground!
         if (dist < 28.0) {
             float lum = dot(srgbTex, vec3(0.333));
             float bumpFade = 1.0 - smoothstep(14.0, 28.0, dist);
@@ -418,53 +498,60 @@ void main() {
         vec4 texel = texture(uAtlas, atlasUV);
         if (texel.a < 0.44) discard;
         vec3 effTint = mix(vec3(1.0), vTintWind.rgb, isDyeable);
-        // Allow golden/highlight tint boost even on non-dyeable fruits (> 1.15)
         effTint *= mix(vec3(1.0), vTintWind.rgb, step(1.12, max(vTintWind.r, vTintWind.g)) * (1.0 - isDyeable));
         base = pow(max(texel.rgb * vColor.rgb, vec3(0.002)), vec3(2.2)) * pow(max(effTint, vec3(0.002)), vec3(1.65));
     }
 
     // Self-illuminated lamps / LED signs / fluorescent shop tubes
     if (gloss > 0.965) {
-        vec3 hdrEm = base * 2.65;
-        vec3 outEm = (hdrEm * (2.51 * hdrEm + 0.03)) / (hdrEm * (2.43 * hdrEm + 0.59) + 0.14);
-        fragColor = vec4(pow(clamp(outEm, 0.0, 1.0), vec3(0.4545)), 1.0);
+        fragColor = vec4(applySemiEnbGrade(base * 2.75), 1.0);
         return;
     }
 
     vec3 H = normalize(L + V);
-    float ndl = max(dot(N, L), 0.0);
-    // Stylized Genshin / Blender Half-Lambert Ramp: prevents muddy black shadows while preserving crisp 3D bevel contrast!
-    float halfLambert = pow(clamp(dot(N, L) * 0.5 + 0.5, 0.0, 1.0), 1.65);
-    float celBand = mix(halfLambert, smoothstep(0.30, 0.72, halfLambert), 0.35);
+    float ndlSigned = dot(N, L);
+    // Crisp 3-Band Anime Cel-Shading Ramp (clean shadow / midtone / sunlit highlight bands!)
+    float celBand = 0.24
+                  + 0.42 * smoothstep(-0.06, 0.08, ndlSigned)
+                  + 0.34 * smoothstep(0.42, 0.56, ndlSigned);
+    if (uRenderMode == 1) {
+        // Keep terrain slopes smooth while harmonizing with cel-shaded props
+        float halfLam = pow(clamp(ndlSigned * 0.5 + 0.5, 0.0, 1.0), 1.55);
+        celBand = mix(halfLam, celBand, 0.45);
+    }
 
     // Subsurface botanical translucency for oil palm fronds & ferns!
     float isBotanical = step(0.75, 1.0 - abs(fract(vUV.x) - 0.125)) * step(0.25, vUV.y) * (1.0 - step(0.50, vUV.y));
-    float sss = (uRenderMode == 0 ? 1.0 : 0.0) * isBotanical * pow(clamp(dot(-V, L) * 0.5 + 0.5, 0.0, 1.0), 2.2) * 0.62;
+    float sss = (uRenderMode == 0 ? 1.0 : 0.0) * isBotanical * pow(clamp(dot(-V, L) * 0.5 + 0.5, 0.0, 1.0), 2.2) * 0.58;
 
     float shadow = computeSunShadow(N, L, dist);
     if (uCloudsOn > 0.5) {
         float cWave = sin(vWorldPos.x * 0.042 + uTime * 0.32) * cos(vWorldPos.z * 0.038 + uTime * 0.21);
-        shadow *= mix(0.84, 1.05, cWave * 0.5 + 0.5);
+        shadow *= mix(0.85, 1.05, cWave * 0.5 + 0.5);
     }
 
-    vec3 hemi = mix(uGroundBounce * 1.18, uSkyTop * 1.12, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
-    float shininess = mix(18.0, 108.0, clamp(gloss, 0.0, 1.0));
-    float spec = pow(max(dot(N, H), 0.0), shininess) * gloss * shadow;
-    // Signature ArtStation / Blender Stylized Fresnel Silhouette Rim Highlight!
-    float rim = pow(1.0 - max(dot(N, V), 0.0), 3.2) * (0.20 + 0.18 * clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
+    vec3 hemi = mix(uGroundBounce * 1.18, uSkyTop * 1.14, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
+    float shininess = mix(16.0, 96.0, clamp(gloss, 0.0, 1.0));
+    float specRaw = pow(max(dot(N, H), 0.0), shininess);
+    float spec = mix(specRaw, smoothstep(0.38, 0.56, specRaw), 0.72) * gloss * shadow;
+    float rim = smoothstep(0.44, 0.78, pow(1.0 - max(dot(N, V), 0.0), 2.8)) * (0.22 + 0.18 * clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
+    vec3 rimTint = (uAtmoPreset == 0) ? vec3(0.42, 0.78, 1.15) : mix(uSkyTop, uSunColor * 0.55, 0.42);
 
-    vec3 lit = base * (hemi + uSunColor * (mix(0.16, 1.0, shadow) * celBand * 1.12 + sss))
-             + uSunColor * spec * 0.58
-             + mix(uSkyTop, uSunColor * 0.55, 0.35) * rim;
+    vec3 lit = base * (hemi + uSunColor * (mix(0.18, 1.0, shadow) * celBand * 1.10 + sss))
+             + uSunColor * spec * 0.62
+             + rimTint * rim;
 
-    float fogAmt = smoothstep(58.0, 210.0, dist) * (0.74 + uFogDensity * 10.0);
-    vec3 hdr = mix(lit, uFogColor, clamp(fogAmt, 0.0, 0.84));
+    // Screen-Space Anime Crease & Panel-Edge Ink along 3D Bevels (Canter doors, Bak Kayu planks, SPBU fascia, tools!)
+    if (uRenderMode == 0 && uOutlineStrength > 0.01 && isBotanical < 0.5 && dist < 34.0) {
+        float nEdge = length(fwidth(N));
+        float crease = smoothstep(0.55, 0.95, nEdge) * (1.0 - smoothstep(18.0, 34.0, dist)) * uOutlineStrength * 0.68;
+        vec3 inkCrease = (uAtmoPreset == 1) ? vec3(0.018, 0.010, 0.006) : vec3(0.005, 0.010, 0.022);
+        lit = mix(lit, inkCrease, clamp(crease, 0.0, 0.78));
+    }
 
-    vec3 mapped = (hdr * (2.51 * hdr + 0.03)) / (hdr * (2.43 * hdr + 0.59) + 0.14);
-    vec3 srgbOut = pow(clamp(mapped, 0.0, 1.0), vec3(0.4545));
-    float lumaOut = dot(srgbOut, vec3(0.2126, 0.7152, 0.0722));
-    srgbOut = clamp(mix(vec3(lumaOut), srgbOut, 1.10), 0.0, 1.0);
-    fragColor = vec4(srgbOut, 1.0);
+    float fogAmt = computeAtmosphereFog(dist, vWorldPos.y);
+    vec3 hdr = mix(lit, uFogColor, fogAmt);
+    fragColor = vec4(applySemiEnbGrade(hdr), 1.0);
 }";
 
     private readonly Context? _context;
@@ -502,6 +589,9 @@ void main() {
     private int _program;
     private int _instanceVbo;
     private int _uVp, _uLightVp, _uTime, _uAtlas, _uShadowMap, _uSunDir, _uSunColor, _uSkyTop, _uGroundBounce, _uFogColor, _uCamPos, _uFogDensity, _uRenderMode, _uShadowMode, _uCloudsOn;
+    private int _uOutlineWidth, _uOutlineStrength, _uAtmoPreset;
+    private bool _allowOutlinePass;
+    private float _karhutlaHazeAccum;
     private bool _gpuReady;
 
     private const int MaxInstancesPerBatch = 1024;
@@ -932,6 +1022,9 @@ void main() {
         _uRenderMode = GLES30.GlGetUniformLocation(_program, "uRenderMode");
         _uShadowMode = GLES30.GlGetUniformLocation(_program, "uShadowMode");
         _uCloudsOn = GLES30.GlGetUniformLocation(_program, "uCloudsOn");
+        _uOutlineWidth = GLES30.GlGetUniformLocation(_program, "uOutlineWidth");
+        _uOutlineStrength = GLES30.GlGetUniformLocation(_program, "uOutlineStrength");
+        _uAtmoPreset = GLES30.GlGetUniformLocation(_program, "uAtmoPreset");
 
         int[] bufs = new int[1];
         GLES30.GlGenBuffers(1, bufs, 0);
@@ -1250,6 +1343,25 @@ void main() {
         float wdx = PlayerX - PlantationWorld.WarungX, wdz = PlayerZ - PlantationWorld.WarungZ;
         NearWarungKopi = !InTruck && (wdx * wdx + wdz * wdz) < 6.5f * 6.5f;
 
+        // Ambient drifting peatland smoke wisps when Sumatra Karhutla Haze mode is active!
+        if (Quality.Atmosphere == AtmospherePreset.KarhutlaSmoke && Quality.ParticlesEnabled)
+        {
+            _karhutlaHazeAccum += dt * 7.5f;
+            while (_karhutlaHazeAccum >= 1f)
+            {
+                _karhutlaHazeAccum -= 1f;
+                float ang = (_vfxCursor * 2.39996f) + (float)now * 0.35f;
+                float rad = 4.5f + (_vfxCursor % 7) * 2.4f;
+                float sx = PlayerX + MathF.Cos(ang) * rad;
+                float sz = PlayerZ + MathF.Sin(ang) * rad;
+                float sy = PlantationWorld.TerrainHeight(sx, sz) + 0.65f + (_vfxCursor % 5) * 0.45f;
+                SpawnParticle(
+                    sx, sy, sz,
+                    0.55f, 0.28f, 0.32f,
+                    1.15f, 2.85f, 0.78f, 0.56f, 0.36f, 0.24f, 2.4f);
+            }
+        }
+
         if (now >= _nextNetSyncSec)
         {
             _nextNetSyncSec = now + 0.085;
@@ -1296,9 +1408,18 @@ void main() {
         GLES30.GlUseProgram(_skyProgram);
         GLES30.GlUniformMatrix4fv(_uSkyInvVp, 1, false, _invVp, 0);
         GLES30.GlUniform3f(_uSkySunDir, 0.35f, 0.65f, 0.66f);
-        GLES30.GlUniform3f(_uSkyZenith, 0.04f, 0.14f, 0.38f);
-        GLES30.GlUniform3f(_uSkyHorizon, 0.38f, 0.56f, 0.78f);
-        GLES30.GlUniform3f(_uSkySunCol, 1.15f, 0.95f, 0.68f);
+        if (Quality.Atmosphere == AtmospherePreset.KarhutlaSmoke)
+        {
+            GLES30.GlUniform3f(_uSkyZenith, 0.30f, 0.18f, 0.10f);
+            GLES30.GlUniform3f(_uSkyHorizon, 0.78f, 0.52f, 0.28f);
+            GLES30.GlUniform3f(_uSkySunCol, 1.55f, 0.88f, 0.36f);
+        }
+        else
+        {
+            GLES30.GlUniform3f(_uSkyZenith, 0.035f, 0.12f, 0.34f);
+            GLES30.GlUniform3f(_uSkyHorizon, 0.42f, 0.64f, 0.86f);
+            GLES30.GlUniform3f(_uSkySunCol, 1.18f, 1.32f, 1.56f);
+        }
         GLES30.GlUniform1f(_uSkyTime, now);
         GLES30.GlUniform1f(_uSkyClouds, Quality.CloudsEnabled ? 1f : 0f);
         GLES30.GlBindVertexArray(_skyVao);
@@ -1316,17 +1437,30 @@ void main() {
         GLES30.GlUniform1i(_uAtlas, 0);
         GLES30.GlUniform1i(_uShadowMap, 1);
         GLES30.GlUniform3f(_uSunDir, 0.28f, 0.80f, 0.53f);
-        GLES30.GlUniform3f(_uSunColor, 2.85f, 2.68f, 2.32f);
-        GLES30.GlUniform3f(_uSkyTop, 0.52f, 0.62f, 0.78f);
-        GLES30.GlUniform3f(_uGroundBounce, 0.24f, 0.22f, 0.20f);
-        GLES30.GlUniform3f(_uFogColor, 0.12f, 0.16f, 0.22f);
+        if (Quality.Atmosphere == AtmospherePreset.KarhutlaSmoke)
+        {
+            GLES30.GlUniform3f(_uSunColor, 2.75f, 1.88f, 1.05f);
+            GLES30.GlUniform3f(_uSkyTop, 0.56f, 0.42f, 0.28f);
+            GLES30.GlUniform3f(_uGroundBounce, 0.24f, 0.18f, 0.12f);
+            GLES30.GlUniform3f(_uFogColor, 0.68f, 0.46f, 0.26f);
+        }
+        else
+        {
+            GLES30.GlUniform3f(_uSunColor, 2.58f, 2.74f, 3.04f);
+            GLES30.GlUniform3f(_uSkyTop, 0.46f, 0.62f, 0.86f);
+            GLES30.GlUniform3f(_uGroundBounce, 0.18f, 0.22f, 0.26f);
+            GLES30.GlUniform3f(_uFogColor, 0.16f, 0.24f, 0.36f);
+        }
         GLES30.GlUniform3f(_uCamPos, eyeX, eyeY, eyeZ);
         GLES30.GlUniform1f(_uFogDensity, 0.001f);
         GLES30.GlUniform1i(_uRenderMode, 0);
         GLES30.GlUniform1i(_uShadowMode, 0);
         GLES30.GlUniform1f(_uCloudsOn, 0f);
+        GLES30.GlUniform1i(_uAtmoPreset, (int)Quality.Atmosphere);
+        ConfigureAnimeOutlineUniforms();
 
         // 1. Workshop Garage Interior + Turntable + Workbench + Spare Tires + Oil Drums
+        _allowOutlinePass = false;
         int c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, 0f, 0f, 0f, 0f, 0f, 0f, 1f, 1f, 1f);
         DrawNamed(MeshCatalog.GarageShowroom, 0, _instStaging, c, ref drawCalls, ref tris);
 
@@ -1344,6 +1478,7 @@ void main() {
         GLES30.GlDepthMask(true);
         GLES30.GlDisable(GLES30.GlBlend);
         GLES30.GlUseProgram(_program);
+        _allowOutlinePass = true;
 
         // 2. Workshop Angkong Cart beside tool bench
         var lobbyCart = Mat4Utils.BoneMat.TRS(-3.55f, 0.08f, -1.65f, 0f, 0.52f, 0f);
@@ -1447,6 +1582,7 @@ void main() {
 
         int drawCalls = 0, tris = 0;
         float windAmp = storm ? 2.0f : 0.82f;
+        _allowOutlinePass = false;
 
         // Pass A: Hardware 1024x1024 Directional Sun Shadow Map Pass!
         int activeShadowMode = (_shadowMapFbo != 0 && Quality.ShadowTier != ShadowQualityTier.Off)
@@ -1475,7 +1611,10 @@ void main() {
 
         // Pass B: Main Color + Depth Framebuffer Pass
         GLES30.GlViewport(0, 0, _surfaceWidth, _surfaceHeight);
-        GLES30.GlClearColor(0.28f, 0.56f, 0.84f, 1.0f);
+        if (Quality.Atmosphere == AtmospherePreset.KarhutlaSmoke)
+            GLES30.GlClearColor(0.56f, 0.38f, 0.22f, 1.0f);
+        else
+            GLES30.GlClearColor(0.20f, 0.42f, 0.68f, 1.0f);
         GLES30.GlClear(GLES30.GlColorBufferBit | GLES30.GlDepthBufferBit);
 
         // Volumetric Cumulus Sky Dome
@@ -1483,8 +1622,7 @@ void main() {
         GLES30.GlDisable(GLES30.GlDepthTest);
         GLES30.GlUseProgram(_skyProgram);
         GLES30.GlUniformMatrix4fv(_uSkyInvVp, 1, false, _invVp, 0);
-        // Vivid tropical golden-daylight sun & sky irradiance!
-        GLES30.GlUniform3f(_uSunDir, 0.48f, 0.72f, 0.44f);
+        GLES30.GlUniform3f(_uSkySunDir, 0.48f, 0.72f, 0.44f);
         GLES30.GlUniform1f(_uSkyTime, now);
         GLES30.GlUniform1f(_uSkyClouds, Quality.CloudsEnabled ? 1f : 0f);
         if (storm)
@@ -1498,6 +1636,18 @@ void main() {
             GLES30.GlUniform3f(_uSkyZenith, 0.06f, 0.22f, 0.62f);
             GLES30.GlUniform3f(_uSkyHorizon, 0.88f, 0.56f, 0.24f);
             GLES30.GlUniform3f(_uSkySunCol, 1.85f, 1.25f, 0.52f);
+        }
+        else if (Quality.Atmosphere == AtmospherePreset.KarhutlaSmoke)
+        {
+            GLES30.GlUniform3f(_uSkyZenith, 0.34f, 0.21f, 0.12f);
+            GLES30.GlUniform3f(_uSkyHorizon, 0.82f, 0.56f, 0.32f);
+            GLES30.GlUniform3f(_uSkySunCol, 1.95f, 1.02f, 0.38f);
+        }
+        else if (Quality.Atmosphere == AtmospherePreset.SemiEnbCold)
+        {
+            GLES30.GlUniform3f(_uSkyZenith, 0.045f, 0.145f, 0.38f);
+            GLES30.GlUniform3f(_uSkyHorizon, 0.48f, 0.68f, 0.88f);
+            GLES30.GlUniform3f(_uSkySunCol, 1.38f, 1.54f, 1.82f);
         }
         else
         {
@@ -1523,6 +1673,8 @@ void main() {
         GLES30.GlUniform3f(_uCamPos, eyeX, eyeY, eyeZ);
         GLES30.GlUniform1i(_uShadowMode, activeShadowMode);
         GLES30.GlUniform1f(_uCloudsOn, Quality.CloudsEnabled ? 1f : 0f);
+        GLES30.GlUniform1i(_uAtmoPreset, storm || goldRush ? 2 : (int)Quality.Atmosphere);
+        ConfigureAnimeOutlineUniforms();
 
         if (storm)
         {
@@ -1539,6 +1691,22 @@ void main() {
             GLES30.GlUniform3f(_uGroundBounce, 0.20f, 0.15f, 0.09f);
             GLES30.GlUniform3f(_uFogColor, 0.78f, 0.54f, 0.26f);
             GLES30.GlUniform1f(_uFogDensity, 0.004f);
+        }
+        else if (Quality.Atmosphere == AtmospherePreset.KarhutlaSmoke)
+        {
+            GLES30.GlUniform3f(_uSunColor, 2.75f, 1.72f, 0.86f);
+            GLES30.GlUniform3f(_uSkyTop, 0.58f, 0.42f, 0.26f);
+            GLES30.GlUniform3f(_uGroundBounce, 0.22f, 0.15f, 0.09f);
+            GLES30.GlUniform3f(_uFogColor, 0.76f, 0.52f, 0.30f);
+            GLES30.GlUniform1f(_uFogDensity, 0.012f);
+        }
+        else if (Quality.Atmosphere == AtmospherePreset.SemiEnbCold)
+        {
+            GLES30.GlUniform3f(_uSunColor, 2.55f, 2.76f, 3.10f);
+            GLES30.GlUniform3f(_uSkyTop, 0.38f, 0.56f, 0.86f);
+            GLES30.GlUniform3f(_uGroundBounce, 0.13f, 0.18f, 0.22f);
+            GLES30.GlUniform3f(_uFogColor, 0.44f, 0.64f, 0.84f);
+            GLES30.GlUniform1f(_uFogDensity, 0.0038f);
         }
         else
         {
@@ -1586,6 +1754,8 @@ void main() {
             GLES30.GlDisable(GLES30.GlBlend);
             GLES30.GlUseProgram(_program);
         }
+
+        _allowOutlinePass = true;
 
         // 2. PKS Mill + Turbines + Weighbridge RAM + Mandor Post + Wooden Bridges
         float pksGround = PlantationWorld.TerrainHeight(PlantationWorld.PksX, PlantationWorld.PksZ);
@@ -1871,6 +2041,7 @@ void main() {
         }
 
         // 9. Soft Volumetric Billboards: PKS Boiler Steam + Tire Dust + Diesel Exhaust + Harvest Chaff (Mode 2)!
+        _allowOutlinePass = false;
         if (Quality.ParticlesEnabled)
         {
             float billboardYaw = MathF.Atan2(eyeX - lookX, eyeZ - lookZ);
@@ -2122,8 +2293,8 @@ void main() {
         var shaftMat = chassis.Child(0f, 0.50f, -1.08f, rz: v.WheelSpinRad * 2.8f, sx: 1f, sy: 1f, sz: 1.48f);
         DrawNamed(MeshCatalog.CanterDriveshaft, 0, _instStaging, shaftMat.Emit(_instStaging, 0), ref drawCalls, ref tris);
 
-        // Warm Halogen Headlight Beams during storm ("HUJAN_BADAI") or Turbo Solar Boost!
-        bool beamsOn = (_net?.EventKind == "HUJAN_BADAI") || (hasDriver && BoostTimer > 0.05f);
+        // Warm Halogen Headlight Beams during storm ("HUJAN_BADAI"), Karhutla Haze, or Turbo Solar Boost!
+        bool beamsOn = (_net?.EventKind == "HUJAN_BADAI") || (Quality.Atmosphere == AtmospherePreset.KarhutlaSmoke) || (hasDriver && BoostTimer > 0.05f);
         if (beamsOn && Stage == AppSceneStage.Gameplay)
         {
             int nb = 0;
@@ -2392,11 +2563,58 @@ void main() {
         }
     }
 
+    private void ConfigureAnimeOutlineUniforms()
+    {
+        switch (Quality.OutlineTier)
+        {
+            case AnimeOutlineTier.Bold:
+                GLES30.GlUniform1f(_uOutlineWidth, 0.0135f);
+                GLES30.GlUniform1f(_uOutlineStrength, 1.0f);
+                break;
+            case AnimeOutlineTier.Subtle:
+                GLES30.GlUniform1f(_uOutlineWidth, 0.0075f);
+                GLES30.GlUniform1f(_uOutlineStrength, 0.55f);
+                break;
+            default:
+                GLES30.GlUniform1f(_uOutlineWidth, 0.0f);
+                GLES30.GlUniform1f(_uOutlineStrength, 0.0f);
+                break;
+        }
+    }
+
+    private static bool AllowsSilhouetteOutline(string meshName) =>
+        meshName != MeshCatalog.PalmCrown &&
+        meshName != MeshCatalog.PalmSapling &&
+        meshName != MeshCatalog.TropicalFern &&
+        meshName != MeshCatalog.CutPalmFrond &&
+        meshName != MeshCatalog.TireTrackSegment &&
+        meshName != MeshCatalog.CanterHeadlightBeam &&
+        meshName != MeshCatalog.VfxPuffQuad &&
+        meshName != MeshCatalog.SteamPuff &&
+        meshName != MeshCatalog.CharFaceNeutral &&
+        meshName != MeshCatalog.CharFaceStrain &&
+        meshName != MeshCatalog.GarageShowroom &&
+        meshName != MeshCatalog.BackCape;
+
     private void DrawNamed(string meshName, int lod, float[] instBuf, int count, ref int drawCalls, ref int tris)
     {
         if (count <= 0 || !_gpuMeshes.TryGetValue(meshName, out var lods)) return;
         int idx = System.Math.Min(lod, lods.Length - 1);
-        DrawGpuHandle(lods[idx], instBuf, count, ref drawCalls, ref tris);
+        var handle = lods[idx];
+        DrawGpuHandle(handle, instBuf, count, ref drawCalls, ref tris);
+
+        // Zero-upload Inverted-Hull Geometric Anime Silhouette Pass (reuses already-bound VAO + _instanceVbo!)
+        if (_allowOutlinePass && Quality.OutlineTier != AnimeOutlineTier.Off && lod <= 1 && AllowsSilhouetteOutline(meshName))
+        {
+            int clamped = System.Math.Min(count, MaxInstancesPerBatch);
+            GLES30.GlEnable(0x0B44);   // GL_CULL_FACE
+            GLES30.GlCullFace(0x0404); // GL_FRONT -> renders extruded backfaces along vertex normal
+            GLES30.GlUniform1i(_uRenderMode, 3);
+            GLES30.GlDrawElementsInstanced(GLES30.GlTriangles, handle.IndexCount, GLES30.GlUnsignedShort, 0, clamped);
+            GLES30.GlUniform1i(_uRenderMode, 0);
+            GLES30.GlDisable(0x0B44);
+            drawCalls++;
+        }
     }
 
     private void DrawGpuHandle(GpuMeshHandle? handle, float[] instBuf, int count, ref int drawCalls, ref int tris)

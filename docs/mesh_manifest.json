@@ -67,22 +67,22 @@
     },
     {
       "name": "tbs_bunch",
-      "radius": 0.399,
+      "radius": 0.417,
       "lods": [
         {
           "lod": 0,
-          "verts": 838,
-          "tris": 1420
+          "verts": 1510,
+          "tris": 2548
         },
         {
           "lod": 1,
-          "verts": 358,
-          "tris": 576
+          "verts": 500,
+          "tris": 812
         },
         {
           "lod": 2,
-          "verts": 62,
-          "tris": 100
+          "verts": 118,
+          "tris": 194
         }
       ]
     },
@@ -134,18 +134,18 @@
       "lods": [
         {
           "lod": 0,
-          "verts": 4123,
-          "tris": 5924
+          "verts": 5864,
+          "tris": 8656
         },
         {
           "lod": 1,
-          "verts": 4123,
-          "tris": 5924
+          "verts": 5660,
+          "tris": 8368
         },
         {
           "lod": 2,
-          "verts": 2061,
-          "tris": 2608
+          "verts": 2597,
+          "tris": 3552
         }
       ]
     },
@@ -172,22 +172,22 @@
     },
     {
       "name": "truck_wheel",
-      "radius": 0.495,
+      "radius": 0.515,
       "lods": [
         {
           "lod": 0,
-          "verts": 284,
-          "tris": 440
+          "verts": 1206,
+          "tris": 1584
         },
         {
           "lod": 1,
-          "verts": 200,
-          "tris": 308
+          "verts": 330,
+          "tris": 540
         },
         {
           "lod": 2,
-          "verts": 130,
-          "tris": 198
+          "verts": 186,
+          "tris": 300
         }
       ]
     },
@@ -214,22 +214,22 @@
     },
     {
       "name": "truck_cargo_heap",
-      "radius": 2.295,
+      "radius": 2.336,
       "lods": [
         {
           "lod": 0,
-          "verts": 5795,
-          "tris": 9336
+          "verts": 8067,
+          "tris": 13112
         },
         {
           "lod": 1,
-          "verts": 672,
-          "tris": 1090
+          "verts": 1232,
+          "tris": 2030
         },
         {
           "lod": 2,
-          "verts": 409,
-          "tris": 660
+          "verts": 745,
+          "tris": 1224
         }
       ]
     },
@@ -239,39 +239,39 @@
       "lods": [
         {
           "lod": 0,
-          "verts": 1546,
-          "tris": 2520
+          "verts": 1966,
+          "tris": 3212
         },
         {
           "lod": 1,
-          "verts": 1242,
-          "tris": 2008
+          "verts": 1662,
+          "tris": 2700
         },
         {
           "lod": 2,
-          "verts": 1242,
-          "tris": 2008
+          "verts": 1354,
+          "tris": 2196
         }
       ]
     },
     {
       "name": "pks_factory",
-      "radius": 15.119,
+      "radius": 15.215,
       "lods": [
         {
           "lod": 0,
-          "verts": 434,
-          "tris": 636
+          "verts": 1105,
+          "tris": 1800
         },
         {
           "lod": 1,
-          "verts": 362,
-          "tris": 492
+          "verts": 1009,
+          "tris": 1608
         },
         {
           "lod": 2,
-          "verts": 314,
-          "tris": 396
+          "verts": 796,
+          "tris": 1248
         }
       ]
     },
@@ -319,22 +319,22 @@
     },
     {
       "name": "weighbridge_ram",
-      "radius": 6.41,
+      "radius": 6.402,
       "lods": [
         {
           "lod": 0,
-          "verts": 220,
-          "tris": 110
+          "verts": 702,
+          "tris": 892
         },
         {
           "lod": 1,
-          "verts": 220,
-          "tris": 110
+          "verts": 702,
+          "tris": 892
         },
         {
           "lod": 2,
-          "verts": 220,
-          "tris": 110
+          "verts": 510,
+          "tris": 796
         }
       ]
     },
@@ -386,8 +386,8 @@
       "lods": [
         {
           "lod": 0,
-          "verts": 1919,
-          "tris": 2464
+          "verts": 2463,
+          "tris": 3400
         },
         {
           "lod": 1,
@@ -424,22 +424,22 @@
     },
     {
       "name": "celeng_boar",
-      "radius": 0.904,
+      "radius": 0.922,
       "lods": [
         {
           "lod": 0,
-          "verts": 183,
-          "tris": 308
+          "verts": 529,
+          "tris": 744
         },
         {
           "lod": 1,
-          "verts": 163,
-          "tris": 268
+          "verts": 499,
+          "tris": 684
         },
         {
           "lod": 2,
-          "verts": 148,
-          "tris": 238
+          "verts": 257,
+          "tris": 420
         }
       ]
     },
@@ -781,22 +781,22 @@
     },
     {
       "name": "back_basket",
-      "radius": 0.387,
+      "radius": 0.398,
       "lods": [
         {
           "lod": 0,
-          "verts": 168,
-          "tris": 292
+          "verts": 224,
+          "tris": 386
         },
         {
           "lod": 1,
-          "verts": 144,
-          "tris": 244
+          "verts": 200,
+          "tris": 338
         },
         {
           "lod": 2,
-          "verts": 120,
-          "tris": 196
+          "verts": 176,
+          "tris": 290
         }
       ]
     },
@@ -932,18 +932,18 @@
       "lods": [
         {
           "lod": 0,
-          "verts": 636,
-          "tris": 1040
+          "verts": 907,
+          "tris": 1468
         },
         {
           "lod": 1,
-          "verts": 493,
-          "tris": 794
+          "verts": 764,
+          "tris": 1222
         },
         {
           "lod": 2,
-          "verts": 451,
-          "tris": 710
+          "verts": 536,
+          "tris": 856
         }
       ]
     },
@@ -1033,85 +1033,85 @@
     },
     {
       "name": "spbu_solar",
-      "radius": 6.687,
+      "radius": 6.899,
       "lods": [
         {
           "lod": 0,
-          "verts": 570,
-          "tris": 588
+          "verts": 1878,
+          "tris": 2944
         },
         {
           "lod": 1,
-          "verts": 570,
-          "tris": 588
+          "verts": 1854,
+          "tris": 2896
         },
         {
           "lod": 2,
-          "verts": 494,
-          "tris": 468
+          "verts": 1226,
+          "tris": 1856
         }
       ]
     },
     {
       "name": "warung_kopi",
-      "radius": 5.033,
+      "radius": 5.078,
       "lods": [
         {
           "lod": 0,
-          "verts": 462,
-          "tris": 448
+          "verts": 1176,
+          "tris": 1860
         },
         {
           "lod": 1,
-          "verts": 462,
-          "tris": 448
+          "verts": 1176,
+          "tris": 1860
         },
         {
           "lod": 2,
-          "verts": 462,
-          "tris": 448
+          "verts": 912,
+          "tris": 1412
         }
       ]
     },
     {
       "name": "gudang_pupuk",
-      "radius": 6.951,
+      "radius": 6.976,
       "lods": [
         {
           "lod": 0,
-          "verts": 402,
-          "tris": 540
+          "verts": 900,
+          "tris": 1352
         },
         {
           "lod": 1,
-          "verts": 402,
-          "tris": 540
+          "verts": 900,
+          "tris": 1352
         },
         {
           "lod": 2,
-          "verts": 402,
-          "tris": 540
+          "verts": 900,
+          "tris": 1352
         }
       ]
     },
     {
       "name": "offroad_arch",
-      "radius": 5.271,
+      "radius": 5.37,
       "lods": [
         {
           "lod": 0,
-          "verts": 448,
-          "tris": 716
+          "verts": 992,
+          "tris": 1656
         },
         {
           "lod": 1,
-          "verts": 448,
-          "tris": 716
+          "verts": 992,
+          "tris": 1656
         },
         {
           "lod": 2,
-          "verts": 448,
-          "tris": 716
+          "verts": 992,
+          "tris": 1656
         }
       ]
     },
@@ -1200,8 +1200,8 @@
       ]
     }
   ],
-  "total_lod0_tris": 41724,
-  "total_lod1_tris": 25870,
-  "total_lod2_tris": 18852,
-  "binary_bytes": 2739051
+  "total_lod0_tris": 60556,
+  "total_lod1_tris": 38722,
+  "total_lod2_tris": 26808,
+  "binary_bytes": 3820155
 }

@@ -146,6 +146,7 @@ public sealed class HudOverlayView : View
     public event Action? OnReturnLobbyRequested;
     public event Action? OnToggleVoiceMic;
     public event Action<int>? OnTargetFpsSelected;
+    public event Action? OnVisualSettingsChanged;
     public event Action? OnCustomChatInputRequested;
     public event Action? OnRenamePlayerRequested;
     public event Action? OnHarvestPressed;
@@ -1357,36 +1358,78 @@ public sealed class HudOverlayView : View
         }
         else if (SettingsTabIndex == 1)
         {
-            // Row 1: Real-Time Sun Shadow Map Quality
-            DrawSettingLabel(canvas, innerL, y, "BAYANGAN MATAHARI REAL-TIME", q.ShadowTier.ToString().ToUpperInvariant());
-            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+            float visRowH = Dp(36f), visStep = Dp(45f);
+
+            // Row 1: Atmospheric Graphics Mood (Semi-ENB Dingin / Fog Asap Karhutla / Tropik Cerah)
+            string moodLabel = q.Atmosphere switch
+            {
+                AtmospherePreset.SemiEnbCold => "ENB DINGIN",
+                AtmospherePreset.KarhutlaSmoke => "ASAP KARHUTLA",
+                _ => "TROPIK CERAH",
+            };
+            DrawSettingLabel(canvas, innerL, y, "MOOD GRAFIK & ENB", moodLabel);
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, visRowH,
+                ["ENB DINGIN", "ASAP KARHUTLA", "TROPIK CERAH"],
+                (int)q.Atmosphere,
+                idx =>
+                {
+                    _sfx?.Play("ui_click");
+                    q.Atmosphere = (AtmospherePreset)idx;
+                    OnVisualSettingsChanged?.Invoke();
+                    PostInvalidate();
+                });
+            y += visStep;
+
+            // Row 2: Anime Cel-Shaded Silhouette & Crease Ink Outlines
+            string outlineLabel = q.OutlineTier switch
+            {
+                AnimeOutlineTier.Off => "MATI",
+                AnimeOutlineTier.Subtle => "HALUS",
+                _ => "ANIME TEGAS",
+            };
+            DrawSettingLabel(canvas, innerL, y, "GARIS OUTLINE ANIME", outlineLabel);
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, visRowH,
+                ["MATI", "HALUS", "ANIME TEGAS"],
+                (int)q.OutlineTier,
+                idx =>
+                {
+                    _sfx?.Play("ui_click");
+                    q.OutlineTier = (AnimeOutlineTier)idx;
+                    OnVisualSettingsChanged?.Invoke();
+                    PostInvalidate();
+                });
+            y += visStep;
+
+            // Row 3: Real-Time Sun Shadow Map Quality
+            DrawSettingLabel(canvas, innerL, y, "BAYANGAN MATAHARI", q.ShadowTier.ToString().ToUpperInvariant());
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, visRowH,
                 ["MATI", "SEDANG", "TINGGI PCF"],
                 (int)q.ShadowTier,
-                idx => { _sfx?.Play("ui_click"); q.ShadowTier = (ShadowQualityTier)idx; PostInvalidate(); });
-            y += rowStep;
+                idx => { _sfx?.Play("ui_click"); q.ShadowTier = (ShadowQualityTier)idx; OnVisualSettingsChanged?.Invoke(); PostInvalidate(); });
+            y += visStep;
 
-            // Row 2: Volumetric Cumulus Clouds & Atmospheric Lighting
-            DrawSettingLabel(canvas, innerL, y, "AWAN VOLUMETRIK & KABUT", q.CloudsEnabled ? "AKTIF" : "MATI");
-            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
-                ["MATI", "AKTIF"],
-                q.CloudsEnabled ? 1 : 0,
-                idx => { _sfx?.Play("ui_click"); q.CloudsEnabled = idx == 1; PostInvalidate(); });
-            y += rowStep;
+            // Row 4: Volumetric Clouds, Tire Dust & Karhutla Smoke VFX
+            bool vfxFull = q.CloudsEnabled && q.ParticlesEnabled;
+            DrawSettingLabel(canvas, innerL, y, "AWAN & PARTIKEL ASAP", vfxFull ? "AKTIF" : "MATI");
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, visRowH,
+                ["MATI", "AKTIF PENUH"],
+                vfxFull ? 1 : 0,
+                idx =>
+                {
+                    _sfx?.Play("ui_click");
+                    q.CloudsEnabled = idx == 1;
+                    q.ParticlesEnabled = idx == 1;
+                    OnVisualSettingsChanged?.Invoke();
+                    PostInvalidate();
+                });
+            y += visStep;
 
-            // Row 3: Tire Dust, Diesel Smoke & Harvest VFX
-            DrawSettingLabel(canvas, innerL, y, "EFEK DEBU BAN & ASAP DIESEL", q.ParticlesEnabled ? "AKTIF" : "MATI");
-            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
-                ["MATI", "AKTIF"],
-                q.ParticlesEnabled ? 1 : 0,
-                idx => { _sfx?.Play("ui_click"); q.ParticlesEnabled = idx == 1; PostInvalidate(); });
-            y += rowStep;
-
-            // Row 4: Live FPS & Frame Telemetry Indicator
-            DrawSettingLabel(canvas, innerL, y, "INDIKATOR FPS DI LAYAR", q.ShowFpsHud ? "TAMPIL" : "SEMBUNYI");
-            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+            // Row 5: Live FPS & Frame Telemetry Indicator
+            DrawSettingLabel(canvas, innerL, y, "INDIKATOR FPS LAYAR", q.ShowFpsHud ? "TAMPIL" : "SEMBUNYI");
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, visRowH,
                 ["SEMBUNYI", "TAMPIL FPS"],
                 q.ShowFpsHud ? 1 : 0,
-                idx => { _sfx?.Play("ui_click"); q.ShowFpsHud = idx == 1; PostInvalidate(); });
+                idx => { _sfx?.Play("ui_click"); q.ShowFpsHud = idx == 1; OnVisualSettingsChanged?.Invoke(); PostInvalidate(); });
         }
         else
         {

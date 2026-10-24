@@ -162,7 +162,7 @@ jobs:
           retention-days: 30
 
   emulator-smoke:
-    name: Live Android 14 (API 34) 6-Stage Verification
+    name: Live Android 14 (API 34) 7-Stage Verification (ENB Dingin + Karhutla + Anime Outline)
     needs: build-apk
     runs-on: ubuntu-latest
     steps:
@@ -176,7 +176,7 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Boot Real Android 14 (API 34) Emulator & Verify All 6 v6.0.0 Stages
+      - name: Boot Real Android 14 (API 34) Emulator & Verify All 7 v6.0.0 Stages
         uses: reactivecircus/android-emulator-runner@v2
         env:
           NYAWIT_APK_PATH: dist-apk/NYAWIT-LIVE-v6-x86_64.apk
@@ -223,7 +223,7 @@ jobs:
         with:
           tag_name: v6.0.0-draft
           target_commitish: ${{ github.sha }}
-          name: NYAWIT LIVE 3D v6.0.0 — Verified RC Draft (3 ABIs + Android 14 6-Stage Smoke)
+          name: NYAWIT LIVE 3D v6.0.0 — Verified RC Draft (3 ABIs + Anime Outline + ENB/Karhutla)
           draft: true
           prerelease: true
           make_latest: false
@@ -233,4 +233,5 @@ jobs:
             dist-apk/NYAWIT-LIVE-v6-*.apk
             dist-apk/SHA256SUMS-v6.0.0.txt
             dist-apk/android_v6_*_hd.png
+            docs/screenshots/v6_anime_assets_showcase.png
           fail_on_unmatched_files: true
