@@ -39,33 +39,52 @@ public sealed class SafeGles3ConfigChooser : Java.Lang.Object, GLSurfaceView.IEG
     public SafeGles3ConfigChooser() { }
     public SafeGles3ConfigChooser(IntPtr handle, JniHandleOwnership transfer) : base(handle, transfer) { }
 
+    public static bool IsSoftwareEmulator =>
+        (Build.Hardware?.Contains("ranchu", StringComparison.OrdinalIgnoreCase) ?? false) ||
+        (Build.Hardware?.Contains("goldfish", StringComparison.OrdinalIgnoreCase) ?? false) ||
+        (Build.Fingerprint?.Contains("generic", StringComparison.OrdinalIgnoreCase) ?? false);
+
     public EGLConfig ChooseConfig(IEGL10? egl, EGLDisplay? display)
     {
         if (egl == null || display == null)
             throw new InvalidOperationException("EGL display unavailable");
 
-        int[][] candidates =
-        [
-            [
-                IEGL10.EglRedSize, 8, IEGL10.EglGreenSize, 8, IEGL10.EglBlueSize, 8,
-                IEGL10.EglDepthSize, 16,
-                IEGL10.EglSampleBuffers, 1, IEGL10.EglSamples, 4,
-                EglRenderableType, EglOpenGlEs3Bit,
-                IEGL10.EglNone
-            ],
-            [
-                IEGL10.EglRedSize, 8, IEGL10.EglGreenSize, 8, IEGL10.EglBlueSize, 8,
-                IEGL10.EglDepthSize, 16,
-                EglRenderableType, EglOpenGlEs3Bit,
-                IEGL10.EglNone
-            ],
-            [
-                IEGL10.EglRedSize, 5, IEGL10.EglGreenSize, 6, IEGL10.EglBlueSize, 5,
-                IEGL10.EglDepthSize, 16,
-                EglRenderableType, EglOpenGlEs2Bit,
-                IEGL10.EglNone
-            ],
-        ];
+        int[][] candidates = IsSoftwareEmulator
+            ? [
+                [
+                    IEGL10.EglRedSize, 8, IEGL10.EglGreenSize, 8, IEGL10.EglBlueSize, 8,
+                    IEGL10.EglDepthSize, 16,
+                    EglRenderableType, EglOpenGlEs3Bit,
+                    IEGL10.EglNone
+                ],
+                [
+                    IEGL10.EglRedSize, 5, IEGL10.EglGreenSize, 6, IEGL10.EglBlueSize, 5,
+                    IEGL10.EglDepthSize, 16,
+                    EglRenderableType, EglOpenGlEs2Bit,
+                    IEGL10.EglNone
+                ],
+            ]
+            : [
+                [
+                    IEGL10.EglRedSize, 8, IEGL10.EglGreenSize, 8, IEGL10.EglBlueSize, 8,
+                    IEGL10.EglDepthSize, 16,
+                    IEGL10.EglSampleBuffers, 1, IEGL10.EglSamples, 4,
+                    EglRenderableType, EglOpenGlEs3Bit,
+                    IEGL10.EglNone
+                ],
+                [
+                    IEGL10.EglRedSize, 8, IEGL10.EglGreenSize, 8, IEGL10.EglBlueSize, 8,
+                    IEGL10.EglDepthSize, 16,
+                    EglRenderableType, EglOpenGlEs3Bit,
+                    IEGL10.EglNone
+                ],
+                [
+                    IEGL10.EglRedSize, 5, IEGL10.EglGreenSize, 6, IEGL10.EglBlueSize, 5,
+                    IEGL10.EglDepthSize, 16,
+                    EglRenderableType, EglOpenGlEs2Bit,
+                    IEGL10.EglNone
+                ],
+            ];
 
         var configs = new EGLConfig[4];
         int[] num = new int[1];
@@ -571,8 +590,10 @@ public class MainActivity : Activity
     private void ApplyStageByName(string stage)
     {
         if (string.IsNullOrWhiteSpace(stage) || _renderer == null || _hud == null || _net == null) return;
-        // Lock native 1.00x Ultra (1024x1024 PCF Sun Shadows & Volumetric Clouds, zero EGL surface resize thrash!)
+        // Lock native 1.00x Ultra (1024x1024 Sun Shadows & Volumetric Clouds, zero EGL surface resize thrash!)
         _renderer.Quality.SetManualPreset(GraphicsPreset.Ultra, disableAuto: true);
+        if (SafeGles3ConfigChooser.IsSoftwareEmulator)
+            _renderer.Quality.ShadowTier = ShadowQualityTier.Medium;
         if (_glView != null) _glView.RenderMode = Rendermode.Continuously;
 
         switch (stage.Trim().ToLowerInvariant())

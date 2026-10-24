@@ -155,13 +155,13 @@ void main() {
         vec2 drift = vec2(uTime * 0.022, uTime * 0.011);
         float dens = fbmCloud(uvC * 0.95 + drift);
         float detail = fbmCloud(uvC * 2.65 - drift * 1.4);
-        float cloud = smoothstep(0.42, 0.80, dens * 0.80 + detail * 0.30);
+        float cloud = smoothstep(0.46, 0.63, dens * 0.78 + detail * 0.26);
         // Directional derivative toward sun for realistic self-shadowed cloud bellies!
         float densSun = fbmCloud((uvC + L.xz * 0.14) * 0.95 + drift);
-        float lit = clamp(0.48 + (dens - densSun) * 3.8, 0.12, 1.12);
+        float lit = clamp(0.45 + (dens - densSun) * 4.2, 0.10, 1.12);
         float sd = max(dot(d, L), 0.0);
-        vec3 cloudDark = uSkyHorizon * 0.36;
-        vec3 cloudBright = mix(uSkyHorizon * 1.65, vec3(0.92, 0.95, 0.98), 0.52) + uSunColor * pow(sd, 5.0) * 0.28;
+        vec3 cloudDark = uSkyHorizon * 0.34;
+        vec3 cloudBright = mix(uSkyHorizon * 1.72, vec3(0.92, 0.95, 0.98), 0.56) + uSunColor * pow(sd, 5.0) * 0.28;
         vec3 cCol = mix(cloudDark, cloudBright, lit);
         float horizonFade = smoothstep(0.012, 0.20, d.y);
         col = mix(col, cCol, cloud * 0.94 * horizonFade);
