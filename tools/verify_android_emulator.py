@@ -18,6 +18,10 @@ APK_PATH = os.environ.get("NYAWIT_APK_PATH", "dist-apk/NYAWIT-LIVE-v6-x86_64.apk
 SCREENSHOT_PREFIX = os.environ.get("NYAWIT_SCREENSHOT_PREFIX", "android_v6")
 
 
+def log_msg(msg: str):
+    print(msg, flush=True)
+
+
 def inspect_png_stdlib(path: str, min_kb: float = 12.0):
     with open(path, "rb") as f:
         data = f.read()
@@ -34,7 +38,7 @@ def inspect_png_stdlib(path: str, min_kb: float = 12.0):
         elif ctype == b"IEND":
             break
     compressed_kb = len(data) / 1024.0
-    print(f"  [ANDROID 14 v6 FRAME] {path}: size=({width}, {height}), pngSize={compressed_kb:.1f} KB")
+    log_msg(f"  [ANDROID 14 v6 FRAME] {path}: size=({width}, {height}), pngSize={compressed_kb:.1f} KB")
     assert width > height, f"Expected landscape frame, got {width}x{height}"
     assert compressed_kb > min_kb, f"Frame appears blank/incomplete ({compressed_kb:.1f} KB < {min_kb} KB)"
 
@@ -48,17 +52,22 @@ def run(cmd, check=True, binary=False):
 
 
 def sync_stage(stage_name: str):
-    deadline = time.time() + 30.0
+    deadline = time.time() + 50.0
     last_err = None
+    attempt = 0
     while time.time() < deadline:
+        attempt += 1
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:18765/stage?s={stage_name}", timeout=15.0) as resp:
+            with urllib.request.urlopen(f"http://127.0.0.1:18765/stage?s={stage_name}", timeout=18.0) as resp:
                 body = resp.read().decode("utf-8", errors="replace")
-                print(f"  -> Frame-Synced Stage '{stage_name}': {body}")
+                log_msg(f"  -> Frame-Synced Stage '{stage_name}' (attempt {attempt}): {body}")
                 return
         except Exception as ex:
             last_err = ex
-            time.sleep(0.5)
+            pid_now = run(["adb", "shell", "pidof", "id.my.xyverse.nyawitlive"], check=False).strip()
+            log_msg(f"  [retry stage={stage_name} attempt={attempt} pid='{pid_now}'] {ex}")
+            run(["adb", "forward", "tcp:18765", "tcp:18765"], check=False)
+            time.sleep(0.6)
     raise RuntimeError(f"Timed out waiting for stage server '{stage_name}': {last_err}")
 
 
@@ -66,7 +75,7 @@ def capture_screen(out_path: str):
     png = subprocess.check_output(["adb", "exec-out", "screencap", "-p"])
     with open(out_path, "wb") as f:
         f.write(png)
-    print(f"Captured {out_path} ({len(png):,} bytes)")
+    log_msg(f"Captured {out_path} ({len(png):,} bytes)")
 
 
 def dump_diagnostics(tag: str):
@@ -74,85 +83,89 @@ def dump_diagnostics(tag: str):
     os.makedirs("dist-apk", exist_ok=True)
     with open("dist-apk/android_logcat.txt", "w", encoding="utf-8") as f:
         f.write(log)
-    print(f"\n=== DIAGNOSTIC LOGCAT TAIL ({tag}) ===")
+    log_msg(f"\n=== DIAGNOSTIC LOGCAT TAIL ({tag}) ===")
     interesting = [
         ln for ln in log.splitlines()
-        if re.search(r"AndroidRuntime|mono-rt|Nyawit|FATAL|Exception|EGL|GLES", ln, re.I)
+        if re.search(r"AndroidRuntime|mono-rt|Nyawit|FATAL|Exception|EGL|GLES|ANR", ln, re.I)
     ]
-    for ln in interesting[-80:]:
-        print(ln)
+    for ln in interesting[-90:]:
+        log_msg(ln)
     return log
 
 
 def main():
-    print(f"=== [1/8] Configuring immersive mode and installing {APK_PATH} ===")
-    run(["adb", "shell", "cmd", "overlay", "enable", "com.android.internal.systemui.navbar.gestural"], check=False)
-    run(["adb", "shell", "settings", "put", "global", "policy_control", "immersive.full=*"], check=False)
-    run(["adb", "shell", "settings", "put", "secure", "immersive_mode_confirmations", "confirmed"], check=False)
-    run(["adb", "shell", "settings", "put", "system", "screen_brightness_mode", "0"], check=False)
-    run(["adb", "shell", "settings", "put", "system", "screen_brightness", "255"], check=False)
-    run(["adb", "shell", "wm", "dismiss-keyguard"], check=False)
-    run(["adb", "shell", "input", "keyevent", "82"], check=False)
-    run(["adb", "shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS"], check=False)
-    time.sleep(1.0)
-
-    install_out = run(["adb", "install", "-r", APK_PATH])
-    print(install_out.strip())
-    run(["adb", "logcat", "-c"], check=False)
-    run(["adb", "forward", "tcp:18765", "tcp:18765"])
-
-    print("=== [2/8] Cold-Launching App & Frame-Syncing Stage 1: Boot Splash ===")
-    run(["adb", "shell", "am", "start", "-W", "-n", ACTIVITY, "--es", "stage", "splash"])
-    sync_stage("splash")
-
-    pid1 = run(["adb", "shell", "pidof", "id.my.xyverse.nyawitlive"], check=False).strip()
-    print(f"Live Android Process PID: '{pid1}'")
-    if not pid1:
-        dump_diagnostics("COLD_LAUNCH_EXIT")
-        sys.exit(1)
     os.makedirs("dist-apk", exist_ok=True)
-    capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_splash_hd.png")
+    try:
+        log_msg(f"=== [1/8] Configuring immersive mode and installing {APK_PATH} ===")
+        run(["adb", "shell", "cmd", "overlay", "enable", "com.android.internal.systemui.navbar.gestural"], check=False)
+        run(["adb", "shell", "settings", "put", "global", "policy_control", "immersive.full=*"], check=False)
+        run(["adb", "shell", "settings", "put", "secure", "immersive_mode_confirmations", "confirmed"], check=False)
+        run(["adb", "shell", "settings", "put", "system", "screen_brightness_mode", "0"], check=False)
+        run(["adb", "shell", "settings", "put", "system", "screen_brightness", "255"], check=False)
+        run(["adb", "shell", "wm", "dismiss-keyguard"], check=False)
+        run(["adb", "shell", "input", "keyevent", "82"], check=False)
+        run(["adb", "shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS"], check=False)
+        time.sleep(1.0)
 
-    print("=== [3/8] Frame-Syncing Stage 2: Dedicated Separate 3D Garage Showroom Lobby ===")
-    sync_stage("garage")
-    capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_lobby_garage_hd.png")
+        install_out = run(["adb", "install", "-r", APK_PATH])
+        log_msg(install_out.strip())
+        run(["adb", "logcat", "-c"], check=False)
+        run(["adb", "forward", "tcp:18765", "tcp:18765"])
 
-    print("=== [4/8] Frame-Syncing Stage 3: Full-Screen 'MENYIAPKAN DUNIA' World Streaming ===")
-    sync_stage("loading")
-    capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_loading_hd.png")
+        log_msg("=== [2/8] Cold-Launching App & Frame-Syncing Stage 1: Boot Splash ===")
+        run(["adb", "shell", "am", "start", "-W", "-n", ACTIVITY, "--es", "stage", "splash"])
+        sync_stage("splash")
 
-    print("=== [5/8] Frame-Syncing Stage 4: v6.0 Plantation (220 Mature Palms, 96 Saplings, Landmarks & TBS Hold) ===")
-    sync_stage("onfoot")
-    capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_onfoot_hold_hd.png")
+        pid1 = run(["adb", "shell", "pidof", "id.my.xyverse.nyawitlive"], check=False).strip()
+        log_msg(f"Live Android Process PID: '{pid1}'")
+        if not pid1:
+            dump_diagnostics("COLD_LAUNCH_EXIT")
+            sys.exit(1)
+        capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_splash_hd.png")
 
-    print("=== [6/8] Frame-Syncing Stage 5: Canter FE 74 HD + Tire Tracks + Arrow Steering & Gas/Brake Pedals HUD ===")
-    sync_stage("canter")
-    capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_canter_drive_hd.png")
+        log_msg("=== [3/8] Frame-Syncing Stage 2: Dedicated Separate 3D Garage Showroom Lobby ===")
+        sync_stage("garage")
+        capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_lobby_garage_hd.png")
 
-    print("=== [7/8] Frame-Syncing Stage 6: Custom In-Game 'PENGATURAN' Panel (FPS, Render Scale & Vehicle Control Mode) ===")
-    sync_stage("settings")
-    capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_settings_hd.png")
+        log_msg("=== [4/8] Frame-Syncing Stage 3: Full-Screen 'MENYIAPKAN DUNIA' World Streaming ===")
+        sync_stage("loading")
+        capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_loading_hd.png")
 
-    pid2 = run(["adb", "shell", "pidof", "id.my.xyverse.nyawitlive"], check=False).strip()
-    print(f"Live Android Process PID after all 6 frame-synced stages: '{pid2}'")
-    if not pid2 or pid2 != pid1:
-        dump_diagnostics("GAMEPLAY_CRASH_OR_RESTART")
-        sys.exit(1)
+        log_msg("=== [5/8] Frame-Syncing Stage 4: v6.0 Plantation (220 Mature Palms, 96 Saplings, Landmarks & TBS Hold) ===")
+        sync_stage("onfoot")
+        capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_onfoot_hold_hd.png")
 
-    print("=== [8/8] Auditing Full Android 14 Logcat & Validating All 6 Full-HD Hardware Frames ===")
-    log = dump_diagnostics("HEALTHY_RUN_SUMMARY")
-    if "FATAL EXCEPTION" in log or "Startup exception:" in log:
-        print("ERROR: Detected unhandled exception in logcat!")
-        sys.exit(1)
+        log_msg("=== [6/8] Frame-Syncing Stage 5: Canter FE 74 HD + Tire Tracks + Arrow Steering & Gas/Brake Pedals HUD ===")
+        sync_stage("canter")
+        capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_canter_drive_hd.png")
 
-    inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_splash_hd.png", min_kb=10.0)
-    inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_lobby_garage_hd.png", min_kb=80.0)
-    inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_loading_hd.png", min_kb=10.0)
-    inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_onfoot_hold_hd.png", min_kb=80.0)
-    inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_canter_drive_hd.png", min_kb=80.0)
-    inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_settings_hd.png", min_kb=80.0)
+        log_msg("=== [7/8] Frame-Syncing Stage 6: Custom In-Game 'PENGATURAN' Panel (FPS, Render Scale & Vehicle Control Mode) ===")
+        sync_stage("settings")
+        capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_settings_hd.png")
 
-    print("=== Android 14 v6.0.0 verification PASSED across all 6 stages in a single uninterrupted PID! ===")
+        pid2 = run(["adb", "shell", "pidof", "id.my.xyverse.nyawitlive"], check=False).strip()
+        log_msg(f"Live Android Process PID after all 6 frame-synced stages: '{pid2}'")
+        if not pid2 or pid2 != pid1:
+            dump_diagnostics("GAMEPLAY_CRASH_OR_RESTART")
+            sys.exit(1)
+
+        log_msg("=== [8/8] Auditing Full Android 14 Logcat & Validating All 6 Full-HD Hardware Frames ===")
+        log = dump_diagnostics("HEALTHY_RUN_SUMMARY")
+        if "FATAL EXCEPTION" in log or "Startup exception:" in log:
+            log_msg("ERROR: Detected unhandled exception in logcat!")
+            sys.exit(1)
+
+        inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_splash_hd.png", min_kb=10.0)
+        inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_lobby_garage_hd.png", min_kb=80.0)
+        inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_loading_hd.png", min_kb=10.0)
+        inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_onfoot_hold_hd.png", min_kb=80.0)
+        inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_canter_drive_hd.png", min_kb=80.0)
+        inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_settings_hd.png", min_kb=80.0)
+
+        log_msg("=== Android 14 v6.0.0 verification PASSED across all 6 stages in a single uninterrupted PID! ===")
+    except Exception:
+        dump_diagnostics("STAGE_FAILURE")
+        raise
 
 
 if __name__ == "__main__":

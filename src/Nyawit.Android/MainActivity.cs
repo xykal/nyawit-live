@@ -478,59 +478,72 @@ public class MainActivity : Activity
             {
                 while (_stageControlServer != null)
                 {
-                    TcpClient? client = null;
                     try
                     {
-                        client = await _stageControlServer.AcceptTcpClientAsync();
-                        using (client)
-                        using (var stream = client.GetStream())
-                        using (var reader = new StreamReader(stream, Encoding.UTF8, false, 1024, leaveOpen: true))
-                        {
-                            string reqLine = await reader.ReadLineAsync() ?? "";
-                            string stage = "";
-                            int qIdx = reqLine.IndexOf("?s=", StringComparison.Ordinal);
-                            if (qIdx >= 0)
-                            {
-                                string rest = reqLine[(qIdx + 3)..];
-                                int sp = rest.IndexOfAny(new[] { ' ', '&' });
-                                stage = (sp >= 0 ? rest[..sp] : rest).Trim();
-                            }
-
-                            if (!string.IsNullOrEmpty(stage))
-                            {
-                                var tcs = new TaskCompletionSource<bool>();
-                                RunOnUiThread(() =>
-                                {
-                                    try { ApplyStageByName(stage); }
-                                    finally { tcs.TrySetResult(true); }
-                                });
-                                await tcs.Task;
-
-                                int targetFrame = (_renderer?.PresentedFrameCount ?? 0) + 8;
-                                var sw = System.Diagnostics.Stopwatch.StartNew();
-                                while ((_renderer?.PresentedFrameCount ?? 0) < targetFrame && sw.ElapsedMilliseconds < 6000)
-                                {
-                                    _hud?.PostInvalidate();
-                                    await Task.Delay(60);
-                                }
-                                _hud?.PostInvalidate();
-                                await Task.Delay(180);
-                            }
-
-                            string body = $"{{\"ok\":true,\"stage\":\"{stage}\",\"frames\":{_renderer?.PresentedFrameCount ?? 0}}}";
-                            byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
-                            string hdr = $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {bodyBytes.Length}\r\nConnection: close\r\n\r\n";
-                            byte[] hdrBytes = Encoding.ASCII.GetBytes(hdr);
-                            await stream.WriteAsync(hdrBytes);
-                            await stream.WriteAsync(bodyBytes);
-                            await stream.FlushAsync();
-                        }
+                        var client = await _stageControlServer.AcceptTcpClientAsync();
+                        _ = Task.Run(() => HandleStageControlClientAsync(client));
                     }
                     catch { await Task.Delay(50); }
                 }
             });
         }
         catch { }
+    }
+
+    private async Task HandleStageControlClientAsync(TcpClient client)
+    {
+        using (client)
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+                using var stream = client.GetStream();
+                byte[] reqBuf = new byte[1024];
+                int n = await stream.ReadAsync(reqBuf.AsMemory(0, reqBuf.Length), cts.Token);
+                string reqText = n > 0 ? Encoding.UTF8.GetString(reqBuf, 0, n) : "";
+                int nl = reqText.IndexOfAny(['\r', '\n']);
+                string reqLine = nl >= 0 ? reqText[..nl] : reqText;
+
+                string stage = "";
+                int qIdx = reqLine.IndexOf("?s=", StringComparison.Ordinal);
+                if (qIdx >= 0)
+                {
+                    string rest = reqLine[(qIdx + 3)..];
+                    int sp = rest.IndexOfAny([' ', '&']);
+                    stage = (sp >= 0 ? rest[..sp] : rest).Trim();
+                }
+
+                if (!string.IsNullOrEmpty(stage))
+                {
+                    var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    RunOnUiThread(() =>
+                    {
+                        try { ApplyStageByName(stage); }
+                        finally { tcs.TrySetResult(true); }
+                    });
+                    await tcs.Task.WaitAsync(TimeSpan.FromSeconds(8));
+
+                    int targetFrame = (_renderer?.PresentedFrameCount ?? 0) + 6;
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    while ((_renderer?.PresentedFrameCount ?? 0) < targetFrame && sw.ElapsedMilliseconds < 4500)
+                    {
+                        _hud?.PostInvalidate();
+                        await Task.Delay(60);
+                    }
+                    _hud?.PostInvalidate();
+                    await Task.Delay(160);
+                }
+
+                string body = $"{{\"ok\":true,\"stage\":\"{stage}\",\"frames\":{_renderer?.PresentedFrameCount ?? 0}}}";
+                byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
+                string hdr = $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {bodyBytes.Length}\r\nConnection: close\r\n\r\n";
+                byte[] hdrBytes = Encoding.ASCII.GetBytes(hdr);
+                await stream.WriteAsync(hdrBytes, cts.Token);
+                await stream.WriteAsync(bodyBytes, cts.Token);
+                await stream.FlushAsync(cts.Token);
+            }
+            catch { }
+        }
     }
 
     protected override void OnNewIntent(Intent? intent)
@@ -598,7 +611,9 @@ public class MainActivity : Activity
         if (_renderer == null || _hud == null || _net == null) return;
         if (keyCode == Keycode.P)
         {
-            _hud.SettingsTabIndex = 0;
+            _renderer.JoyX = 0f;
+            _renderer.JoyY = 0f;
+            _hud.SettingsTabIndex = 2;
             _hud.OpenModal(ActiveModalOverlay.Settings);
             _hud.PostInvalidate();
             return;
