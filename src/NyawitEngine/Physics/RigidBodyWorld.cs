@@ -147,7 +147,7 @@ public sealed class RigidBodyWorld
     private const float WorldHalfSpan = 120f;
     private const float CellSize = (WorldHalfSpan * 2f) / GridDim; // 10.0m cells
 
-    private readonly List<StaticCollider> _colliders = new(320);
+    private readonly List<StaticCollider> _colliders = new(480);
     private readonly List<int>[] _cells = new List<int>[GridDim * GridDim];
 
     public CharacterMotorBody Player { get; } = new();
@@ -167,10 +167,14 @@ public sealed class RigidBodyWorld
 
     public IReadOnlyList<StaticCollider> StaticColliders => _colliders;
 
-    public RigidBodyWorld(IReadOnlyList<PalmTreeNode> trees, IReadOnlyList<StaticPropInstance> rocks)
+    public RigidBodyWorld(
+        IReadOnlyList<PalmTreeNode> trees,
+        IReadOnlyList<StaticPropInstance> rocks,
+        IReadOnlyList<StaticPropInstance>? saplings = null)
     {
         for (int i = 0; i < _cells.Length; i++) _cells[i] = new List<int>(8);
-        BuildStaticWorldColliders(trees, rocks);
+        var saplingList = saplings ?? PlantationWorld.GenerateJuvenileSaplings(trees);
+        BuildStaticWorldColliders(trees, rocks, saplingList);
         ResetPosesToTerrain();
     }
 
@@ -192,9 +196,12 @@ public sealed class RigidBodyWorld
                 _cells[cz * GridDim + cx].Add(idx);
     }
 
-    private void BuildStaticWorldColliders(IReadOnlyList<PalmTreeNode> trees, IReadOnlyList<StaticPropInstance> rocks)
+    private void BuildStaticWorldColliders(
+        IReadOnlyList<PalmTreeNode> trees,
+        IReadOnlyList<StaticPropInstance> rocks,
+        IReadOnlyList<StaticPropInstance> saplings)
     {
-        // 1. All 180 Oil Palm Trunks — solid cylindrical trunks (ZERO nembus!)
+        // 1. All 220 Mature Oil Palm Trunks — solid cylindrical trunks (ZERO nembus!)
         for (int i = 0; i < trees.Count; i++)
         {
             var t = trees[i];
@@ -209,7 +216,22 @@ public sealed class RigidBodyWorld
             });
         }
 
-        // 2. All 42 Granite/Laterite Plantation Boulders — solid colliders!
+        // 1b. All 96 Juvenile Palm Saplings ("Bibit Sawit TBM") — compact trunk colliders
+        for (int i = 0; i < saplings.Count; i++)
+        {
+            var s = saplings[i];
+            AddCollider(new StaticCollider
+            {
+                Kind = ColliderKind.Cylinder,
+                X = s.X,
+                Z = s.Z,
+                Radius = 0.28f * s.Scale,
+                TopY = s.Y + 1.35f * s.Scale,
+                Tag = 1,
+            });
+        }
+
+        // 2. All Granite/Laterite Plantation Boulders — solid colliders!
         for (int i = 0; i < rocks.Count; i++)
         {
             var r = rocks[i];
@@ -258,6 +280,16 @@ public sealed class RigidBodyWorld
         AddCollider(new StaticCollider { Kind = ColliderKind.Box, X = PlantationWorld.MandorX, Z = PlantationWorld.MandorZ - 0.15f, HalfX = 1.85f, HalfZ = 1.95f, TopY = 4.2f, Tag = 3 });
         AddCollider(new StaticCollider { Kind = ColliderKind.Cylinder, X = PlantationWorld.MandorX - 2.25f, Z = PlantationWorld.MandorZ + 0.8f, Radius = 0.36f, TopY = 1.2f, Tag = 4 });
         AddCollider(new StaticCollider { Kind = ColliderKind.Cylinder, X = PlantationWorld.MandorX - 2.25f, Z = PlantationWorld.MandorZ - 0.2f, Radius = 0.36f, TopY = 1.2f, Tag = 4 });
+
+        // 6. v6.0 Estate Landmarks: SPBU Solar Pump Island, Warung Kopi, Gudang Pupuk & Drive-Through Offroad Arches!
+        AddCollider(new StaticCollider { Kind = ColliderKind.Box, X = PlantationWorld.SpbuX, Z = PlantationWorld.SpbuZ, HalfX = 1.95f, HalfZ = 2.85f, TopY = 4.5f, Tag = 3 });
+        AddCollider(new StaticCollider { Kind = ColliderKind.Box, X = PlantationWorld.WarungX, Z = PlantationWorld.WarungZ, HalfX = 2.35f, HalfZ = 2.75f, TopY = 3.3f, Tag = 3 });
+        AddCollider(new StaticCollider { Kind = ColliderKind.Box, X = PlantationWorld.GudangX, Z = PlantationWorld.GudangZ, HalfX = 3.55f, HalfZ = 4.10f, TopY = 5.3f, Tag = 3 });
+
+        AddCollider(new StaticCollider { Kind = ColliderKind.Cylinder, X = PlantationWorld.ArchNorthX - 3.12f, Z = PlantationWorld.ArchNorthZ, Radius = 0.42f, TopY = 4.3f, Tag = 4 });
+        AddCollider(new StaticCollider { Kind = ColliderKind.Cylinder, X = PlantationWorld.ArchNorthX + 3.12f, Z = PlantationWorld.ArchNorthZ, Radius = 0.42f, TopY = 4.3f, Tag = 4 });
+        AddCollider(new StaticCollider { Kind = ColliderKind.Cylinder, X = PlantationWorld.ArchBridgeX - 3.12f, Z = PlantationWorld.ArchBridgeZ, Radius = 0.42f, TopY = 4.3f, Tag = 4 });
+        AddCollider(new StaticCollider { Kind = ColliderKind.Cylinder, X = PlantationWorld.ArchBridgeX + 3.12f, Z = PlantationWorld.ArchBridgeZ, Radius = 0.42f, TopY = 4.3f, Tag = 4 });
     }
 
     public static float SurfaceHeightWithStructures(float x, float z)

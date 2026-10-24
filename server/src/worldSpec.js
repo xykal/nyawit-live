@@ -7,9 +7,24 @@ export const WORLD_HALF = 108.0;
 export const PKS_POS = { x: 0.0, z: -26.0 };
 export const RAM_POS = { x: 0.0, z: -14.5 };      // Drive-through Jembatan Timbang PKS sell zone!
 export const MANDOR_POS = { x: -12.5, z: -11.0 };
+export const SPBU_POS = { x: 21.0, z: -9.5 };
+export const WARUNG_POS = { x: -12.5, z: 3.5 };
+export const GUDANG_POS = { x: -20.5, z: -21.5 };
+export const ARCH_NORTH_POS = { x: 0.0, z: 5.5 };
+export const ARCH_BRIDGE_POS = { x: 28.0, z: -39.5 };
 export const SPAWN_CENTER = { x: 0.0, z: 3.0 };
 export const CANAL_Z = -48.0;
 export const BRIDGE_XS = [-28.0, 28.0];
+export const MATURE_PALM_COUNT = 220;
+
+export function isLandmarkPad(x, z) {
+  if (Math.abs(x - SPBU_POS.x) < 6.5 && Math.abs(z - SPBU_POS.z) < 6.8) return true;
+  if (Math.abs(x - WARUNG_POS.x) < 5.2 && Math.abs(z - WARUNG_POS.z) < 5.5) return true;
+  if (Math.abs(x - GUDANG_POS.x) < 6.2 && Math.abs(z - GUDANG_POS.z) < 6.5) return true;
+  if (Math.abs(x - ARCH_NORTH_POS.x) < 5.2 && Math.abs(z - ARCH_NORTH_POS.z) < 3.5) return true;
+  if (Math.abs(x - ARCH_BRIDGE_POS.x) < 5.2 && Math.abs(z - ARCH_BRIDGE_POS.z) < 3.5) return true;
+  return false;
+}
 
 export function mulberry32(seed) {
   let a = seed >>> 0;
@@ -65,9 +80,9 @@ export function terrainHeight(x, z) {
 export function generatePlantationTrees() {
   const rng = mulberry32(WORLD_SEED);
   const trees = [];
-  // 180 trees on realistic estate grid with organic jitter avoiding roads, canal & PKS yard
-  for (let gx = -94; gx <= 94 && trees.length < 180; gx += 11.5) {
-    for (let gz = -92; gz <= 94 && trees.length < 180; gz += 11.5) {
+  // 220 mature trees on expanded estate grid avoiding roads, canal, PKS yard & estate landmarks
+  for (let gx = -98; gx <= 98 && trees.length < MATURE_PALM_COUNT; gx += 10.8) {
+    for (let gz = -98; gz <= 98 && trees.length < MATURE_PALM_COUNT; gz += 10.8) {
       const x = +(gx + (rng() - 0.5) * 3.8).toFixed(2);
       const z = +(gz + (rng() - 0.5) * 3.8).toFixed(2);
       const rot = +(rng() * Math.PI * 2.0).toFixed(3);
@@ -75,6 +90,7 @@ export function generatePlantationTrees() {
       if (Math.hypot(x, z + 15.0) < 22.0) continue;           // Clear PKS & RAM yard
       if (Math.abs(z - CANAL_Z) < 6.4) continue;              // Clear canal banks
       if (roadFactor(x, z) > 0.35) continue;                  // Clear haul roads
+      if (isLandmarkPad(x, z)) continue;                      // Clear v6 estate landmarks
       const y = +terrainHeight(x, z).toFixed(2);
       const isNorthSultanZone = z > 42.0;
       trees.push({

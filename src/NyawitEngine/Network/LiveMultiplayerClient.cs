@@ -197,13 +197,19 @@ public sealed class LiveMultiplayerSession : IDisposable
             var fresh = new List<RoomDescriptor>();
             foreach (var r in arr.EnumerateArray())
             {
+                string lbl = r.TryGetProperty("label", out var lEl) ? (lEl.GetString() ?? "")
+                           : (r.TryGetProperty("name", out var nEl) ? (nEl.GetString() ?? "KEBUN LIVE") : "KEBUN LIVE");
+                int onl = r.TryGetProperty("onlineRealPlayers", out var rpEl) ? rpEl.GetInt32()
+                        : (r.TryGetProperty("online", out var oEl) ? oEl.GetInt32() : 0);
+                int cap = r.TryGetProperty("maxPlayers", out var mpEl) ? mpEl.GetInt32()
+                        : (r.TryGetProperty("capacity", out var cEl) ? cEl.GetInt32() : 32);
                 fresh.Add(new RoomDescriptor
                 {
                     Id = r.GetProperty("id").GetString() ?? "kebun-sumatera-01",
-                    Label = (r.GetProperty("label").GetString() ?? "KEBUN LIVE").ToUpperInvariant(),
+                    Label = lbl.ToUpperInvariant(),
                     Region = r.TryGetProperty("region", out var reg) ? reg.GetString() ?? "ID" : "ID",
-                    Online = r.TryGetProperty("online", out var onl) ? onl.GetInt32() : 0,
-                    Capacity = r.TryGetProperty("capacity", out var cap) ? cap.GetInt32() : 32,
+                    Online = onl,
+                    Capacity = cap,
                 });
             }
             if (fresh.Count > 0)
@@ -488,6 +494,8 @@ public sealed class LiveMultiplayerSession : IDisposable
             w.WriteString("outfitHex", av.OutfitHex);
             w.WriteString("aura", av.Aura);
             w.WriteString("title", av.Title);
+            w.WriteBoolean("glasses", av.Glasses);
+            w.WriteBoolean("waistParang", av.WaistParang);
             w.WriteEndObject();
         }));
     }
@@ -512,6 +520,7 @@ public sealed class LiveMultiplayerSession : IDisposable
             byte[] body = BuildJsonBytes(w =>
             {
                 w.WriteString("playerId", Profile.Id);
+                w.WriteString("token", Profile.Token);
                 w.WriteString("playerName", Profile.Name);
                 w.WriteString("title", Profile.Avatar.Title);
                 w.WriteNumber("totalKg", Profile.TotalKg);
@@ -825,6 +834,8 @@ public sealed class LiveMultiplayerSession : IDisposable
         OutfitHex = av.TryGetProperty("outfitHex", out var o) ? o.GetString() ?? "#27AE60" : "#27AE60",
         Aura = av.TryGetProperty("aura", out var a) ? a.GetString() ?? "leaf" : "leaf",
         Title = av.TryGetProperty("title", out var tl) ? tl.GetString() ?? "Pemanen Kebun" : "Pemanen Kebun",
+        Glasses = av.TryGetProperty("glasses", out var gl) && gl.ValueKind == JsonValueKind.True,
+        WaistParang = !av.TryGetProperty("waistParang", out var wp) || wp.ValueKind != JsonValueKind.False,
     };
 
     private void ParseEvent(JsonElement ev)

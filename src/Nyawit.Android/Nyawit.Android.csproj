@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationId>id.my.xyverse.nyawitlive</ApplicationId>
-    <ApplicationVersion>500</ApplicationVersion>
-    <ApplicationDisplayVersion>5.0.0</ApplicationDisplayVersion>
+    <ApplicationVersion>600</ApplicationVersion>
+    <ApplicationDisplayVersion>6.0.0</ApplicationDisplayVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <AndroidCreatePackagePerAbi>false</AndroidCreatePackagePerAbi>
     <UseMonoRuntime>true</UseMonoRuntime>

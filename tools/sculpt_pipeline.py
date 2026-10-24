@@ -2,7 +2,7 @@
 """
 Nyawit Live 3D v4.0 — Realistic UV-Mapped PBR 3D Asset & Anatomy Sculpt Pipeline
 
-Builds 41 precision UV-mapped 3D models x 3 LODs = 123 GPU meshes mapped onto the
+Builds 57 precision UV-mapped 3D models x 3 LODs = 171 GPU meshes mapped onto the
 2048x2048 RGBA8 PBR & Alpha-Cutout Texture Atlas (Assets/Textures/nyawit_pbr_atlas.png):
   - Authentic Indonesian Cab-Over-Engine (COE) Mitsubishi Fuso Canter FE 74 HD Bak Kayu
     (curved flat-nose COE cab, raked reflective windshield + wipers, dipped door window,
@@ -395,6 +395,30 @@ def build_palm_crown(lod: int) -> MeshPart:
     return merge_parts(parts)
 
 
+def build_palm_sapling(lod: int) -> MeshPart:
+    """A juvenile oil palm with a short ringed bole, emerging spear, and compact pinnate crown."""
+    seg = (12, 9, 6)[lod]
+    ring_count = (6, 4, 3)[lod]
+    rings = []
+    for i in range(ring_count):
+        t = i / max(1, ring_count - 1)
+        y = 0.88 * t
+        radius = 0.105 - 0.032 * t + 0.009 * math.sin(t * 25.0)
+        rings.append(ring_ellipse(radius, radius, y, seg, cx=0.035 * t, cz=0.018 * math.sin(t * 3.0)))
+    parts = [make_loft(rings, UV_PALM_BARK, col=rgba(255, 255, 255, 48), cap_start=True, cap_end=True)]
+    # Young spear leaves emerge upright from the crown, visibly different from mature palms.
+    parts.append(make_tube_segment((0.0, 0.73, 0.0), (0.035, 1.43, 0.025), 0.045, 0.012,
+                                   UV_PALM_FROND, seg=(8, 6, 5)[lod], col=rgba(184, 255, 118, 42), ball_caps=False))
+    frond = make_arching_pinnate_frond(0.95, 0.245, 0.40, 0.24, (6, 4, 3)[lod], tint_g=232)
+    n_fronds = (7, 5, 3)[lod]
+    for i in range(n_fronds):
+        az = i * (2.0 * math.pi / n_fronds) + 0.34
+        pitch = -0.06 + 0.13 * math.sin(i * 1.7)
+        parts.append(xform(frond, rx=pitch, ry=az, rz=0.03 * math.cos(i * 2.1),
+                           translate=(0.0, 0.69 + 0.035 * math.sin(az), 0.0)))
+    return merge_parts(parts)
+
+
 def build_tbs_bunch(lod: int) -> MeshPart:
     # Plump Stylized Multi-Berry Fresh Fruit Bunch (Tandan Buah Segar — matches Blender 4.2 Stylized Sawit!)
     seg = (14, 10, 7)[lod]
@@ -460,6 +484,24 @@ def build_tropical_fern(lod: int) -> MeshPart:
         b = make_quad((-0.48, 0.0, 0.0), (0.48, 0.0, 0.0), (0.62, 0.86, 0.42), (-0.62, 0.86, 0.42),
                       UV_FERN, col=rgba(255, 255, 255, 58), double_sided=True)
         parts.append(xform(b, rx=0.22, ry=az))
+    return merge_parts(parts)
+
+
+def build_tire_track_segment(lod: int) -> MeshPart:
+    """Flat raised herringbone tread lugs for persistent mud/road tire-mark decals."""
+    rows = (5, 4, 3)[lod]
+    spacing = 0.72 / rows
+    parts = []
+    for i in range(rows):
+        z_hi = 0.36 - i * spacing
+        z_lo = z_hi - spacing * 0.78
+        shade = 48 + (i % 2) * 8
+        tread = rgba(shade, max(28, shade - 12), max(17, shade - 24), 205)
+        # Left and right angled lugs form a chevron, with narrow gaps to read as a real tire imprint.
+        parts.append(make_quad((-0.145, 0.018, z_hi), (-0.045, 0.018, z_hi), (0.015, 0.018, z_lo), (-0.085, 0.018, z_lo),
+                               UV_DIRT, col=tread))
+        parts.append(make_quad((0.045, 0.018, z_hi), (0.145, 0.018, z_hi), (0.085, 0.018, z_lo), (-0.015, 0.018, z_lo),
+                               UV_DIRT, col=tread))
     return merge_parts(parts)
 
 
@@ -536,9 +578,21 @@ def build_canter_truck_body(lod: int) -> MeshPart:
         parts.append(make_bevel_box(0.13, 0.72, 0.22, UV_CANTER_PAINT, c_paint, center=(sx * 0.86, 1.67, 0.72), bev=0.02))
     parts.append(make_bevel_box(1.74, 0.26, 0.10, UV_CANTER_PAINT, c_paint, center=(0.0, 1.44, 0.63), bev=0.02))
 
-    # REAL 3D CABIN INTERIOR: Recessed Floor + Beveled Dashboard + TWO TAN RIBBED SEATS (visible through clear glass!)
+    # REAL 3D CABIN INTERIOR: Recessed Floor + Pedals + Shifter + Beveled Dashboard + Steering Column + TWO TAN RIBBED SEATS!
     parts.append(make_box(1.66, 0.08, 1.34, UV_STEEL, rgba(34, 38, 44, 55), center=(0.0, 1.02, 1.36)))
     parts.append(make_bevel_box(1.64, 0.28, 0.34, UV_STEEL, rgba(44, 48, 56, 75), center=(0.0, 1.24, 1.92), bev=0.03))
+    # Solid steering column housing connecting steering wheel hub (0.42, 1.44, 1.86) directly down into dash & floor!
+    parts.append(make_tube_segment((0.42, 1.06, 1.98), (0.42, 1.44, 1.86), 0.042, 0.034, UV_STEEL, seg=8, col=rgba(36, 40, 48, 95), ball_caps=True))
+    # Center 5-speed Canter gear stick + boot + driver gas/brake pedals + twin roof Basuri horns + amber roof markers!
+    parts.append(make_tube_segment((0.04, 1.05, 1.48), (0.08, 1.36, 1.44), 0.022, 0.014, UV_STEEL, seg=6, col=rgba(40, 44, 52, 110)))
+    parts.append(make_sphere_uv(0.032, 0.038, 0.032, UV_STEEL, seg=8, rings=5, col=rgba(28, 30, 36, 150), center=(0.08, 1.38, 1.44)))
+    for px_ped in (0.32, 0.44, 0.54):
+        parts.append(make_box(0.055, 0.09, 0.02, UV_STEEL, rgba(58, 64, 72, 120), center=(px_ped, 1.12, 1.90)))
+    if lod <= 1:
+        for hx_h in (-0.34, -0.22, 0.22, 0.34):
+            parts.append(make_tube_segment((hx_h, 2.20, 1.34), (hx_h, 2.24, 1.78), 0.018, 0.052, UV_STEEL, seg=8, col=c_chrome, ball_caps=False))
+        for mx_m in (-0.52, 0.0, 0.52):
+            parts.append(make_bevel_box(0.11, 0.055, 0.08, UV_CANTER_FOGLAMP, rgba(255, 188, 36, 250), center=(mx_m, 2.18, 1.72), bev=0.01))
     c_seat = rgba(235, 168, 112, 85)
     for sx_s in (-0.44, 0.44):
         parts.append(make_bevel_box(0.48, 0.14, 0.46, UV_WOOD_PLAIN, c_seat, center=(sx_s, 1.18, 1.26), bev=0.03))
@@ -856,6 +910,41 @@ def build_char_head(lod: int) -> MeshPart:
     return merge_parts(parts)
 
 
+def build_char_face_neutral(lod: int) -> MeshPart:
+    """Visible low-poly facial details: expressive eyes, brows, and a relaxed mouth."""
+    seg = (9, 7, 5)[lod]
+    parts = []
+    for sx in (-1.0, 1.0):
+        parts.append(make_sphere_uv(0.013, 0.010, 0.008, UV_SKIN, seg=seg, rings=5,
+                                    col=rgba(250, 246, 230, 245), center=(sx * 0.037, 0.146, 0.094)))
+        parts.append(make_sphere_uv(0.0055, 0.0065, 0.004, UV_STEEL, seg=6, rings=4,
+                                    col=rgba(22, 24, 26, 245), center=(sx * 0.037, 0.145, 0.102)))
+        parts.append(make_tube_segment((sx * 0.066, 0.173, 0.079), (sx * 0.012, 0.178, 0.101),
+                                       0.007, 0.008, UV_HAIR, seg=6, col=rgba(54, 38, 28, 235), ball_caps=False))
+    parts.append(make_tube_segment((-0.020, 0.073, 0.099), (0.020, 0.073, 0.099),
+                                   0.0045, 0.0045, UV_SKIN, seg=6, col=rgba(104, 43, 39, 230), ball_caps=False))
+    return merge_parts(parts)
+
+
+def build_char_face_strain(lod: int) -> MeshPart:
+    """Strained brow, open-mouth effort expression and sweat bead for the heavy TBS hoist pose."""
+    parts = []
+    seg = (8, 6, 5)[lod]
+    for sx in (-1.0, 1.0):
+        # Narrowed eyes and brows pinched toward the nose under load.
+        parts.append(make_tube_segment((sx * 0.052, 0.148, 0.095), (sx * 0.020, 0.147, 0.108),
+                                       0.0055, 0.0055, UV_STEEL, seg=seg, col=rgba(25, 28, 31, 245), ball_caps=False))
+        parts.append(make_tube_segment((sx * 0.066, 0.179, 0.078), (sx * 0.012, 0.162, 0.104),
+                                       0.009, 0.010, UV_HAIR, seg=seg, col=rgba(48, 33, 24, 245), ball_caps=False))
+    parts.append(make_sphere_uv(0.020, 0.027, 0.010, UV_STEEL, seg=seg, rings=5,
+                                col=rgba(70, 30, 27, 242), center=(0.0, 0.074, 0.105)))
+    parts.append(make_sphere_uv(0.010, 0.004, 0.004, UV_SKIN, seg=6, rings=4,
+                                col=rgba(250, 240, 218, 245), center=(0.0, 0.092, 0.113)))
+    parts.append(make_sphere_uv(0.010, 0.016, 0.010, UV_CANTER_GLASS, seg=seg, rings=5,
+                                col=rgba(120, 226, 248, 220), center=(0.104, 0.205, 0.025)))
+    return merge_parts(parts)
+
+
 def build_char_arm(lod: int) -> MeshPart:
     """Seamless ball-jointed upper arm: rolled shirt sleeve deltoid top + muscular bicep/tricep + spherical elbow cap!"""
     seg = (12, 9, 6)[lod]
@@ -1054,52 +1143,71 @@ def build_back_wings_gold(lod: int) -> MeshPart:
 
 
 def build_tool_egrek(lod: int) -> MeshPart:
-    """Authentic Indonesian Telescopic Alloy Sawit Egrek Pole + Grip Tape + Curved High-Carbon Sickle Blade!"""
+    """
+    Authentic Indonesian 5.05m 3-Stage Telescopic Sawit Egrek ('Galah Sawit Tinggi + Pisau Egrek SBL Baja Putih')!
+    Exact Hand Grip Anchors in Local Pole Space (0.0mm slip):
+      - Lower Power Hand Grip: y = -0.18m  (rubberized red anti-slip sleeve y = -0.42 .. +0.04)
+      - Upper Guide Hand Grip: y = +0.44m  (rubberized emerald grip sleeve y = +0.25 .. +0.64)
+      - Stage 1 Anodized Alloy Pole: y = -0.46 .. +1.46  (Dia 38mm) + Red Twist-Lock Clamp Collar #1
+      - Stage 2 Telescopic Mid Pole: y = +1.52 .. +3.06  (Dia 31mm) + Gold Twist-Lock Clamp Collar #2
+      - Stage 3 Slim Upper Whip Pole: y = +3.11 .. +4.04 (Dia 24mm) + Bolted SBL Holder Bracket
+      - High-Carbon Curved Pull-Cut Sickle Blade ('Pisau Egrek SBL'): y = +4.12 .. +4.57m;
+        complete butt-cap-to-tip length = 5.03m, within 20mm of the 5.05m tool spec.
+    """
     seg = (10, 7, 5)[lod]
-    pole_low = make_tube_segment((0.0, -0.55, 0.0), (0.0, 0.75, 0.0), 0.021, 0.018, UV_STEEL, seg=seg, col=rgba(215, 222, 230, 165), ball_caps=False)
-    grip1 = make_tube_segment((0.0, -0.35, 0.0), (0.0, 0.18, 0.0), 0.024, 0.024, UV_DENIM, seg=seg, col=rgba(205, 42, 36, 75), ball_caps=False)
-    pole_up = make_tube_segment((0.0, 0.75, 0.0), (0.0, 2.05, 0.0), 0.016, 0.013, UV_STEEL, seg=seg, col=rgba(225, 232, 240, 175), ball_caps=False)
-    clamp = make_tube_segment((0.0, 2.00, 0.0), (0.0, 2.12, 0.0), 0.024, 0.022, UV_STEEL, seg=seg, col=rgba(235, 182, 34, 185), ball_caps=False)
-
-    # Curved razor-sharp Malaysian/Indonesian Egrek sickle blade along Y=2.12..2.58
-    parts = [pole_low, grip1, pole_up, clamp]
-    b_steps = 8 if lod == 0 else 5
+    parts = [
+        make_sphere_uv(0.026, 0.024, 0.026, UV_STEEL, seg=8, rings=5, col=rgba(30, 34, 40, 120), center=(0.0, -0.46, 0.0)),
+        make_tube_segment((0.0, -0.46, 0.0), (0.0, 1.46, 0.0), 0.0195, 0.0175, UV_STEEL, seg=seg, col=rgba(210, 218, 228, 175), ball_caps=False),
+        make_tube_segment((0.0, -0.42, 0.0), (0.0, 0.04, 0.0), 0.0235, 0.0230, UV_DENIM, seg=seg, col=rgba(214, 46, 38, 85), ball_caps=False),
+        make_tube_segment((0.0, 0.25, 0.0), (0.0, 0.64, 0.0), 0.0225, 0.0220, UV_BOOT, seg=seg, col=rgba(46, 158, 92, 90), ball_caps=False),
+        make_tube_segment((0.0, 1.40, 0.0), (0.0, 1.54, 0.0), 0.0255, 0.0245, UV_CANTER_PAINT, seg=seg, col=rgba(235, 68, 42, 185), ball_caps=False),
+        make_tube_segment((0.0, 1.52, 0.0), (0.0, 3.06, 0.0), 0.0155, 0.0140, UV_STEEL, seg=seg, col=rgba(226, 234, 242, 185), ball_caps=False),
+        make_tube_segment((0.0, 3.00, 0.0), (0.0, 3.13, 0.0), 0.0220, 0.0210, UV_CANTER_PAINT, seg=seg, col=rgba(245, 192, 32, 190), ball_caps=False),
+        make_tube_segment((0.0, 3.11, 0.0), (0.0, 4.04, 0.02), 0.0125, 0.0108, UV_STEEL, seg=seg, col=rgba(234, 240, 248, 195), ball_caps=False),
+        make_bevel_box(0.044, 0.16, 0.048, UV_STEEL, rgba(238, 184, 34, 205), center=(0.0, 4.08, 0.022), bev=0.008),
+    ]
+    b_steps = 10 if lod == 0 else 6
     for i in range(b_steps):
         t0, t1 = i / b_steps, (i + 1) / b_steps
-        a0, a1 = t0 * 2.05, t1 * 2.05
-        p0 = (0.0, 2.12 + math.sin(a0 * 0.62) * 0.36, (1.0 - math.cos(a0)) * 0.16)
-        p1 = (0.0, 2.12 + math.sin(a1 * 0.62) * 0.36, (1.0 - math.cos(a1)) * 0.16)
-        w = 0.042 * (1.0 - 0.68 * t0)
-        parts.append(make_tube_segment(p0, p1, w, w * 0.85, UV_STEEL, seg=5, col=rgba(248, 252, 255, 225), ball_caps=False))
+        a0, a1 = t0 * 2.38, t1 * 2.38
+        p0 = (0.0, 4.12 + math.sin(a0 * 0.62) * 0.45, 0.022 + (1.0 - math.cos(a0)) * 0.21)
+        p1 = (0.0, 4.12 + math.sin(a1 * 0.62) * 0.45, 0.022 + (1.0 - math.cos(a1)) * 0.21)
+        w = 0.036 * (1.0 - 0.72 * t0)
+        parts.append(make_tube_segment(p0, p1, w, max(0.004, w * 0.84), UV_STEEL, seg=5, col=rgba(250, 253, 255, 238), ball_caps=False))
     return merge_parts(parts)
 
 
 def build_tool_dodos(lod: int) -> MeshPart:
+    """Authentic Long Heavy Iron-Wood & Steel 'Dodos Sawit Lebar' (2.35m) with Two-Hand Grip Locks!"""
     seg = (10, 7, 5)[lod]
-    shaft = make_tube_segment((0.0, -0.50, 0.0), (0.0, 1.25, 0.0), 0.022, 0.019, UV_WOOD_PLAIN, seg=seg, col=rgba(168, 108, 54, 80))
-    socket = make_tube_segment((0.0, 1.22, 0.0), (0.0, 1.38, 0.0), 0.028, 0.032, UV_STEEL, seg=seg, col=rgba(95, 102, 112, 160), ball_caps=False)
+    shaft = make_tube_segment((0.0, -0.44, 0.0), (0.0, 1.12, 0.0), 0.022, 0.019, UV_WOOD_PLAIN, seg=seg, col=rgba(168, 108, 54, 80))
+    grip_lo = make_tube_segment((0.0, -0.38, 0.0), (0.0, 0.02, 0.0), 0.025, 0.025, UV_DENIM, seg=seg, col=rgba(42, 46, 54, 85), ball_caps=False)
+    grip_hi = make_tube_segment((0.0, 0.28, 0.0), (0.0, 0.62, 0.0), 0.024, 0.024, UV_DENIM, seg=seg, col=rgba(204, 48, 38, 85), ball_caps=False)
+    socket = make_tube_segment((0.0, 1.06, 0.0), (0.0, 1.24, 0.0), 0.028, 0.032, UV_STEEL, seg=seg, col=rgba(74, 80, 90, 165), ball_caps=False)
     chisel = make_loft([
-        ring_ellipse(0.032, 0.010, 1.38, 6),
-        ring_ellipse(0.068, 0.008, 1.56, 6),
-        ring_ellipse(0.082, 0.003, 1.72, 6),
+        ring_ellipse(0.036, 0.012, 1.24, 6),
+        ring_ellipse(0.078, 0.010, 1.58, 6),
+        ring_ellipse(0.098, 0.003, 1.91, 6),
     ], UV_STEEL, col=rgba(245, 250, 255, 225))
-    return merge_parts([shaft, socket, chisel])
+    return merge_parts([shaft, grip_lo, grip_hi, socket, chisel])
 
 
 def build_tool_tojok(lod: int) -> MeshPart:
-    """Authentic Indonesian 'Tojok Sawit' Steel Loading Spear with T-Bar Handle!"""
+    """Authentic Indonesian 'Tojok Sawit Baja' (1.55m) T-Bar Loading Spear!"""
     seg = (10, 7, 5)[lod]
-    t_bar = make_tube_segment((-0.13, -0.42, 0.0), (0.13, -0.42, 0.0), 0.017, 0.017, UV_STEEL, seg=seg, col=rgba(210, 48, 38, 120))
-    rod = make_tube_segment((0.0, -0.42, 0.0), (0.0, 0.78, 0.0), 0.016, 0.014, UV_STEEL, seg=seg, col=rgba(205, 212, 222, 185))
-    spike = make_tube_segment((0.0, 0.78, 0.0), (0.0, 1.06, 0.03), 0.015, 0.002, UV_STEEL, seg=seg, col=rgba(250, 252, 255, 235), ball_caps=False)
+    t_bar = make_tube_segment((-0.14, -0.44, 0.0), (0.14, -0.44, 0.0), 0.018, 0.018, UV_STEEL, seg=seg, col=rgba(214, 48, 38, 130))
+    rod = make_tube_segment((0.0, -0.44, 0.0), (0.0, 0.95, 0.0), 0.017, 0.014, UV_STEEL, seg=seg, col=rgba(208, 216, 226, 185))
+    spike = make_tube_segment((0.0, 0.95, 0.0), (0.0, 1.11, 0.04), 0.015, 0.002, UV_STEEL, seg=seg, col=rgba(250, 252, 255, 238), ball_caps=False)
     return merge_parts([t_bar, rod, spike])
 
 
 def build_tool_egrek_dragon(lod: int) -> MeshPart:
+    """Legendary Golden Sultan 5.05m Carbon-Gold Egrek Naga with Emerald Gem & Gold Dragon Guard!"""
     base = build_tool_egrek(lod)
-    guard = make_sphere_uv(0.045, 0.065, 0.065, UV_STEEL, seg=8, rings=5, col=rgba(255, 206, 48, 235), center=(0.0, 2.08, 0.02))
-    gem = make_sphere_uv(0.022, 0.028, 0.022, UV_STEEL, seg=6, rings=4, col=rgba(40, 240, 145, 250), center=(0.0, 2.08, 0.07))
-    return merge_parts([base, guard, gem])
+    gold_sleeve = make_tube_segment((0.0, 1.54, 0.0), (0.0, 3.00, 0.0), 0.0172, 0.0158, UV_STEEL, seg=8, col=rgba(255, 206, 48, 225), ball_caps=False)
+    guard = make_sphere_uv(0.052, 0.075, 0.075, UV_STEEL, seg=8, rings=5, col=rgba(255, 206, 48, 238), center=(0.0, 4.10, 0.03))
+    gem = make_sphere_uv(0.026, 0.034, 0.026, UV_STEEL, seg=6, rings=4, col=rgba(40, 244, 148, 252), center=(0.0, 4.10, 0.085))
+    return merge_parts([base, gold_sleeve, guard, gem])
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1155,7 +1263,12 @@ def build_garage_showroom(lod: int) -> MeshPart:
 
 
 def build_angkong_cart(lod: int) -> MeshPart:
-    # Plank-by-Plank ArtStation Stylized Wooden Wheelbarrow Angkong with Iron Brackets, Red Grips & TBS!
+    """
+    Millimeter-Precision Indonesian Sawit 'Angkong' Wheelbarrow (0.0mm Floating Wheel or Floating Hands!):
+      - Bolted steel front axle bearing brackets lock directly around spinning wheel hub (0.000, 0.290, +0.800)
+      - Ergonomically rising tubular push shafts curve smoothly to waist-height red rubber grips (±0.310, 0.800, -0.960)
+      - Solid ground rest skids touch terrain cleanly at y = 0.000m when parked!
+    """
     parts = [make_bevel_box(0.56, 0.055, 0.90, UV_WOOD_PLAIN, rgba(255, 255, 255, 85), center=(0.0, 0.37, 0.05), bev=0.012)]
     n_p = 4 if lod == 0 else 2
     for p in range(n_p):
@@ -1166,14 +1279,237 @@ def build_angkong_cart(lod: int) -> MeshPart:
             parts.append(xform(make_bevel_box(0.042, ph, 0.96 + p * 0.05, UV_WOOD_PLAIN, rgba(255, 255, 255, 85), bev=0.01), rz=sx * -0.22, translate=(sx * flare, py, 0.05)))
         parts.append(xform(make_bevel_box(flare * 2.0, ph, 0.042, UV_WOOD_PLAIN, rgba(255, 255, 255, 85), bev=0.01), rx=0.24, translate=(0.0, py, 0.52 + p * 0.03)))
         parts.append(xform(make_bevel_box(flare * 2.0, ph, 0.042, UV_WOOD_PLAIN, rgba(255, 255, 255, 85), bev=0.01), rx=-0.16, translate=(0.0, py, -0.42 - p * 0.02)))
+
+    # Solid steel axle shaft passing straight through wheel center (0.000, 0.290, 0.800)!
+    parts.append(make_tube_segment((-0.135, 0.290, 0.800), (0.135, 0.290, 0.800), 0.022, 0.022, UV_STEEL, seg=8, col=rgba(62, 68, 78, 175)))
+    parts.append(make_tube_segment((-0.26, 0.38, -0.42), (0.26, 0.38, -0.42), 0.020, 0.020, UV_STEEL, seg=6, col=rgba(54, 60, 68, 145)))
+
     for sx in (-1.0, 1.0):
-        parts.append(make_tube_segment((sx * 0.30, 0.44, -0.82), (sx * 0.12, 0.29, 0.80), 0.028, 0.026, UV_WOOD_PLAIN, seg=6, col=rgba(245, 235, 220, 80)))
-        parts.append(make_tube_segment((sx * 0.30, 0.44, -0.82), (sx * 0.33, 0.50, -1.05), 0.032, 0.032, UV_DENIM, seg=6, col=rgba(228, 52, 38, 95)))
-        parts.append(make_bevel_box(0.055, 0.34, 0.065, UV_WOOD_PLAIN, rgba(235, 220, 200, 75), center=(sx * 0.25, 0.18, -0.32), bev=0.01))
+        # Front steel fork chassis rails meeting exact axle bearing block at (sx * 0.115, 0.290, 0.800)!
+        parts.append(make_bevel_box(0.042, 0.075, 0.095, UV_STEEL, rgba(52, 58, 66, 165), center=(sx * 0.115, 0.290, 0.800), bev=0.008))
+        parts.append(make_tube_segment((sx * 0.26, 0.36, 0.42), (sx * 0.115, 0.290, 0.800), 0.026, 0.024, UV_STEEL, seg=6, col=rgba(62, 68, 76, 155)))
+        parts.append(make_tube_segment((sx * 0.26, 0.36, 0.42), (sx * 0.28, 0.56, -0.46), 0.028, 0.028, UV_STEEL, seg=6, col=rgba(62, 68, 76, 155)))
+        # Ergonomic rising handle bars curving cleanly up to exact waist grip center (sx * 0.310, 0.800, -0.960)!
+        parts.append(make_tube_segment((sx * 0.28, 0.56, -0.46), (sx * 0.305, 0.775, -0.84), 0.026, 0.025, UV_STEEL, seg=6, col=rgba(74, 82, 92, 165)))
+        parts.append(make_tube_segment((sx * 0.305, 0.775, -0.84), (sx * 0.315, 0.825, -1.08), 0.032, 0.031, UV_DENIM, seg=8, col=rgba(228, 52, 38, 105)))
+        # Solid rear support legs touching y = 0.000m cleanly when resting + front brace
+        parts.append(make_tube_segment((sx * 0.27, 0.48, -0.36), (sx * 0.27, 0.02, -0.44), 0.024, 0.022, UV_STEEL, seg=6, col=rgba(54, 60, 68, 145)))
+        parts.append(make_tube_segment((sx * 0.27, 0.02, -0.44), (sx * 0.26, 0.36, 0.08), 0.020, 0.020, UV_STEEL, seg=6, col=rgba(54, 60, 68, 145)))
         parts.append(make_box(0.05, 0.34, 0.05, UV_STEEL, rgba(54, 60, 68, 125), center=(sx * 0.38, 0.54, 0.42)))
     parts.append(xform(build_tbs_bunch(2), scale=(0.88, 0.88, 0.88), translate=(-0.10, 0.62, 0.14)))
     parts.append(xform(build_tbs_bunch(2), scale=(0.84, 0.84, 0.84), ry=1.7, translate=(0.12, 0.60, -0.14)))
     return merge_parts(parts)
+
+
+def build_canter_axle_suspension(lod: int) -> MeshPart:
+    """
+    Real Heavy-Duty Mitsubishi Canter FE 74 HD Live Solid Axle + Differential Pumpkin ('Gardan') +
+    7-Layer Semi-Elliptical Multi-Leaf Spring Packs ('Per Daun Baja') + Twin Yellow Telescopic Shocks!
+    Origin (0, 0, 0) = Exact Wheel Axle Centerline; Top Shackle Mounts sit at y = +0.260m (dynamically compressed per frame!).
+    """
+    seg = (12, 8, 6)[lod]
+    steel_dark = rgba(44, 50, 58, 155)
+    spring_steel = rgba(62, 68, 78, 168)
+    shock_yellow = rgba(248, 198, 28, 195)
+    chrome_rod = rgba(236, 242, 248, 232)
+
+    parts = [
+        # Solid forged steel live axle tube spanning full track width (-0.82m .. +0.82m) right into brake drums!
+        make_tube_segment((-0.82, 0.0, 0.0), (0.82, 0.0, 0.0), 0.054, 0.054, UV_STEEL, seg=seg, col=steel_dark),
+        # Central cast-iron Differential Banjo Housing ('Gardan Canter') + pinion yoke flange!
+        make_sphere_uv(0.155, 0.165, 0.165, UV_STEEL, seg=seg, rings=7, col=steel_dark, center=(0.0, 0.0, 0.0)),
+        make_tube_segment((0.0, 0.0, 0.10), (0.0, 0.015, 0.24), 0.068, 0.052, UV_STEEL, seg=8, col=spring_steel),
+    ]
+    for sx in (-1.0, 1.0):
+        # Inner steel brake drum / steering knuckle backing plates flush against wheel hubs!
+        parts.append(make_tube_segment((sx * 0.72, 0.0, 0.0), (sx * 0.83, 0.0, 0.0), 0.175, 0.165, UV_STEEL, seg=seg, col=rgba(54, 60, 70, 160), ball_caps=False))
+        # U-bolt center clamp block locking 7-layer leaf spring pack onto axle tube at x = ±0.54m
+        parts.append(make_bevel_box(0.11, 0.13, 0.14, UV_STEEL, rgba(34, 38, 46, 175), center=(sx * 0.54, 0.055, 0.0), bev=0.01))
+        # 5 visible stacked arched semi-elliptical spring leaves curving cleanly up to front/rear frame shackles (y = +0.260m)!
+        n_leaves = 5 if lod == 0 else 3
+        for li in range(n_leaves):
+            frac = 1.0 - li * 0.14
+            half_len = 0.48 * frac
+            base_y = 0.032 + li * 0.021
+            for si in range(6):
+                t0, t1 = -1.0 + si * (2.0 / 6.0), -1.0 + (si + 1) * (2.0 / 6.0)
+                z0, z1 = t0 * half_len, t1 * half_len
+                y0 = base_y + (t0 * t0) * (0.228 - base_y * 0.45)
+                y1 = base_y + (t1 * t1) * (0.228 - base_y * 0.45)
+                parts.append(make_tube_segment((sx * 0.54, y0, z0), (sx * 0.54, y1, z1), 0.016, 0.016, UV_STEEL, seg=4, col=spring_steel, ball_caps=False))
+        # Front & rear shackle brackets meeting chassis rails at y = +0.260m!
+        for sz in (-0.47, 0.47):
+            parts.append(make_bevel_box(0.09, 0.08, 0.08, UV_STEEL, steel_dark, center=(sx * 0.54, 0.255, sz), bev=0.008))
+        # Angled Heavy-Duty Yellow Hydraulic Telescopic Shock Absorbers + Chrome Piston Rod!
+        parts.append(make_tube_segment((sx * 0.63, -0.02, -0.08), (sx * 0.58, 0.145, -0.05), 0.038, 0.036, UV_CANTER_PAINT, seg=8, col=shock_yellow))
+        parts.append(make_tube_segment((sx * 0.58, 0.135, -0.05), (sx * 0.53, 0.265, -0.02), 0.020, 0.020, UV_STEEL, seg=8, col=chrome_rod))
+    return merge_parts(parts)
+
+
+def build_canter_driveshaft(lod: int) -> MeshPart:
+    """Spinning Steel Propeller Driveshaft + Twin Universal Joints ('Kopel Gardan Canter') along unit +Z (0..1m)!"""
+    seg = (10, 7, 5)[lod]
+    shaft_col = rgba(68, 76, 88, 185)
+    yoke_col = rgba(196, 206, 218, 215)
+    return merge_parts([
+        make_tube_segment((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 0.036, 0.036, UV_STEEL, seg=seg, col=shaft_col),
+        make_bevel_box(0.095, 0.095, 0.10, UV_STEEL, yoke_col, center=(0.0, 0.0, 0.05), bev=0.012),
+        make_bevel_box(0.095, 0.095, 0.10, UV_STEEL, yoke_col, center=(0.0, 0.0, 0.95), bev=0.012),
+    ])
+
+
+def build_canter_headlight_beam(lod: int) -> MeshPart:
+    """Warm Halogen/LED Headlight Ground Projection Beam when Canter Headlights are switched ON!"""
+    return merge_parts([
+        make_quad((-0.26, 0.0, 0.0), (0.26, 0.0, 0.0), (1.85, -0.62, 11.5), (-1.85, -0.62, 11.5),
+                  UV_PUFF_ALPHA, col=rgba(255, 246, 205, 95), double_sided=True),
+        make_quad((0.0, -0.22, 0.0), (0.0, 0.22, 0.0), (0.0, 0.45, 10.5), (0.0, -0.72, 10.5),
+                  UV_PUFF_ALPHA, col=rgba(255, 246, 205, 75), double_sided=True),
+    ])
+
+
+def build_cut_palm_frond(lod: int) -> MeshPart:
+    """Freshly Severed Green Oil Palm Frond ('Pelepah Sawit Jatuh') that drops cleanly when harvested with Egrek!"""
+    parts = [
+        make_tube_segment((0.0, 0.0, -0.35), (0.0, 0.08, 1.95), 0.048, 0.012, UV_PALM_BARK, seg=6, col=rgba(118, 152, 58, 70))
+    ]
+    n_leaf = 6 if lod == 0 else 4
+    for i in range(n_leaf):
+        z0 = 0.05 + i * 0.30
+        parts.append(make_quad(
+            (-0.48, -0.04, z0), (0.48, -0.04, z0),
+            (0.42, 0.06, z0 + 0.34), (-0.42, 0.06, z0 + 0.34),
+            UV_PALM_FROND, col=rgba(255, 255, 255, 88), double_sided=True
+        ))
+    return merge_parts(parts)
+
+
+# ── Expanded Kebun Raya Sumatera v6.0 Landmarks & Interactive Field Pickups ──
+
+def build_spbu_solar(lod: int) -> MeshPart:
+    """Indonesian Pertashop / SPBU Biosolar B35 & Bengkel Modif Canter Forecourt Station!"""
+    red_brand = rgba(216, 38, 38, 155)
+    white_clean = rgba(244, 246, 250, 120)
+    steel_c = rgba(52, 58, 68, 145)
+    parts = [
+        # Concrete forecourt slab + raised pump island
+        make_box(9.6, 0.16, 8.2, UV_CONCRETE, rgba(226, 230, 236, 95), center=(0.0, 0.08, 0.0)),
+        make_bevel_box(3.8, 0.22, 1.5, UV_CONCRETE_CLEAN, rgba(235, 196, 34, 125), center=(0.0, 0.22, 0.0), bev=0.03),
+        # Four white canopy steel columns + crisp red-white Pertashop canopy fascia!
+        make_box(7.8, 0.56, 6.2, UV_CONCRETE_CLEAN, red_brand, center=(0.0, 4.18, 0.0)),
+        make_box(7.92, 0.16, 6.32, UV_CONCRETE_CLEAN, white_clean, center=(0.0, 3.88, 0.0)),
+        # Twin Digital Biosolar B35 Fuel Dispensers + Glowing Cyan LCD Meter + Nozzle Hoses!
+        make_bevel_box(0.76, 1.68, 0.52, UV_CONCRETE_CLEAN, white_clean, center=(-0.95, 1.12, 0.0), bev=0.03),
+        make_bevel_box(0.76, 1.68, 0.52, UV_CONCRETE_CLEAN, white_clean, center=( 0.95, 1.12, 0.0), bev=0.03),
+        make_box(0.78, 0.42, 0.54, UV_CONCRETE_CLEAN, red_brand, center=(-0.95, 1.72, 0.0)),
+        make_box(0.78, 0.42, 0.54, UV_CONCRETE_CLEAN, rgba(32, 158, 92, 165), center=( 0.95, 1.72, 0.0)),
+        make_box(0.48, 0.26, 0.55, UV_CONCRETE_CLEAN, rgba(56, 232, 178, 252), center=(-0.95, 1.30, 0.0)),
+        make_box(0.48, 0.26, 0.55, UV_CONCRETE_CLEAN, rgba(56, 232, 178, 252), center=( 0.95, 1.30, 0.0)),
+        # Side Truck Tire & Suspension Service Bay Ramps!
+        xform(make_box(0.68, 0.34, 2.8, UV_STEEL, rgba(242, 192, 28, 165)), rx=0.11, translate=(-3.35, 0.20, 0.4)),
+        xform(make_box(0.68, 0.34, 2.8, UV_STEEL, rgba(242, 192, 28, 165)), rx=0.11, translate=(-1.95, 0.20, 0.4)),
+        make_tube_segment((3.4, 0.36, -2.4), (4.4, 0.36, -2.4), 0.26, 0.26, UV_STEEL, seg=10, col=rgba(36, 124, 208, 165)),
+    ]
+    for cx in (-3.1, 3.1):
+        for cz in (-2.4, 2.4):
+            parts.append(make_box(0.24, 3.85, 0.24, UV_CONCRETE_CLEAN, white_clean, center=(cx, 1.95, cz)))
+    if lod <= 1:
+        for hx in (-0.52, 1.38):
+            parts.append(make_tube_segment((hx, 1.38, 0.12), (hx + 0.14, 0.62, 0.22), 0.022, 0.022, UV_STEEL, seg=5, col=steel_c))
+    return merge_parts(parts)
+
+
+def build_warung_kopi(lod: int) -> MeshPart:
+    """Traditional Sumatran Plantation 'Warung Kopi & Istirahat Pemanen' with Wooden Bench, Counter & Kettle!"""
+    parts = [
+        make_box(5.4, 0.16, 4.6, UV_WOOD_PLAIN, rgba(206, 182, 152, 75), center=(0.0, 0.08, 0.0)),
+        make_box(4.6, 1.05, 1.8, UV_WOOD_BAK, rgba(228, 196, 158, 82), center=(0.0, 0.68, -0.95)),
+        make_box(4.75, 0.09, 0.92, UV_WOOD_PLAIN, rgba(244, 224, 192, 95), center=(0.0, 1.24, -0.42)),
+        make_box(4.6, 2.25, 0.16, UV_WOOD_BAK, rgba(212, 186, 152, 78), center=(0.0, 1.28, -1.82)),
+        xform(make_box(5.8, 0.12, 3.2, UV_CORRUGATED, rgba(44, 146, 96, 128)), rx=0.22, translate=(0.0, 2.86, -0.95)),
+        xform(make_box(5.8, 0.12, 2.8, UV_CORRUGATED, rgba(218, 92, 48, 128)), rx=-0.26, translate=(0.0, 2.74, 0.95)),
+        # Long wooden harvester bench in front of counter + glowing warm hanging lantern + brass coffee kettle!
+        make_bevel_box(3.6, 0.08, 0.44, UV_WOOD_PLAIN, rgba(232, 204, 168, 85), center=(0.0, 0.50, 0.98), bev=0.015),
+        make_box(0.18, 0.48, 0.38, UV_WOOD_PLAIN, rgba(148, 102, 58, 75), center=(-1.4, 0.24, 0.98)),
+        make_box(0.18, 0.48, 0.38, UV_WOOD_PLAIN, rgba(148, 102, 58, 75), center=( 1.4, 0.24, 0.98)),
+        make_sphere_uv(0.16, 0.20, 0.16, UV_CANTER_HEADLAMP, seg=10, rings=6, col=rgba(255, 226, 128, 253), center=(0.0, 2.28, 0.42)),
+        make_tube_segment((-0.85, 1.28, -0.38), (-0.85, 1.62, -0.38), 0.16, 0.12, UV_STEEL, seg=10, col=rgba(232, 188, 64, 205)),
+    ]
+    for px in (-2.35, 2.35):
+        for pz in (-1.75, 1.75):
+            parts.append(make_box(0.16, 2.65, 0.16, UV_WOOD_PLAIN, rgba(132, 88, 48, 75), center=(px, 1.38, pz)))
+    return merge_parts(parts)
+
+
+def build_gudang_pupuk(lod: int) -> MeshPart:
+    """Plantation 'Gudang Pupuk NPK Mutiara' Warehouse with Concrete Dock & Stacked 50kg NPK Sacks!"""
+    parts = [
+        make_box(8.4, 0.42, 7.2, UV_CONCRETE, rgba(218, 224, 230, 92), center=(0.0, 0.21, 0.0)),
+        make_box(7.6, 3.85, 5.4, UV_CORRUGATED, rgba(226, 236, 228, 112), center=(0.0, 2.34, -0.65)),
+        xform(make_box(4.4, 0.15, 6.0, UV_CORRUGATED, rgba(36, 134, 82, 132)), rz=0.24, translate=(-1.98, 4.68, -0.65)),
+        xform(make_box(4.4, 0.15, 6.0, UV_CORRUGATED, rgba(36, 134, 82, 132)), rz=-0.24, translate=( 1.98, 4.68, -0.65)),
+        make_box(3.2, 2.65, 0.18, UV_STEEL, rgba(32, 42, 52, 95), center=(0.0, 1.74, 2.08)),
+    ]
+    # Stacked blue/white 50kg NPK fertilizer sacks on front concrete dock!
+    for si, (sx, sy, sz) in enumerate([(-2.2, 0.56, 2.55), (-1.35, 0.56, 2.55), (-1.78, 0.80, 2.55),
+                                       ( 2.2, 0.56, 2.55), ( 1.35, 0.56, 2.55), ( 1.78, 0.80, 2.55)]):
+        sack_col = rgba(52, 152, 235, 95) if si % 2 == 0 else rgba(245, 206, 62, 110)
+        parts.append(make_sphere_uv(0.38, 0.15, 0.26, UV_WOVEN, seg=8, rings=5, col=sack_col, center=(sx, sy, sz)))
+    return merge_parts(parts)
+
+
+def build_offroad_arch(lod: int) -> MeshPart:
+    """Heavy Timber Offroad Mud Hill Trailhead Arch ('Jalur Tanjakan Lumpur Sitinjau Sawit')!"""
+    parts = [
+        make_tube_segment((-3.1, 0.0, 0.0), (-2.85, 4.2, 0.0), 0.22, 0.18, UV_WOOD_PLAIN, seg=8, col=rgba(148, 98, 54, 78)),
+        make_tube_segment(( 3.1, 0.0, 0.0), ( 2.85, 4.2, 0.0), 0.22, 0.18, UV_WOOD_PLAIN, seg=8, col=rgba(148, 98, 54, 78)),
+        make_bevel_box(6.4, 0.72, 0.26, UV_CANTER_PAINT, rgba(242, 188, 28, 165), center=(0.0, 3.85, 0.0), bev=0.03),
+        make_bevel_box(5.6, 0.42, 0.30, UV_STEEL, rgba(28, 34, 42, 145), center=(0.0, 3.85, 0.0), bev=0.02),
+    ]
+    for sx in (-3.25, 3.25):
+        parts.append(xform(build_truck_wheel(2), rz=math.pi * 0.5, translate=(sx, 0.18, 0.65)))
+    return merge_parts(parts)
+
+
+def build_item_solar_can(lod: int) -> MeshPart:
+    """Interactive 25L Yellow Biosolar Turbo Jerrycan Pickup!"""
+    return merge_parts([
+        make_bevel_box(0.32, 0.46, 0.20, UV_CANTER_PAINT, rgba(250, 198, 28, 185), center=(0.0, 0.24, 0.0), bev=0.04),
+        make_tube_segment((-0.07, 0.49, 0.0), (0.07, 0.49, 0.0), 0.022, 0.022, UV_CANTER_PAINT, seg=6, col=rgba(250, 198, 28, 185)),
+        make_tube_segment((0.09, 0.45, 0.0), (0.14, 0.54, 0.0), 0.030, 0.026, UV_STEEL, seg=8, col=rgba(220, 42, 34, 195)),
+    ])
+
+
+def build_item_coffee_cup(lod: int) -> MeshPart:
+    """Interactive Steaming Plantation 'Kopi Tubruk Stamina' Mug Pickup!"""
+    seg = (12, 8, 6)[lod]
+    return merge_parts([
+        make_loft([ring_ellipse(0.13, 0.13, 0.02, seg), ring_ellipse(0.16, 0.16, 0.36, seg)], UV_CONCRETE_CLEAN, col=rgba(248, 244, 232, 165)),
+        make_sphere_uv(0.145, 0.025, 0.145, UV_WOOD_PLAIN, seg=seg, rings=4, col=rgba(58, 34, 18, 215), center=(0.0, 0.34, 0.0)),
+        make_tube_segment((0.15, 0.12, 0.0), (0.22, 0.20, 0.0), 0.022, 0.022, UV_CONCRETE_CLEAN, seg=6, col=rgba(248, 244, 232, 165)),
+        make_tube_segment((0.22, 0.20, 0.0), (0.15, 0.29, 0.0), 0.022, 0.022, UV_CONCRETE_CLEAN, seg=6, col=rgba(248, 244, 232, 165)),
+    ])
+
+
+def build_item_npk_sack(lod: int) -> MeshPart:
+    """Interactive 50kg 'Pupuk NPK Emas' Fertilizer Sack Pickup!"""
+    return merge_parts([
+        make_sphere_uv(0.28, 0.30, 0.19, UV_WOVEN, seg=(12, 8, 6)[lod], rings=6, col=rgba(56, 178, 248, 125), center=(0.0, 0.28, 0.0)),
+        make_tube_segment((0.0, 0.52, 0.0), (0.0, 0.62, 0.0), 0.075, 0.11, UV_WOVEN, seg=8, col=rgba(250, 206, 48, 185)),
+    ])
+
+
+def build_item_cuan_crate(lod: int) -> MeshPart:
+    """Interactive Glowing Golden 'Peti Sultan / Tiket Cuan' Field Chest!"""
+    gold = rgba(255, 208, 44, 238)
+    emerald = rgba(38, 232, 138, 248)
+    return merge_parts([
+        make_bevel_box(0.54, 0.34, 0.38, UV_WOOD_PLAIN, rgba(96, 52, 24, 135), center=(0.0, 0.18, 0.0), bev=0.03),
+        make_bevel_box(0.56, 0.14, 0.40, UV_STEEL, gold, center=(0.0, 0.40, 0.0), bev=0.03),
+        make_box(0.10, 0.42, 0.41, UV_STEEL, gold, center=(-0.16, 0.24, 0.0)),
+        make_box(0.10, 0.42, 0.41, UV_STEEL, gold, center=( 0.16, 0.24, 0.0)),
+        make_sphere_uv(0.055, 0.065, 0.035, UV_CONCRETE_CLEAN, seg=8, rings=5, col=emerald, center=(0.0, 0.30, 0.20)),
+    ])
 
 
 def build_celeng_boar(lod: int) -> MeshPart:
@@ -1325,12 +1661,14 @@ def finalize_normals_and_ao(part: MeshPart) -> Tuple[np.ndarray, MeshPart]:
 MODEL_SPECS: List[Tuple[str, Callable[[int], MeshPart]]] = [
     ("palm_trunk", build_palm_trunk),
     ("palm_crown", build_palm_crown),
+    ("palm_sapling", build_palm_sapling),
     ("tbs_bunch", build_tbs_bunch),
     ("tropical_fern", build_tropical_fern),
     ("rock_boulder", build_rock_boulder),
     ("canter_truck_body", build_canter_truck_body),
     ("canter_steering_wheel", build_canter_steering_wheel),
     ("truck_wheel", build_truck_wheel),
+    ("tire_track_segment", build_tire_track_segment),
     ("truck_cargo_heap", build_truck_cargo_heap),
     ("angkong_cart", build_angkong_cart),
     ("pks_factory", build_pks_factory),
@@ -1345,6 +1683,8 @@ MODEL_SPECS: List[Tuple[str, Callable[[int], MeshPart]]] = [
     ("boar_leg", build_boar_leg),
     ("char_torso_head", build_char_torso_head),
     ("char_head", build_char_head),
+    ("char_face_neutral", build_char_face_neutral),
+    ("char_face_strain", build_char_face_strain),
     ("char_arm", build_char_arm),
     ("char_forearm_hand", build_char_forearm_hand),
     ("char_leg", build_char_leg),
@@ -1364,6 +1704,18 @@ MODEL_SPECS: List[Tuple[str, Callable[[int], MeshPart]]] = [
     ("tool_dodos", build_tool_dodos),
     ("tool_tojok", build_tool_tojok),
     ("tool_egrek_dragon", build_tool_egrek_dragon),
+    ("canter_axle_suspension", build_canter_axle_suspension),
+    ("canter_driveshaft", build_canter_driveshaft),
+    ("canter_headlight_beam", build_canter_headlight_beam),
+    ("cut_palm_frond", build_cut_palm_frond),
+    ("spbu_solar", build_spbu_solar),
+    ("warung_kopi", build_warung_kopi),
+    ("gudang_pupuk", build_gudang_pupuk),
+    ("offroad_arch", build_offroad_arch),
+    ("item_solar_can", build_item_solar_can),
+    ("item_coffee_cup", build_item_coffee_cup),
+    ("item_npk_sack", build_item_npk_sack),
+    ("item_cuan_crate", build_item_cuan_crate),
 ]
 
 

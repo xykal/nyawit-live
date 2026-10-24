@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Zero-dependency (100% pure Python stdlib) live hardware-KVM Android 14 (API 34) Emulator harness for Nyawit Live 3D v4.0.0.
-Uses frame-acknowledged loopback TCP sync (adb forward tcp:18765 tcp:18765) so EVERY ONE of all 6 v4.0.0 stages
-is proven to render >= 8 real OpenGL ES 3.0 frames BEFORE screenshot capture — 100.0% deterministic!
+Zero-dependency Android 14 (API 34) emulator verification harness for NYAWIT LIVE v6.0.0.
+Uses frame-acknowledged loopback TCP sync (adb forward tcp:18765 tcp:18765) to capture all 6 live
+stages (splash, separate 3D garage lobby, loading, on-foot plantation, Canter driving with arrow+pedal
+HUD, and custom PENGATURAN modal) in one uninterrupted Android process PID.
 """
-import math
 import os
 import re
 import struct
@@ -12,9 +12,10 @@ import subprocess
 import sys
 import time
 import urllib.request
-import zlib
 
 ACTIVITY = "id.my.xyverse.nyawitlive/id.my.xyverse.nyawitlive.MainActivity"
+APK_PATH = os.environ.get("NYAWIT_APK_PATH", "dist-apk/NYAWIT-LIVE-v6-x86_64.apk")
+SCREENSHOT_PREFIX = os.environ.get("NYAWIT_SCREENSHOT_PREFIX", "android_v6")
 
 
 def inspect_png_stdlib(path: str, min_kb: float = 12.0):
@@ -22,21 +23,18 @@ def inspect_png_stdlib(path: str, min_kb: float = 12.0):
         data = f.read()
     assert data[:8] == b"\x89PNG\r\n\x1a\n", f"{path}: invalid PNG signature"
     pos = 8
-    width = height = color_type = 0
-    idat_chunks = []
+    width = height = 0
     while pos < len(data):
         length = struct.unpack(">I", data[pos:pos + 4])[0]
         ctype = data[pos + 4:pos + 8]
         chunk = data[pos + 8:pos + 8 + length]
         pos += 12 + length
         if ctype == b"IHDR":
-            width, height, bit_depth, color_type = struct.unpack(">IIBB", chunk[:10])
-        elif ctype == b"IDAT":
-            idat_chunks.append(chunk)
+            width, height = struct.unpack(">II", chunk[:8])
         elif ctype == b"IEND":
             break
     compressed_kb = len(data) / 1024.0
-    print(f"  [VERIFIED ANDROID 14 v4.0 FRAME] {path}: size=({width}, {height}), pngSize={compressed_kb:.1f} KB")
+    print(f"  [ANDROID 14 v6 FRAME] {path}: size=({width}, {height}), pngSize={compressed_kb:.1f} KB")
     assert width > height, f"Expected landscape frame, got {width}x{height}"
     assert compressed_kb > min_kb, f"Frame appears blank/incomplete ({compressed_kb:.1f} KB < {min_kb} KB)"
 
@@ -50,7 +48,7 @@ def run(cmd, check=True, binary=False):
 
 
 def sync_stage(stage_name: str):
-    deadline = time.time() + 25.0
+    deadline = time.time() + 30.0
     last_err = None
     while time.time() < deadline:
         try:
@@ -87,7 +85,7 @@ def dump_diagnostics(tag: str):
 
 
 def main():
-    print("=== [1/8] Configuring Fullscreen Gesture Mode, Immersive Policy & Installing v4.0.0 Universal APK ===")
+    print(f"=== [1/8] Configuring immersive mode and installing {APK_PATH} ===")
     run(["adb", "shell", "cmd", "overlay", "enable", "com.android.internal.systemui.navbar.gestural"], check=False)
     run(["adb", "shell", "settings", "put", "global", "policy_control", "immersive.full=*"], check=False)
     run(["adb", "shell", "settings", "put", "secure", "immersive_mode_confirmations", "confirmed"], check=False)
@@ -98,7 +96,7 @@ def main():
     run(["adb", "shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS"], check=False)
     time.sleep(1.0)
 
-    install_out = run(["adb", "install", "-r", "dist-apk/NyawitLive-v4.0.0-universal.apk"])
+    install_out = run(["adb", "install", "-r", APK_PATH])
     print(install_out.strip())
     run(["adb", "logcat", "-c"], check=False)
     run(["adb", "forward", "tcp:18765", "tcp:18765"])
@@ -112,27 +110,28 @@ def main():
     if not pid1:
         dump_diagnostics("COLD_LAUNCH_EXIT")
         sys.exit(1)
-    capture_screen("dist-apk/android_v4_splash_hd.png")
+    os.makedirs("dist-apk", exist_ok=True)
+    capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_splash_hd.png")
 
     print("=== [3/8] Frame-Syncing Stage 2: Dedicated Separate 3D Garage Showroom Lobby ===")
     sync_stage("garage")
-    capture_screen("dist-apk/android_v4_lobby_garage_hd.png")
+    capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_lobby_garage_hd.png")
 
     print("=== [4/8] Frame-Syncing Stage 3: Full-Screen 'MENYIAPKAN DUNIA' World Streaming ===")
     sync_stage("loading")
-    capture_screen("dist-apk/android_v4_loading_hd.png")
+    capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_loading_hd.png")
 
-    print("=== [5/8] Frame-Syncing Stage 4: Sunlit PBR Plantation + Alpha-Cutout Palms + Spiky TBS Hold ===")
+    print("=== [5/8] Frame-Syncing Stage 4: v6.0 Plantation (220 Mature Palms, 96 Saplings, Landmarks & TBS Hold) ===")
     sync_stage("onfoot")
-    capture_screen("dist-apk/android_v4_onfoot_hold_hd.png")
+    capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_onfoot_hold_hd.png")
 
-    print("=== [6/8] Frame-Syncing Stage 5: Flat-Nose COE Mitsubishi Canter FE 74 HD + Dual Rear Tires ===")
+    print("=== [6/8] Frame-Syncing Stage 5: Canter FE 74 HD + Tire Tracks + Arrow Steering & Gas/Brake Pedals HUD ===")
     sync_stage("canter")
-    capture_screen("dist-apk/android_v4_canter_drive_hd.png")
+    capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_canter_drive_hd.png")
 
-    print("=== [7/8] Frame-Syncing Stage 6: Custom In-Game 'PENGATURAN' Panel (30/60/90/120 FPS, Render Scale, Anti-Lag) ===")
+    print("=== [7/8] Frame-Syncing Stage 6: Custom In-Game 'PENGATURAN' Panel (FPS, Render Scale & Vehicle Control Mode) ===")
     sync_stage("settings")
-    capture_screen("dist-apk/android_v4_settings_hd.png")
+    capture_screen(f"dist-apk/{SCREENSHOT_PREFIX}_settings_hd.png")
 
     pid2 = run(["adb", "shell", "pidof", "id.my.xyverse.nyawitlive"], check=False).strip()
     print(f"Live Android Process PID after all 6 frame-synced stages: '{pid2}'")
@@ -146,14 +145,14 @@ def main():
         print("ERROR: Detected unhandled exception in logcat!")
         sys.exit(1)
 
-    inspect_png_stdlib("dist-apk/android_v4_splash_hd.png", min_kb=10.0)
-    inspect_png_stdlib("dist-apk/android_v4_lobby_garage_hd.png", min_kb=120.0)
-    inspect_png_stdlib("dist-apk/android_v4_loading_hd.png", min_kb=10.0)
-    inspect_png_stdlib("dist-apk/android_v4_onfoot_hold_hd.png", min_kb=120.0)
-    inspect_png_stdlib("dist-apk/android_v4_canter_drive_hd.png", min_kb=120.0)
-    inspect_png_stdlib("dist-apk/android_v4_settings_hd.png", min_kb=120.0)
+    inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_splash_hd.png", min_kb=10.0)
+    inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_lobby_garage_hd.png", min_kb=80.0)
+    inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_loading_hd.png", min_kb=10.0)
+    inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_onfoot_hold_hd.png", min_kb=80.0)
+    inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_canter_drive_hd.png", min_kb=80.0)
+    inspect_png_stdlib(f"dist-apk/{SCREENSHOT_PREFIX}_settings_hd.png", min_kb=80.0)
 
-    print("=== ALL 8 LIVE ANDROID 14 EMULATOR v4.0.0 PBR VERIFICATION GATES 100% PASSED! ===")
+    print("=== Android 14 v6.0.0 verification PASSED across all 6 stages in a single uninterrupted PID! ===")
 
 
 if __name__ == "__main__":

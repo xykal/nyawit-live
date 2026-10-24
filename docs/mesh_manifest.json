@@ -45,6 +45,27 @@
       ]
     },
     {
+      "name": "palm_sapling",
+      "radius": 1.431,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 256,
+          "tris": 360
+        },
+        {
+          "lod": 1,
+          "verts": 140,
+          "tris": 188
+        },
+        {
+          "lod": 2,
+          "verts": 79,
+          "tris": 102
+        }
+      ]
+    },
+    {
       "name": "tbs_bunch",
       "radius": 0.399,
       "lods": [
@@ -113,18 +134,18 @@
       "lods": [
         {
           "lod": 0,
-          "verts": 3674,
-          "tris": 5256
+          "verts": 4123,
+          "tris": 5924
         },
         {
           "lod": 1,
-          "verts": 3674,
-          "tris": 5256
+          "verts": 4123,
+          "tris": 5924
         },
         {
           "lod": 2,
-          "verts": 1842,
-          "tris": 2324
+          "verts": 2061,
+          "tris": 2608
         }
       ]
     },
@@ -171,6 +192,27 @@
       ]
     },
     {
+      "name": "tire_track_segment",
+      "radius": 0.389,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 40,
+          "tris": 20
+        },
+        {
+          "lod": 1,
+          "verts": 32,
+          "tris": 16
+        },
+        {
+          "lod": 2,
+          "verts": 24,
+          "tris": 12
+        }
+      ]
+    },
+    {
       "name": "truck_cargo_heap",
       "radius": 2.295,
       "lods": [
@@ -193,22 +235,22 @@
     },
     {
       "name": "angkong_cart",
-      "radius": 1.222,
+      "radius": 1.409,
       "lods": [
         {
           "lod": 0,
-          "verts": 1070,
-          "tris": 1728
+          "verts": 1546,
+          "tris": 2520
         },
         {
           "lod": 1,
-          "verts": 766,
-          "tris": 1216
+          "verts": 1242,
+          "tris": 2008
         },
         {
           "lod": 2,
-          "verts": 766,
-          "tris": 1216
+          "verts": 1242,
+          "tris": 2008
         }
       ]
     },
@@ -461,6 +503,48 @@
           "lod": 2,
           "verts": 119,
           "tris": 206
+        }
+      ]
+    },
+    {
+      "name": "char_face_neutral",
+      "radius": 0.213,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 233,
+          "tris": 384
+        },
+        {
+          "lod": 1,
+          "verts": 213,
+          "tris": 344
+        },
+        {
+          "lod": 2,
+          "verts": 193,
+          "tris": 304
+        }
+      ]
+    },
+    {
+      "name": "char_face_strain",
+      "radius": 0.246,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 240,
+          "tris": 400
+        },
+        {
+          "lod": 1,
+          "verts": 196,
+          "tris": 312
+        },
+        {
+          "lod": 2,
+          "verts": 174,
+          "tris": 268
         }
       ]
     },
@@ -781,49 +865,49 @@
     },
     {
       "name": "tool_egrek",
-      "radius": 2.487,
+      "radius": 4.594,
       "lods": [
         {
           "lod": 0,
-          "verts": 300,
-          "tris": 480
+          "verts": 530,
+          "tris": 864
         },
         {
           "lod": 1,
-          "verts": 204,
-          "tris": 318
+          "verts": 387,
+          "tris": 618
         },
         {
           "lod": 2,
-          "verts": 180,
-          "tris": 270
+          "verts": 345,
+          "tris": 534
         }
       ]
     },
     {
       "name": "tool_dodos",
-      "radius": 1.721,
+      "radius": 1.912,
       "lods": [
         {
           "lod": 0,
-          "verts": 126,
-          "tris": 216
+          "verts": 196,
+          "tris": 336
         },
         {
           "lod": 1,
-          "verts": 99,
-          "tris": 162
+          "verts": 151,
+          "tris": 246
         },
         {
           "lod": 2,
-          "verts": 81,
-          "tris": 126
+          "verts": 121,
+          "tris": 186
         }
       ]
     },
     {
       "name": "tool_tojok",
-      "radius": 1.061,
+      "radius": 1.111,
       "lods": [
         {
           "lod": 0,
@@ -844,28 +928,280 @@
     },
     {
       "name": "tool_egrek_dragon",
-      "radius": 2.487,
+      "radius": 4.594,
       "lods": [
         {
           "lod": 0,
-          "verts": 377,
-          "tris": 608
+          "verts": 636,
+          "tris": 1040
         },
         {
           "lod": 1,
-          "verts": 281,
-          "tris": 446
+          "verts": 493,
+          "tris": 794
         },
         {
           "lod": 2,
-          "verts": 257,
-          "tris": 398
+          "verts": 451,
+          "tris": 710
+        }
+      ]
+    },
+    {
+      "name": "canter_axle_suspension",
+      "radius": 0.846,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 1783,
+          "tris": 2760
+        },
+        {
+          "lod": 1,
+          "verts": 1299,
+          "tris": 2032
+        },
+        {
+          "lod": 2,
+          "verts": 1261,
+          "tris": 1956
+        }
+      ]
+    },
+    {
+      "name": "canter_driveshaft",
+      "radius": 1.013,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 144,
+          "tris": 248
+        },
+        {
+          "lod": 1,
+          "verts": 126,
+          "tris": 212
+        },
+        {
+          "lod": 2,
+          "verts": 114,
+          "tris": 188
+        }
+      ]
+    },
+    {
+      "name": "canter_headlight_beam",
+      "radius": 11.664,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 16,
+          "tris": 8
+        },
+        {
+          "lod": 1,
+          "verts": 16,
+          "tris": 8
+        },
+        {
+          "lod": 2,
+          "verts": 16,
+          "tris": 8
+        }
+      ]
+    },
+    {
+      "name": "cut_palm_frond",
+      "radius": 1.956,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 92,
+          "tris": 96
+        },
+        {
+          "lod": 1,
+          "verts": 76,
+          "tris": 88
+        },
+        {
+          "lod": 2,
+          "verts": 76,
+          "tris": 88
+        }
+      ]
+    },
+    {
+      "name": "spbu_solar",
+      "radius": 6.687,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 570,
+          "tris": 588
+        },
+        {
+          "lod": 1,
+          "verts": 570,
+          "tris": 588
+        },
+        {
+          "lod": 2,
+          "verts": 494,
+          "tris": 468
+        }
+      ]
+    },
+    {
+      "name": "warung_kopi",
+      "radius": 5.033,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 462,
+          "tris": 448
+        },
+        {
+          "lod": 1,
+          "verts": 462,
+          "tris": 448
+        },
+        {
+          "lod": 2,
+          "verts": 462,
+          "tris": 448
+        }
+      ]
+    },
+    {
+      "name": "gudang_pupuk",
+      "radius": 6.951,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 402,
+          "tris": 540
+        },
+        {
+          "lod": 1,
+          "verts": 402,
+          "tris": 540
+        },
+        {
+          "lod": 2,
+          "verts": 402,
+          "tris": 540
+        }
+      ]
+    },
+    {
+      "name": "offroad_arch",
+      "radius": 5.271,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 448,
+          "tris": 716
+        },
+        {
+          "lod": 1,
+          "verts": 448,
+          "tris": 716
+        },
+        {
+          "lod": 2,
+          "verts": 448,
+          "tris": 716
+        }
+      ]
+    },
+    {
+      "name": "item_solar_can",
+      "radius": 0.569,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 138,
+          "tris": 232
+        },
+        {
+          "lod": 1,
+          "verts": 138,
+          "tris": 232
+        },
+        {
+          "lod": 2,
+          "verts": 138,
+          "tris": 232
+        }
+      ]
+    },
+    {
+      "name": "item_coffee_cup",
+      "radius": 0.394,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 170,
+          "tris": 288
+        },
+        {
+          "lod": 1,
+          "verts": 146,
+          "tris": 240
+        },
+        {
+          "lod": 2,
+          "verts": 134,
+          "tris": 216
+        }
+      ]
+    },
+    {
+      "name": "item_npk_sack",
+      "radius": 0.66,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 136,
+          "tris": 240
+        },
+        {
+          "lod": 1,
+          "verts": 112,
+          "tris": 192
+        },
+        {
+          "lod": 2,
+          "verts": 100,
+          "tris": 168
+        }
+      ]
+    },
+    {
+      "name": "item_cuan_crate",
+      "radius": 0.552,
+      "lods": [
+        {
+          "lod": 0,
+          "verts": 171,
+          "tris": 232
+        },
+        {
+          "lod": 1,
+          "verts": 171,
+          "tris": 232
+        },
+        {
+          "lod": 2,
+          "verts": 171,
+          "tris": 232
         }
       ]
     }
   ],
-  "total_lod0_tris": 31768,
-  "total_lod1_tris": 17290,
-  "total_lod2_tris": 11194,
-  "binary_bytes": 1929760
+  "total_lod0_tris": 41724,
+  "total_lod1_tris": 25870,
+  "total_lod2_tris": 18852,
+  "binary_bytes": 2739051
 }

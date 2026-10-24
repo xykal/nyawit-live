@@ -1,0 +1,236 @@
+name: NYAWIT LIVE v6.0.0 — Per-ABI Builds, Android 14 Smoke & Draft Release
+
+on:
+  push:
+    branches:
+      - release/v6.0.0-draft
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  engine-tests:
+    name: Zero-Emoji, Server Syntax & Native SIMD Engine Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Secret Hygiene & Zero Emoji Policy
+        run: |
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo "FATAL: .env must never be tracked in git!"
+            exit 1
+          fi
+          python3 -c '
+          import os, re, sys
+          rx = re.compile(r"[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0000FE0F\U00002300-\U000023FF\U00002B50\U00002B55]")
+          exts = {".cs", ".js", ".html", ".css", ".md", ".py", ".yml", ".yaml", ".xml", ".json", ".toml", ".c", ".h"}
+          bad = []
+          for r, ds, fs in os.walk("."):
+            ds[:] = [d for d in ds if d not in {".git", "node_modules", "bin", "obj", ".wrangler"}]
+            for fn in fs:
+              if os.path.splitext(fn)[1].lower() in exts:
+                p = os.path.join(r, fn)
+                txt = open(p, encoding="utf-8", errors="ignore").read()
+                if rx.search(txt):
+                  bad.append(p)
+          if bad:
+            print("FATAL: Emoji detected in:", bad)
+            sys.exit(1)
+          print("Secret hygiene & Zero-Emoji audit 100% clean across repository.")
+          '
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Verify Cloudflare Worker Syntax & 220-Tree WorldSpec Parity
+        run: |
+          (cd server && npm install --no-audit --no-fund && npm run check)
+          node -e 'import("./server/src/worldSpec.js").then(m => { const n = m.generatePlantationTrees().length; console.log("worldSpec trees:", n); if (n !== 220) process.exit(1); })'
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Compile Host x86_64 C11 SIMD Library & Run Engine Tests
+        env:
+          SKIP_LIVE_NET_TEST: "1"
+        run: |
+          mkdir -p tests/NyawitEngine.Tests/bin/Release/net8.0
+          gcc -O3 -std=c11 -Wall -Wextra -Werror -shared -fPIC native/nyawit_simd.c -lm \
+            -o tests/NyawitEngine.Tests/bin/Release/net8.0/libnyawit_simd.so
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/tests/NyawitEngine.Tests/bin/Release/net8.0" \
+            dotnet test tests/NyawitEngine.Tests/NyawitEngine.Tests.csproj -c Release --verbosity normal
+
+  build-apk:
+    name: Build ${{ matrix.abi }} APK
+    needs: engine-tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: android-arm64
+            abi: arm64-v8a
+            clang: aarch64-linux-android24-clang
+          - rid: android-arm
+            abi: armeabi-v7a
+            clang: armv7a-linux-androideabi24-clang
+          - rid: android-x64
+            abi: x86_64
+            clang: x86_64-linux-android24-clang
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-36 build-tools;36.0.0 ndk;28.2.13676358"
+      - name: Install Android workload
+        run: dotnet workload install android
+      - name: Compile target-ABI native SIMD library
+        shell: bash
+        env:
+          TARGET_CLANG: ${{ matrix.clang }}
+          TARGET_ABI: ${{ matrix.abi }}
+        run: |
+          set -euo pipefail
+          NDK_ROOT="${ANDROID_NDK_LATEST_HOME:-$ANDROID_HOME/ndk/28.2.13676358}"
+          CLANG_BIN="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          mkdir -p "src/Nyawit.Android/Libs/$TARGET_ABI"
+          "$CLANG_BIN/$TARGET_CLANG" -O3 -ffast-math -std=c11 -Wall -Werror -shared -fPIC \
+            native/nyawit_simd.c -lm -o "src/Nyawit.Android/Libs/$TARGET_ABI/libnyawit_simd.so"
+          file "src/Nyawit.Android/Libs/$TARGET_ABI/libnyawit_simd.so"
+      - name: Prepare Signing Keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEYSTORE_PATH="$RUNNER_TEMP/nyawit-release.p12"
+          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+          else
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_PATH" \
+              -storetype PKCS12 \
+              -alias nyawitkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "NyawitLive2026!" -keypass "NyawitLive2026!" \
+              -dname "CN=Nyawit Live 3D, OU=Game Engine, O=XyVerse Tech, L=Jakarta, ST=DKI, C=ID"
+          fi
+      - name: Publish Single-ABI v6.0.0 APK
+        shell: bash
+        env:
+          TARGET_RID: ${{ matrix.rid }}
+        run: |
+          set -euo pipefail
+          dotnet publish src/Nyawit.Android/Nyawit.Android.csproj \
+            -f net10.0-android -c Release -r "$TARGET_RID" \
+            -p:RuntimeIdentifiers="$TARGET_RID" \
+            -p:AndroidPackageFormat=apk \
+            -p:AndroidCreatePackagePerAbi=false \
+            -p:JavaMaximumHeapSize=1024m \
+            -p:AndroidKeyStore=true \
+            -p:AndroidSigningKeyStore="$RUNNER_TEMP/nyawit-release.p12" \
+            -p:AndroidSigningKeyAlias=nyawitkey \
+            -p:AndroidSigningKeyPass="NyawitLive2026!" \
+            -p:AndroidSigningStorePass="NyawitLive2026!" \
+            -m:1
+          APK=$(find src/Nyawit.Android/bin/Release -name '*-Signed.apk' -type f | head -n 1)
+          test -n "$APK"
+          mkdir -p dist-apk
+          cp "$APK" "dist-apk/NYAWIT-LIVE-v6-${{ matrix.abi }}.apk"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+          "$APKSIGNER" verify --verbose "dist-apk/NYAWIT-LIVE-v6-${{ matrix.abi }}.apk"
+          ACTUAL_ABIS=$(unzip -Z1 "dist-apk/NYAWIT-LIVE-v6-${{ matrix.abi }}.apk" \
+            | awk -F/ '$1 == "lib" && $3 ~ /\.so$/ { print $2 }' | sort -u | paste -sd, -)
+          echo "Verified single-ABI native libraries inside APK: $ACTUAL_ABIS"
+          test "$ACTUAL_ABIS" = "${{ matrix.abi }}"
+          (cd dist-apk && sha256sum "NYAWIT-LIVE-v6-${{ matrix.abi }}.apk" > "SHA256-${{ matrix.abi }}.txt")
+          ls -lh dist-apk/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nyawit-v6-${{ matrix.abi }}
+          path: dist-apk/*
+          if-no-files-found: error
+          retention-days: 30
+
+  emulator-smoke:
+    name: Live Android 14 (API 34) 6-Stage Verification
+    needs: build-apk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: nyawit-v6-x86_64
+          path: dist-apk
+      - name: Enable KVM Group Permissions for Hardware-Accelerated Android Emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Boot Real Android 14 (API 34) Emulator & Verify All 6 v6.0.0 Stages
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          NYAWIT_APK_PATH: dist-apk/NYAWIT-LIVE-v6-x86_64.apk
+          NYAWIT_SCREENSHOT_PREFIX: android_v6
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 4096M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: python3 tools/verify_android_emulator.py
+      - name: Upload Live Android 14 v6.0.0 Screenshots & Logcat
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nyawit-v6-android14-smoke
+          path: |
+            dist-apk/android_v6_*_hd.png
+            dist-apk/android_logcat.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  draft-release:
+    name: Refresh Unpublished v6.0.0-draft Release
+    needs: [build-apk, emulator-smoke]
+    if: github.ref == 'refs/heads/release/v6.0.0-draft'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nyawit-v6-*
+          path: dist-apk
+          merge-multiple: true
+      - name: Build Combined SHA256SUMS
+        run: |
+          cd dist-apk
+          sha256sum NYAWIT-LIVE-v6-*.apk > SHA256SUMS-v6.0.0.txt
+          cat SHA256SUMS-v6.0.0.txt
+      - name: Refresh unpublished v6.0.0-draft GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v6.0.0-draft
+          target_commitish: ${{ github.sha }}
+          name: NYAWIT LIVE 3D v6.0.0 — Verified RC Draft (3 ABIs + Android 14 6-Stage Smoke)
+          draft: true
+          prerelease: true
+          make_latest: false
+          generate_release_notes: false
+          body_path: docs/release-draft-v6.md
+          files: |
+            dist-apk/NYAWIT-LIVE-v6-*.apk
+            dist-apk/SHA256SUMS-v6.0.0.txt
+            dist-apk/android_v6_*_hd.png
+          fail_on_unmatched_files: true

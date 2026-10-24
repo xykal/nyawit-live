@@ -36,23 +36,26 @@ async function pollServer() {
       )
       .join("");
 
-    elRanks.innerHTML = (st.topPlayers || [])
-      .slice(0, 8)
-      .map(
-        (p) => `<div class="row">
-          <div><strong>#${p.rank} ${esc(p.name)}</strong><br><span style="color:#8E9AA6;font-size:11px">${esc(p.title)}</span></div>
-          <code style="color:#F59E0B">${Number(p.totalKg || 0).toLocaleString("id-ID")} Kg</code>
-        </div>`
-      )
-      .join("");
+    const topRows = (st.topPlayers || []).slice(0, 8);
+    elRanks.innerHTML = topRows.length > 0
+      ? topRows
+          .map(
+            (p) => `<div class="row">
+              <div><strong>#${p.rank} ${esc(p.name)}</strong><br><span style="color:#8E9AA6;font-size:11px">${esc(p.title)}</span></div>
+              <code style="color:#F59E0B">${Number(p.totalKg || 0).toLocaleString("id-ID")} Kg</code>
+            </div>`
+          )
+          .join("")
+      : `<div class="row"><span style="color:#8E9AA6;font-size:12px">MENUNGGU SETORAN PEMAIN ASLI PERTAMA</span><code>0 Kg</code></div>`;
 
-    elChats.innerHTML = (st.recentChat || [])
-      .slice(-10)
-      .reverse()
-      .map(
-        (c) => `<div class="chat-item"><b>[${esc(c.channel.toUpperCase())}] ${esc(c.senderName)}:</b> ${esc(c.text)}</div>`
-      )
-      .join("");
+    const chatRows = (st.recentChat || []).slice(-10).reverse();
+    elChats.innerHTML = chatRows.length > 0
+      ? chatRows
+          .map(
+            (c) => `<div class="chat-item"><b>[${esc(c.channel.toUpperCase())}] ${esc(c.senderName)}:</b> ${esc(c.text)}</div>`
+          )
+          .join("")
+      : `<div class="chat-item"><span style="color:#8E9AA6">Server 100% Real-Player Only — belum ada percakapan pemain aktif.</span></div>`;
   } catch {
     elPing.textContent = "RECONNECTING";
   }

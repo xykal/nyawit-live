@@ -97,7 +97,6 @@ public class MainActivity : Activity
     private const int ReqRecordAudio = 4102;
 
     private FrameLayout? _rootLayout;
-    private LinearLayout? _inlineInputOverlay;
     private GLSurfaceView? _glView;
     private Gles3InstancedRenderer? _renderer;
     private HudOverlayView? _hud;
@@ -168,6 +167,7 @@ public class MainActivity : Activity
             };
 
             _hud = new HudOverlayView(this, _renderer, _net, _sfx, _voice, displayFont, smallBrandMark, wideBrandLogo);
+            _hud.TruckControlMode = (VehicleControlMode)System.Math.Clamp(_prefs?.GetInt("ctl_vehicle_mode", 0) ?? 0, 0, 1);
             WireGameplayEvents();
 
             _rootLayout = new FrameLayout(this);
@@ -177,11 +177,13 @@ public class MainActivity : Activity
 
             SetContentView(_rootLayout);
             ApplyHardwareDisplayRefreshRate(_renderer.Quality.TargetFps);
-            StartLocalStageControlServer();
 
             _net.StartBackgroundConnect();
             if (!string.IsNullOrWhiteSpace(Intent?.GetStringExtra("stage")))
+            {
+                StartLocalStageControlServer();
                 ApplyStageByName(Intent.GetStringExtra("stage")!);
+            }
         }
         catch (Exception ex)
         {
@@ -319,11 +321,36 @@ public class MainActivity : Activity
 
         _hud.OnTruckTogglePressed += () =>
         {
+            _hud.ResetDrivingPedalStates();
             _renderer.ToggleVehicleEnterExit();
             _sfx.Play(_renderer.InTruck ? "engine_enter" : "ui_open");
             _hud.ShowToast(_renderer.InTruck
-                ? "KABIN MITSUBISHI CANTER AKTIF — SUSPENSI BAN DOBEL SIAP"
+                ? "KABIN MITSUBISHI CANTER AKTIF — KEMUDI & PEDAL SIAP"
                 : "TURUN DARI KABIN CANTER");
+        };
+
+        _hud.OnVehicleControlModeChanged += mode =>
+        {
+            SaveGraphicsSettings();
+            _hud.ShowToast(mode == VehicleControlMode.PedalsAndArrows
+                ? "KONTROL TRUK: PANAH KEMUDI + PEDAL GAS/REM"
+                : "KONTROL TRUK: JOYSTICK ANALOG 360");
+        };
+
+        _hud.OnEstatePoiActionPressed += () =>
+        {
+            if (_renderer.NearSpbuSolar)
+            {
+                _renderer.BoostTimer = 6.0f;
+                _sfx.Play("horn");
+                _hud.ShowToast("SOLAR TURBO PENUH — TENAGA CANTER MENINGKAT!");
+            }
+            else if (_renderer.NearWarungKopi)
+            {
+                _renderer.BoostTimer = 4.5f;
+                _sfx.Play("sell");
+                _hud.ShowToast("KOPI TUBRUK SEGAR — STAMINA PANEN PENUH!");
+            }
         };
 
         _hud.OnHornPressed += () =>
@@ -334,7 +361,7 @@ public class MainActivity : Activity
             _hud.ShowToast("TURBO DIESEL CANTER AKTIF");
         };
 
-        _hud.OnCustomChatInputRequested += () => ShowInlineTextPrompt("KETIK PESAN SERVER LIVE...", "", txt =>
+        _hud.OnCustomChatInputRequested += () => _hud.OpenTextInputModal("KETIK PESAN SERVER LIVE", "", 56, txt =>
         {
             if (!string.IsNullOrWhiteSpace(txt))
             {
@@ -343,7 +370,7 @@ public class MainActivity : Activity
             }
         });
 
-        _hud.OnRenamePlayerRequested += () => ShowInlineTextPrompt("NAMA PEMANEN / JURAGAN BARU", _net.Profile.Name, txt =>
+        _hud.OnRenamePlayerRequested += () => _hud.OpenTextInputModal("NAMA PEMANEN / JURAGAN BARU", _net.Profile.Name, 18, txt =>
         {
             string clean = txt.Trim();
             if (clean.Length >= 2)
@@ -357,89 +384,10 @@ public class MainActivity : Activity
         });
     }
 
-    private void ShowInlineTextPrompt(string hint, string initial, Action<string> onSubmit)
-    {
-        if (_rootLayout == null) return;
-        DismissInlineTextPrompt();
-
-        var bar = new LinearLayout(this) { Orientation = Orientation.Horizontal };
-        bar.SetBackgroundColor(Color.Argb(248, 12, 20, 26));
-        int p = (int)(12 * (Resources?.DisplayMetrics?.Density ?? 2.5f));
-        bar.SetPadding(p, p, p, p);
-
-        var input = new EditText(this)
-        {
-            Text = initial,
-            Hint = hint,
-            TextSize = 13f,
-        };
-        input.SetSingleLine(true);
-        input.SetTextColor(Color.White);
-        input.SetHintTextColor(Color.Rgb(148, 163, 184));
-        input.SetBackgroundColor(Color.Rgb(20, 32, 40));
-        input.SetPadding(p, p / 2, p, p / 2);
-
-        var sendBtn = new TextView(this)
-        {
-            Text = "SIMPAN",
-            TextSize = 12f,
-            Gravity = GravityFlags.Center,
-        };
-        sendBtn.SetTypeface(Typeface.DefaultBold, TypefaceStyle.Bold);
-        sendBtn.SetTextColor(Color.White);
-        sendBtn.SetBackgroundColor(Color.Rgb(22, 163, 74));
-        sendBtn.SetPadding(p * 2, p / 2, p * 2, p / 2);
-        sendBtn.Click += (_, _) =>
-        {
-            string val = input.Text ?? "";
-            DismissInlineTextPrompt();
-            onSubmit(val);
-            ScheduleImmersiveFullscreen();
-        };
-
-        var cancelBtn = new TextView(this)
-        {
-            Text = "BATAL",
-            TextSize = 12f,
-            Gravity = GravityFlags.Center,
-        };
-        cancelBtn.SetTypeface(Typeface.DefaultBold, TypefaceStyle.Bold);
-        cancelBtn.SetTextColor(Color.White);
-        cancelBtn.SetBackgroundColor(Color.Rgb(127, 29, 29));
-        cancelBtn.SetPadding(p, p / 2, p, p / 2);
-        cancelBtn.Click += (_, _) =>
-        {
-            DismissInlineTextPrompt();
-            ScheduleImmersiveFullscreen();
-        };
-
-        bar.AddView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f));
-        bar.AddView(sendBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.MatchParent) { LeftMargin = p / 2 });
-        bar.AddView(cancelBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.MatchParent) { LeftMargin = p / 2 });
-
-        var lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent, GravityFlags.Top);
-        _inlineInputOverlay = bar;
-        _rootLayout.AddView(bar, lp);
-        input.RequestFocus();
-        var imm = GetSystemService(InputMethodService) as InputMethodManager;
-        imm?.ShowSoftInput(input, ShowFlags.Implicit);
-    }
-
-    private void DismissInlineTextPrompt()
-    {
-        if (_inlineInputOverlay != null && _rootLayout != null)
-        {
-            var imm = GetSystemService(InputMethodService) as InputMethodManager;
-            imm?.HideSoftInputFromWindow(_inlineInputOverlay.WindowToken, HideSoftInputFlags.None);
-            _rootLayout.RemoveView(_inlineInputOverlay);
-            _inlineInputOverlay = null;
-        }
-    }
-
     private void TriggerHarvestAction()
     {
         if (_renderer == null || _net == null || _sfx == null || _hud == null) return;
-        _renderer.Physics.Player.SlashTimer = 0.46f;
+        _renderer.Physics.Player.SlashTimer = 0.68f;
         _sfx.Play("chop");
         if (_renderer.NearestRipeTreeId >= 0)
         {
@@ -590,7 +538,10 @@ public class MainActivity : Activity
         base.OnNewIntent(intent);
         ScheduleImmersiveFullscreen();
         if (!string.IsNullOrWhiteSpace(intent?.GetStringExtra("stage")))
+        {
+            if (_stageControlServer == null) StartLocalStageControlServer();
             ApplyStageByName(intent.GetStringExtra("stage")!);
+        }
     }
 
     private void ApplyStageByName(string stage)
@@ -679,6 +630,7 @@ public class MainActivity : Activity
             _renderer.Physics.MainTruck.SpeedMs = 0f;
             _renderer.Physics.MainTruck.SteerAngle = 0.34f;
             _renderer.Physics.MainTruck.VisualCargoUnits = 16;
+            _renderer.SeedShowcaseTireTracks();
 
             _renderer.CamYaw = 0.14f;
             _renderer.CamPitch = 0.10f;
@@ -700,6 +652,7 @@ public class MainActivity : Activity
             _renderer.Physics.MainTruck.SpeedMs = 0f;
             _renderer.Physics.MainTruck.SteerAngle = 0.36f;
             _renderer.Physics.MainTruck.VisualCargoUnits = 18;
+            _renderer.SeedShowcaseTireTracks();
             _renderer.CamYaw = 0.14f;
             _renderer.CamDist = 5.9f;
             _renderer.CamPitch = 0.16f;
@@ -711,6 +664,9 @@ public class MainActivity : Activity
     {
         if (_renderer != null && _hud != null && _net != null)
         {
+            if (_hud.HandleHardwareKeyText(keyCode, e))
+                return true;
+
             if (keyCode == Keycode.Back && _hud.ActiveModal != ActiveModalOverlay.None)
             {
                 _hud.CloseModal();
@@ -819,6 +775,7 @@ public class MainActivity : Activity
         ed.PutBoolean("gfx_clouds", _renderer.Quality.CloudsEnabled);
         ed.PutBoolean("gfx_particles", _renderer.Quality.ParticlesEnabled);
         ed.PutBoolean("gfx_show_fps", _renderer.Quality.ShowFpsHud);
+        if (_hud != null) ed.PutInt("ctl_vehicle_mode", (int)_hud.TruckControlMode);
         ed.Apply();
     }
 

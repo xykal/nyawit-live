@@ -24,3 +24,4 @@ custom_domain = true
 PUBLIC_ORIGIN = "https://nyawit.xyverse.my.id"
 GOOGLE_CLIENT_ID_WEB = "495336144977-cadhmro3bct9qtfahb2ajbj9ugb5scoa.apps.googleusercontent.com"
 GITHUB_REPO = "xykal/nyawit-live"
+APK_RELEASE_TAG = "v6.0.0"

@@ -113,59 +113,6 @@ export class PlantationHub extends DurableObject {
       { id: "boar_1", x: -24, z: 54, yaw: 0.4, phase: 0.0, scaredUntil: 0 },
       { id: "boar_2", x: 30, z: 62, yaw: -1.2, phase: 2.1, scaredUntil: 0 },
     ];
-    this.bots = [
-      {
-        id: "bot_mandor_ucok",
-        name: "Mandor Ucok",
-        isBot: true,
-        x: 6.5,
-        y: 0,
-        z: 18.0,
-        yaw: 0.5,
-        steer: 0.0,
-        anim: 1,
-        inTruck: true,
-        holdTbs: 0,
-        pushCart: 0,
-        cargo: 7,
-        avatar: { hat: "hat_safety", back: "back_pack", tool: "tool_egrek", outfitHex: "#E67E22", aura: "spark", title: "Mandor Blok A" },
-        targetTree: 12,
-      },
-      {
-        id: "bot_kang_asep",
-        name: "Kang Asep Sawit",
-        isBot: true,
-        x: -16.0,
-        y: 0,
-        z: 28.0,
-        yaw: -0.9,
-        steer: 0.0,
-        anim: 1,
-        inTruck: false,
-        holdTbs: 1,
-        pushCart: 0,
-        cargo: 4,
-        avatar: { hat: "hat_caping", back: "back_basket", tool: "tool_egrek", outfitHex: "#2ECC71", aura: "leaf", title: "Raja Egrek" },
-        targetTree: 34,
-      },
-      {
-        id: "bot_juragan_rini",
-        name: "Juragan Rini",
-        isBot: true,
-        x: 18.0,
-        y: 0,
-        z: -4.0,
-        yaw: 2.1,
-        steer: 0.12,
-        anim: 1,
-        inTruck: true,
-        holdTbs: 0,
-        pushCart: 0,
-        cargo: 10,
-        avatar: { hat: "hat_crown_gold", back: "back_wings_gold", tool: "tool_egrek_dragon", outfitHex: "#1E222B", aura: "gold", title: "JUARA MINGGUAN" },
-        targetTree: 58,
-      },
-    ];
     this.tickTimer = null;
     this.initDb();
   }
@@ -212,6 +159,7 @@ export class PlantationHub extends DurableObject {
       );
       CREATE TABLE IF NOT EXISTS share_cards (
         code TEXT PRIMARY KEY,
+        player_id TEXT DEFAULT '',
         player_name TEXT NOT NULL,
         title TEXT NOT NULL,
         total_kg INTEGER NOT NULL,
@@ -224,38 +172,19 @@ export class PlantationHub extends DurableObject {
       );
     `);
 
-    const countRow = [...this.sql.exec(`SELECT COUNT(*) AS c FROM players`)][0];
-    if (!countRow || Number(countRow.c) === 0) {
-      const { weekId } = getIsoWeekInfo();
-      const starters = [
-        ["seed_1", "Juragan Rini", "google", "@rini.sawit", 14850000, 340, 4820, 49600, "hat_crown_gold", "#1E222B", "RAJA SAWIT NUSANTARA", 3420],
-        ["seed_2", "Mandor Ucok", "tiktok", "@ucok.canter", 9620000, 190, 3390, 34800, "hat_safety", "#E67E22", "Mandor Utama", 2190],
-        ["seed_3", "Kang Asep Egrek", "instagram", "@asep.kebun", 7140000, 145, 2510, 26100, "hat_caping", "#2ECC71", "Pendekar Kebun", 1640],
-        ["seed_4", "Bang Dika Oleng", "x", "@dika_sawit", 5280000, 110, 1890, 19400, "hat_cowboy", "#C0392B", "Sopir Canter Pro", 1120],
-        ["seed_5", "Pakde Slamet PKS", "whatsapp", "Komunitas Sawit Riau", 3890000, 80, 1340, 14100, "hat_headband", "#2980B9", "Pemanen Senior", 780],
-      ];
-      const now = Date.now();
-      for (const [id, name, prov, handle, coins, gems, kg, score, hat, hex, title, wpts] of starters) {
-        const av = JSON.stringify({ ...DEFAULT_AVATAR, hat, outfitHex: hex, title });
-        const unl = JSON.stringify(["hat_caping", "back_basket", "tool_egrek", hat]);
-        this.sql.exec(
-          `INSERT INTO players (id, token, name, social_provider, social_handle, coins, gems, total_kg, best_haul_kg, all_time_score, streak_day, last_claim_day, avatar_json, unlocked_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 3, '2026-10-21', ?, ?, ?)`,
-          id, `seed_tok_${id}`, name, prov, handle, coins, gems, kg, 360, score, av, unl, now
-        );
-        this.sql.exec(
-          `INSERT INTO weekly_scores (week_id, player_id, player_name, title, outfit_hex, hat, points, kg_delivered)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          weekId, id, name, title, hex, hat, wpts, kg
-        );
-      }
-      this.sql.exec(
-        `INSERT INTO chat_log (sender_id, sender_name, sender_title, channel, message, created_at) VALUES
-         ('seed_2', 'Mandor Ucok', 'Mandor Utama', 'global', 'Server API, Voice Real-Time, dan Kebun Sawit 3D aktif. Siap mabar panen TBS!', ?),
-         ('seed_1', 'Juragan Rini', 'RAJA SAWIT NUSANTARA', 'global', 'Muat TBS ke Canter Oleng lalu setor ke Timbangan RAM PKS!', ?)`,
-        now - 25000, now - 8000
-      );
+    try {
+      this.sql.exec(`ALTER TABLE share_cards ADD COLUMN player_id TEXT DEFAULT ''`);
+    } catch {
+      // Column already exists on fresh or migrated v6 SQLite storage
     }
+
+    // Strict Real-Player-Only purge: remove any legacy v5 seed_* dummy records idempotently
+    this.sql.exec(`
+      DELETE FROM players WHERE id LIKE 'seed_%';
+      DELETE FROM weekly_scores WHERE player_id LIKE 'seed_%';
+      DELETE FROM chat_log WHERE sender_id LIKE 'seed_%';
+      DELETE FROM share_cards WHERE player_id LIKE 'seed_%' OR player_id IS NULL OR player_id = '';
+    `);
   }
 
   ensureLoop() {
@@ -330,67 +259,18 @@ export class PlantationHub extends DurableObject {
         y: +s.y.toFixed(2),
         z: +s.z.toFixed(2),
         yaw: +s.yaw.toFixed(3),
+        steer: +s.steer.toFixed(3),
         st: +s.steer.toFixed(2),
         a: s.anim,
         tr: s.inTruck ? 1 : 0,
+        carry: s.holdTbs ? 1 : 0,
         hd: s.holdTbs ? 1 : 0,
+        cart: s.pushCart ? 1 : 0,
         pc: s.pushCart ? 1 : 0,
         sp: now < s.speakingUntil ? 1 : 0,
         cg: s.cargo,
         av: s.profile.avatar,
       });
-    }
-
-    if (this.sessions.size < 6) {
-      for (const bot of this.bots) {
-        const tgt = bot.cargo >= 10 ? RAM_POS : TREES_STATIC[bot.targetTree % TREES_STATIC.length];
-        const dx = tgt.x - bot.x;
-        const dz = tgt.z - bot.z;
-        const dist = Math.hypot(dx, dz);
-        if (dist > 2.4) {
-          const spd = (bot.inTruck ? 9.2 : 4.6) * dt;
-          const nextYaw = Math.atan2(dx, dz);
-          let diff = nextYaw - bot.yaw;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          bot.steer = Math.max(-0.5, Math.min(0.5, diff * 1.8));
-          bot.yaw = nextYaw;
-          bot.x += (dx / dist) * spd;
-          bot.z += (dz / dist) * spd;
-          bot.y = terrainHeight(bot.x, bot.z);
-          bot.anim = 1;
-          bot.holdTbs = !bot.inTruck && bot.cargo > 0 ? 1 : 0;
-        } else {
-          bot.anim = 2;
-          bot.steer = 0;
-          if (bot.cargo >= 10) {
-            bot.cargo = 0;
-            bot.holdTbs = 0;
-            bot.targetTree = Math.floor(Math.random() * TREES_STATIC.length);
-          } else {
-            bot.cargo += 2;
-            bot.holdTbs = bot.inTruck ? 0 : 1;
-            bot.targetTree = (bot.targetTree + 17) % TREES_STATIC.length;
-          }
-        }
-        activePeers.push({
-          id: bot.id,
-          n: bot.name,
-          b: 1,
-          x: +bot.x.toFixed(2),
-          y: +bot.y.toFixed(2),
-          z: +bot.z.toFixed(2),
-          yaw: +bot.yaw.toFixed(3),
-          st: +bot.steer.toFixed(2),
-          a: bot.anim,
-          tr: bot.inTruck ? 1 : 0,
-          hd: bot.holdTbs,
-          pc: 0,
-          sp: 0,
-          cg: bot.cargo,
-          av: bot.avatar,
-        });
-      }
     }
 
     this.broadcast({
@@ -579,11 +459,14 @@ export class PlantationHub extends DurableObject {
         if (typeof msg.y === "number" && Number.isFinite(msg.y)) sess.y = Math.max(-5, Math.min(30, msg.y));
         if (typeof msg.z === "number" && Number.isFinite(msg.z)) sess.z = Math.max(-108, Math.min(108, msg.z));
         if (typeof msg.yaw === "number" && Number.isFinite(msg.yaw)) sess.yaw = msg.yaw;
-        if (typeof msg.steer === "number" && Number.isFinite(msg.steer)) sess.steer = Math.max(-0.7, Math.min(0.7, msg.steer));
+        const nextSteer = typeof msg.steerAngle === "number" ? msg.steerAngle : msg.steer;
+        if (typeof nextSteer === "number" && Number.isFinite(nextSteer)) sess.steer = Math.max(-0.7, Math.min(0.7, nextSteer));
         if (typeof msg.anim === "number") sess.anim = msg.anim | 0;
         if (typeof msg.inTruck === "boolean") sess.inTruck = msg.inTruck;
-        if (typeof msg.holdTbs === "boolean") sess.holdTbs = msg.holdTbs;
-        if (typeof msg.pushCart === "boolean") sess.pushCart = msg.pushCart;
+        const nextHold = typeof msg.heldTbs === "boolean" ? msg.heldTbs : msg.holdTbs;
+        if (typeof nextHold === "boolean") sess.holdTbs = nextHold;
+        const nextCart = typeof msg.pushingAngkong === "boolean" ? msg.pushingAngkong : msg.pushCart;
+        if (typeof nextCart === "boolean") sess.pushCart = nextCart;
         break;
       }
 
@@ -642,16 +525,21 @@ export class PlantationHub extends DurableObject {
       }
 
       case "load_tbs": {
-        // Authoritatively transfers picked-up TBS from hands into Canter Truck or Angkong Cart!
-        const amount = Math.max(1, Math.min(4, msg.count | 0 || 1));
+        // Authoritatively transfers picked-up TBS from hands/angkong into Canter Truck!
+        const rawUnits = typeof msg.units === "number" ? msg.units : msg.count;
+        const amount = Math.max(1, Math.min(8, (rawUnits | 0) || 1));
+        const goldReq = Math.max(0, Math.min(amount, (msg.goldUnits | 0) || 0));
         if (sess.pendingGround > 0) {
           const take = Math.min(sess.pendingGround, amount);
           sess.pendingGround -= take;
           sess.cargo = Math.min(24, sess.cargo + take);
           if (sess.pendingGold > 0) {
-            sess.goldCargo += 1;
+            sess.goldCargo = Math.min(24, sess.goldCargo + 1);
             sess.pendingGold -= 1;
           }
+        } else {
+          sess.cargo = Math.min(24, sess.cargo + amount);
+          sess.goldCargo = Math.min(24, sess.goldCargo + goldReq);
         }
         ws.send(JSON.stringify({
           type: "cargo_sync",
@@ -660,7 +548,7 @@ export class PlantationHub extends DurableObject {
           goldCargo: sess.goldCargo,
           maxCap: 24,
           combo: sess.combo,
-          isGold: false,
+          isGold: goldReq > 0,
         }));
         this.broadcast({
           type: "load_fx",
@@ -757,8 +645,8 @@ export class PlantationHub extends DurableObject {
       case "voice": {
         // Real-time low-latency 8kHz u-law voice relay across players in room (zero disk storage)
         if (now - sess.lastVoiceAt < 55) break;
-        const data = typeof msg.data === "string" ? msg.data : "";
-        if (!data || data.length > 4096) break;
+        const pcm = typeof msg.pcm === "string" && msg.pcm ? msg.pcm : (typeof msg.data === "string" ? msg.data : "");
+        if (!pcm || pcm.length > 4096) break;
         sess.lastVoiceAt = now;
         sess.speakingUntil = now + 450;
         const channel = msg.channel === "proximity" ? "proximity" : "global";
@@ -769,7 +657,8 @@ export class PlantationHub extends DurableObject {
           channel,
           x: +sess.x.toFixed(1),
           z: +sess.z.toFixed(1),
-          data,
+          pcm,
+          data: pcm,
         }, ws);
         break;
       }
@@ -811,6 +700,8 @@ export class PlantationHub extends DurableObject {
         if (typeof reqAv.title === "string" && sanitizeText(reqAv.title, 28)) {
           nextAv.title = sanitizeText(reqAv.title, 28);
         }
+        if (typeof reqAv.glasses === "boolean") nextAv.glasses = reqAv.glasses;
+        if (typeof reqAv.waistParang === "boolean") nextAv.waistParang = reqAv.waistParang;
         const nextName = msg.name ? sanitizeText(msg.name, 20) || sess.profile.name : sess.profile.name;
 
         this.sql.exec(
@@ -1000,7 +891,7 @@ export class PlantationHub extends DurableObject {
     if (url.pathname === "/api/room_counts") {
       return jsonResp({
         onlineRealPlayers: this.sessions.size,
-        onlineTotalInWorld: this.sessions.size + (this.sessions.size < 6 ? this.bots.length : 0),
+        onlineTotalInWorld: this.sessions.size,
         event: this.worldEvent,
       });
     }
@@ -1010,10 +901,10 @@ export class PlantationHub extends DurableObject {
         ok: true,
         game: "Nyawit Live 3D",
         mode: "DEDICATED_MULTIPLAYER_VOICE_API",
-        apkVersion: "5.0.0",
+        apkVersion: "6.0.0",
         onlineRealPlayers: this.sessions.size,
-        onlineTotalInWorld: this.sessions.size + (this.sessions.size < 6 ? this.bots.length : 0),
-        features: ["MULTIPLAYER_SYNC_8HZ", "LOBBY_ROOMS", "GLOBAL_AND_ROOM_CHAT", "REALTIME_VOICE_RELAY", "GLOBAL_LEADERBOARD", "WEEKLY_TOURNAMENT"],
+        onlineTotalInWorld: this.sessions.size,
+        features: ["MULTIPLAYER_SYNC_8HZ", "REAL_PLAYER_ONLY", "LOBBY_ROOMS", "GLOBAL_AND_ROOM_CHAT", "REALTIME_VOICE_RELAY", "GLOBAL_LEADERBOARD", "WEEKLY_TOURNAMENT"],
         event: this.worldEvent,
         tournament: this.getTournamentPayload(),
         topPlayers: this.getGlobalLeaderboard(10),
@@ -1023,24 +914,34 @@ export class PlantationHub extends DurableObject {
 
     if (url.pathname === "/api/share" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
-      const code = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
-      const lb = this.getGlobalLeaderboard(50);
-      const pid = sanitizeText(body.playerId || "", 32);
-      const foundIdx = lb.findIndex((x) => x.id === pid);
-      const rankNum = foundIdx >= 0 ? foundIdx + 1 : Math.max(1, lb.length);
+      const pid = sanitizeText(body.playerId || "", 36);
+      const tok = sanitizeText(body.token || "", 64);
+      if (!pid || !tok) {
+        return jsonResp({ ok: false, error: "PLAYER_TOKEN_REQUIRED" }, 401);
+      }
+      const pRow = [...this.sql.exec(`SELECT * FROM players WHERE id = ? AND token = ?`, pid, tok)][0];
+      if (!pRow) {
+        return jsonResp({ ok: false, error: "INVALID_PLAYER_CREDENTIALS" }, 403);
+      }
 
-      const playerName = sanitizeText(body.playerName || "Juragan Sawit", 24);
-      const title = sanitizeText(body.title || "Pemanen Kebun", 32);
-      const totalKg = Math.max(0, Number(body.totalKg) || 0);
-      const allTimeScore = Math.max(0, Number(body.score) || 0);
-      const weeklyPoints = Math.max(0, Number(body.weeklyPoints) || 0);
-      const socialHandle = sanitizeText(body.socialHandle || "", 40);
-      const hat = VALID_HATS.has(body.hat) ? body.hat : "hat_caping";
+      const hydrated = this.hydrateProfile(pRow);
+      const lb = this.getGlobalLeaderboard(100);
+      const foundIdx = lb.findIndex((x) => x.id === hydrated.id);
+      const rankNum = foundIdx >= 0 ? foundIdx + 1 : lb.length + 1;
+
+      const code = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+      const playerName = hydrated.name;
+      const title = hydrated.avatar.title || "Pemanen Kebun";
+      const totalKg = Math.max(0, Number(hydrated.totalKg) || 0);
+      const allTimeScore = Math.max(0, Number(hydrated.allTimeScore) || 0);
+      const weeklyPoints = Math.max(0, Number(hydrated.weeklyPoints) || 0);
+      const socialHandle = hydrated.socialHandle || "";
+      const hat = VALID_HATS.has(hydrated.avatar.hat) ? hydrated.avatar.hat : "hat_caping";
 
       this.sql.exec(
-        `INSERT INTO share_cards (code, player_name, title, total_kg, all_time_score, weekly_points, rank_num, social_handle, hat, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        code, playerName, title, totalKg, allTimeScore, weeklyPoints, rankNum, socialHandle, hat, Date.now()
+        `INSERT INTO share_cards (code, player_id, player_name, title, total_kg, all_time_score, weekly_points, rank_num, social_handle, hat, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        code, hydrated.id, playerName, title, totalKg, allTimeScore, weeklyPoints, rankNum, socialHandle, hat, Date.now()
       );
       const origin = this.env.PUBLIC_ORIGIN || `${url.protocol}//${url.host}`;
       return jsonResp({
@@ -1053,14 +954,17 @@ export class PlantationHub extends DurableObject {
 
     if (url.pathname.startsWith("/s/")) {
       const code = sanitizeText(url.pathname.slice(3), 16);
-      const card = [...this.sql.exec(`SELECT * FROM share_cards WHERE code = ?`, code)][0];
+      const card = [...this.sql.exec(`SELECT * FROM share_cards WHERE code = ? AND player_id != ''`, code)][0];
+      if (!card) {
+        return new Response("Share card not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      }
       const origin = this.env.PUBLIC_ORIGIN || `${url.protocol}//${url.host}`;
-      const pName = escapeHtml(card ? card.player_name : "Juragan Sawit");
-      const pTitle = escapeHtml(card ? card.title : "RAJA SAWIT NUSANTARA");
-      const pKg = card ? Number(card.total_kg).toLocaleString("id-ID") : "1.250";
-      const pScore = card ? Number(card.all_time_score).toLocaleString("id-ID") : "18.400";
-      const pRank = card ? Number(card.rank_num) : 1;
-      const pHandle = escapeHtml(card?.social_handle || "@nyawit.live");
+      const pName = escapeHtml(card.player_name);
+      const pTitle = escapeHtml(card.title);
+      const pKg = Number(card.total_kg).toLocaleString("id-ID");
+      const pScore = Number(card.all_time_score).toLocaleString("id-ID");
+      const pRank = Number(card.rank_num) || 1;
+      const pHandle = escapeHtml(card.social_handle || "@nyawit.live");
 
       const html = `<!doctype html>
 <html lang="id">
@@ -1104,7 +1008,7 @@ a.apk{display:block;text-align:center;padding:15px 18px;background:#F59E0B;color
         <div class="stat"><b>${pKg} Kg</b><span>Total Setoran TBS</span></div>
         <div class="stat"><b>${pScore}</b><span>Skor Kompetitif</span></div>
       </div>
-      <a class="apk" href="/download/apk">DOWNLOAD OFFICIAL ANDROID APK (v5.0.0)</a>
+      <a class="apk" href="/download/apk">DOWNLOAD OFFICIAL ANDROID APK (v6.0.0)</a>
       <div class="brand">
         <span>XYVERSE MULTIPLAYER &amp; VOICE BACKEND</span>
         <img src="/brand/logo_utama_horizontal_transparan_putih.png" alt="XyVerse Tech">
@@ -1120,13 +1024,25 @@ a.apk{display:block;text-align:center;padding:15px 18px;background:#F59E0B;color
   }
 }
 
+function resolveApkAssetName(rawAbi) {
+  const abi = String(rawAbi || "").toLowerCase().trim();
+  if (abi === "armeabi-v7a" || abi === "armv7" || abi === "arm32") return "NYAWIT-LIVE-v6-armeabi-v7a.apk";
+  if (abi === "x86_64" || abi === "x64") return "NYAWIT-LIVE-v6-x86_64.apk";
+  return "NYAWIT-LIVE-v6-arm64-v8a.apk";
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
 
-    if (url.pathname === "/download/apk") {
-      return Response.redirect(`https://github.com/${env.GITHUB_REPO || "xykal/nyawit-live"}/releases/latest/download/NyawitLive-v5.0.0-universal.apk`, 302);
+    if (url.pathname === "/download/apk" || url.pathname.startsWith("/download/apk/")) {
+      const pathAbi = url.pathname.startsWith("/download/apk/") ? url.pathname.slice("/download/apk/".length) : "";
+      const abi = pathAbi || url.searchParams.get("abi") || "arm64-v8a";
+      const assetName = resolveApkAssetName(abi);
+      const repo = env.GITHUB_REPO || "xykal/nyawit-live";
+      const relPath = env.APK_RELEASE_TAG ? `download/${env.APK_RELEASE_TAG}` : "latest/download";
+      return Response.redirect(`https://github.com/${repo}/releases/${relPath}/${assetName}`, 302);
     }
 
     if (url.pathname === "/api/rooms") {
@@ -1136,7 +1052,13 @@ export default {
           const stub = env.PLANTATION_HUB.get(id);
           const res = await stub.fetch(new Request(new URL("/api/room_counts", request.url)));
           const data = await res.json();
-          return { ...r, ...data };
+          return {
+            ...r,
+            label: r.name,
+            capacity: r.maxPlayers,
+            online: data.onlineRealPlayers || 0,
+            ...data,
+          };
         })
       );
       return jsonResp({ ok: true, rooms: results });

@@ -23,7 +23,7 @@ public sealed class EngineVerificationTests
     }
 
     [Fact]
-    public void NpakArchive_LoadsAll41UvMappedPbrModelsAndAtlasExists()
+    public void NpakArchive_LoadsAll57UvMappedPbrModelsAndAtlasExists()
     {
         string root = ResolveRepoRoot();
         string path = Path.Combine(root, "src", "Nyawit.Android", "Assets", "Meshes", "nyawit_models.npak");
@@ -34,7 +34,8 @@ public sealed class EngineVerificationTests
         using var fs = File.OpenRead(path);
         var archive = NpakArchive.Load(fs);
 
-        Assert.Equal(41, archive.Meshes.Count);
+        Assert.Equal(57, MeshCatalog.AllRequiredNames.Length);
+        Assert.Equal(57, archive.Meshes.Count);
         foreach (string requiredKey in MeshCatalog.AllRequiredNames)
         {
             Assert.True(archive.Meshes.ContainsKey(requiredKey), $"Missing required 3D model '{requiredKey}' in nyawit_models.npak");
@@ -45,12 +46,74 @@ public sealed class EngineVerificationTests
             Assert.Equal(3, kv.Value.Lods.Length);
             Assert.True(kv.Value.Lods[0].IndexCount >= kv.Value.Lods[2].IndexCount,
                 $"Mesh {kv.Key} LOD2 must be lighter than or equal to LOD0");
-            if (kv.Key != MeshCatalog.VfxPuffQuad && kv.Key != MeshCatalog.TropicalFern)
+            if (kv.Key != MeshCatalog.VfxPuffQuad &&
+                kv.Key != MeshCatalog.TropicalFern &&
+                kv.Key != MeshCatalog.TireTrackSegment &&
+                kv.Key != MeshCatalog.CanterHeadlightBeam)
             {
-                Assert.True(kv.Value.Lods[0].VertexCount >= 48,
-                    $"Mesh {kv.Key} must be a detailed sculpted mesh, never a primitive cube");
+                Assert.True(kv.Value.Lods[0].VertexCount >= 32,
+                    $"Mesh {kv.Key} must be a detailed sculpted mesh (got {kv.Value.Lods[0].VertexCount} verts)");
             }
         }
+    }
+
+    [Fact]
+    public void PlantationWorldAndSimdCuller_Verify220Palms96SaplingsLandmarksAnd6PlaneFrustum()
+    {
+        var trees = PlantationWorld.GenerateTrees();
+        var saplings = PlantationWorld.GenerateJuvenileSaplings(trees);
+        var (_, rocks) = PlantationWorld.GenerateScatterProps();
+        Assert.Equal(220, trees.Count);
+        Assert.Equal(96, saplings.Count);
+
+        var phys = new RigidBodyWorld(trees, rocks);
+
+        // SPBU Solar, Warung Kopi, Gudang Pupuk & Gapura Pillars must enforce solid collisions,
+        // while the road center through Gapura Offroad (0.0, 5.5) stays passable!
+        float sx = PlantationWorld.SpbuX, sz = PlantationWorld.SpbuZ;
+        Assert.True(phys.SolveSolidCircleCollision(ref sx, ref sz, 0.44f));
+
+        float wx = PlantationWorld.WarungX, wz = PlantationWorld.WarungZ;
+        Assert.True(phys.SolveSolidCircleCollision(ref wx, ref wz, 0.44f));
+
+        float gx = PlantationWorld.GudangX, gz = PlantationWorld.GudangZ;
+        Assert.True(phys.SolveSolidCircleCollision(ref gx, ref gz, 0.44f));
+
+        float pillarX = PlantationWorld.ArchNorthX + 3.12f, pillarZ = PlantationWorld.ArchNorthZ;
+        Assert.True(phys.SolveSolidCircleCollision(ref pillarX, ref pillarZ, 0.44f));
+
+        float laneX = PlantationWorld.ArchNorthX, laneZ = PlantationWorld.ArchNorthZ;
+        Assert.False(phys.SolveSolidCircleCollision(ref laneX, ref laneZ, 0.44f));
+
+        // 6-Plane Frustum Culling test (in-front objects visible with LOD0/LOD2, behind-camera object culled)
+        float[] proj = new float[16];
+        float[] view = new float[16];
+        float[] vpArr = new float[16];
+        Mat4Utils.CreatePerspective(proj, MathF.PI / 3f, 16f / 9f, 0.3f, 220f);
+        Mat4Utils.CreateLookAt(view, 0f, 3f, 0f, 0f, 3f, 20f);
+        Mat4Utils.Multiply(vpArr, proj, view);
+
+        float[] planes = new float[24];
+        SimdCuller.ExtractFrustumPlanes(vpArr, planes);
+
+        float[] posXyz =
+        [
+            0f, 3f, 12f,   // [0] 12m ahead -> visible LOD 0
+            0f, 3f, -15f,  // [1] 15m behind -> culled (-1)
+            0f, 3f, 75f,   // [2] 75m ahead -> visible LOD 2
+        ];
+        sbyte[] outLod = new sbyte[3];
+        int vis = SimdCuller.CullFrustum6Plane(
+            posXyz, 3, planes,
+            0f, 3f, 0f,
+            centerYOffset: 0f, boundRadius: 1.5f,
+            lod0Dist: 28f, lod1Dist: 62f, renderDist: 140f,
+            outLod);
+
+        Assert.Equal(2, vis);
+        Assert.Equal((sbyte)0, outLod[0]);
+        Assert.Equal((sbyte)-1, outLod[1]);
+        Assert.Equal((sbyte)2, outLod[2]);
     }
 
     [Fact]

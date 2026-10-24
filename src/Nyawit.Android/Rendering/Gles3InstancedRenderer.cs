@@ -62,6 +62,24 @@ public struct SmoothedRigPose
     public float UaRRx, UaRRz, FaRRx, FaRRy;
 }
 
+public struct TireTrackDecal
+{
+    public bool Active;
+    public float X, Y, Z;
+    public float Rx, Ry, Rz;
+    public float Age, Life;
+}
+
+public struct FallingFrond
+{
+    public bool Active;
+    public float X, Y, Z;
+    public float Vx, Vy, Vz;
+    public float Rx, Ry, Rz;
+    public float GroundY;
+    public float Age, Life;
+}
+
 /// <summary>
 /// NyawitEngine v4.0 Photorealistic OpenGL ES 3.0 Hardware-Instanced PBR + Shadow-Mapped Renderer:
 ///   - 2048x2048 Mipmapped + Anisotropic RGBA8 PBR Texture Atlas + Zero-Seam Alpha Cutout Foliage
@@ -455,6 +473,7 @@ void main() {
     private readonly LiveMultiplayerSession? _net;
     private readonly List<StaticPropInstance> _ferns = [];
     private readonly List<StaticPropInstance> _rocks = [];
+    private readonly List<StaticPropInstance> _saplings = [];
 
     public RigidBodyWorld Physics { get; } = null!;
     public QualityGovernor Quality { get; } = new();
@@ -488,19 +507,29 @@ void main() {
     private const int MaxInstancesPerBatch = 1024;
     private readonly float[] _instStaging = new float[MaxInstancesPerBatch * 16];
     private readonly float[] _shadowStaging = new float[MaxInstancesPerBatch * 16];
-    private readonly float[][] _treeLodStaging = [new float[256 * 16], new float[256 * 16], new float[256 * 16]];
-    private readonly float[] _fruitStaging = new float[256 * 16];
-    private readonly float[] _goldStaging = new float[256 * 16];
+    private readonly float[][] _treeLodStaging = [new float[320 * 16], new float[320 * 16], new float[320 * 16]];
+    private readonly float[] _fruitStaging = new float[MaxInstancesPerBatch * 16];
+    private readonly float[] _goldStaging = new float[320 * 16];
+    private readonly float[] _frustumPlanes24 = new float[24];
     private readonly float[] _treePositionsXyz = [];
     private readonly sbyte[] _treeLodResult = [];
+    private readonly float[] _saplingPositionsXyz = [];
+    private readonly sbyte[] _saplingLodResult = [];
     private FloatBuffer? _directFloatBuffer;
 
-    // Pre-allocated zero-GC VFX particle pool & spring-smoothed animation state!
+    // Pre-allocated zero-GC VFX particle pool, terrain-conforming tire tracks, falling fronds & spring rig!
     private readonly VfxParticle[] _vfxPool = new VfxParticle[96];
     private int _vfxCursor;
+    private readonly TireTrackDecal[] _tireTracks = new TireTrackDecal[128];
+    private int _tireTrackCursor;
+    private float _lastTrackX = float.NaN, _lastTrackZ = float.NaN;
+    private readonly FallingFrond[] _fallingFronds = new FallingFrond[16];
+    private int _frondCursor;
     private float _dustEmitAccum;
     private float _exhaustEmitAccum;
     private SmoothedRigPose _localRigPose;
+    public bool NearSpbuSolar;
+    public bool NearWarungKopi;
 
     public bool InTruck;
     public float BoostTimer;
@@ -563,7 +592,8 @@ void main() {
         var (ferns, rocks) = PlantationWorld.GenerateScatterProps();
         _ferns = ferns;
         _rocks = rocks;
-        Physics = new RigidBodyWorld(trees, rocks);
+        _saplings = PlantationWorld.GenerateJuvenileSaplings(trees);
+        Physics = new RigidBodyWorld(trees, rocks, _saplings);
 
         _treePositionsXyz = new float[_trees.Count * 3];
         _treeLodResult = new sbyte[_trees.Count];
@@ -574,11 +604,21 @@ void main() {
             _treePositionsXyz[i * 3 + 2] = _trees[i].Z;
         }
 
+        _saplingPositionsXyz = new float[_saplings.Count * 3];
+        _saplingLodResult = new sbyte[_saplings.Count];
+        for (int i = 0; i < _saplings.Count; i++)
+        {
+            _saplingPositionsXyz[i * 3 + 0] = _saplings[i].X;
+            _saplingPositionsXyz[i * 3 + 1] = _saplings[i].Y;
+            _saplingPositionsXyz[i * 3 + 2] = _saplings[i].Z;
+        }
+
         _net.OnHarvestSpawnFruit += (tx, tz, isGold) =>
         {
             float gy = PlantationWorld.TerrainHeight(tx, tz);
             EmitHarvestBurstVfx(tx, gy + 5.6f, tz, isGold);
             EmitDustBurstVfx(tx + 0.6f, gy + 0.25f, tz + 0.6f, 6);
+            SpawnFallingFrond(tx, gy + 5.75f, tz);
             if (InTruck) Physics.LaunchDirectTreeToTruckArc(tx, tz, isGold);
             else Physics.SpawnHarvestedGroundFruit(tx, tz, isGold);
         };
@@ -635,6 +675,73 @@ void main() {
         p.Spin = (_vfxCursor % 7) * 0.8f;
     }
 
+    public void SpawnFallingFrond(float tx, float startY, float tz)
+    {
+        ref var f = ref _fallingFronds[_frondCursor];
+        float ang = (_frondCursor * 1.85f) + tx * 0.25f;
+        _frondCursor = (_frondCursor + 1) % _fallingFronds.Length;
+        float gx = tx + MathF.Cos(ang) * 1.15f;
+        float gz = tz + MathF.Sin(ang) * 1.15f;
+        f.Active = true;
+        f.X = gx;
+        f.Y = startY;
+        f.Z = gz;
+        f.Vx = MathF.Cos(ang) * 1.35f;
+        f.Vy = -0.6f;
+        f.Vz = MathF.Sin(ang) * 1.35f;
+        f.Rx = 0.25f;
+        f.Ry = ang;
+        f.Rz = 0.15f;
+        f.GroundY = RigidBodyWorld.SurfaceHeightWithStructures(gx, gz) + 0.05f;
+        f.Age = 0f;
+        f.Life = 22.0f;
+    }
+
+    public void EmitTireTrackAt(float wx, float wz, float yaw)
+    {
+        float h = RigidBodyWorld.SurfaceHeightWithStructures(wx, wz);
+        // Never stamp tire tracks onto open canal water!
+        bool onBridge = (MathF.Abs(wx + 28f) < 2.2f || MathF.Abs(wx - 28f) < 2.2f) && MathF.Abs(wz - PlantationWorld.CanalZ) < 4.3f;
+        if (!onBridge && MathF.Abs(wz - PlantationWorld.CanalZ) < 4.1f) return;
+
+        float sy = MathF.Sin(yaw), cy = MathF.Cos(yaw);
+        float hFront = RigidBodyWorld.SurfaceHeightWithStructures(wx + sy * 0.35f, wz + cy * 0.35f);
+        float hBack = RigidBodyWorld.SurfaceHeightWithStructures(wx - sy * 0.35f, wz - cy * 0.35f);
+        float hRight = RigidBodyWorld.SurfaceHeightWithStructures(wx + cy * 0.22f, wz - sy * 0.22f);
+        float hLeft = RigidBodyWorld.SurfaceHeightWithStructures(wx - cy * 0.22f, wz + sy * 0.22f);
+
+        ref var tr = ref _tireTracks[_tireTrackCursor];
+        _tireTrackCursor = (_tireTrackCursor + 1) % _tireTracks.Length;
+        tr.Active = true;
+        tr.X = wx;
+        tr.Y = h + 0.008f;
+        tr.Z = wz;
+        tr.Rx = -MathF.Atan2(hFront - hBack, 0.70f);
+        tr.Ry = yaw;
+        tr.Rz = MathF.Atan2(hLeft - hRight, 0.44f);
+        tr.Age = 0f;
+        tr.Life = 36.0f;
+    }
+
+    public void SeedShowcaseTireTracks()
+    {
+        for (int i = 0; i < _tireTracks.Length; i++) _tireTracks[i].Active = false;
+        _tireTrackCursor = 0;
+        var v = Physics.MainTruck;
+        for (int step = 1; step <= 10; step++)
+        {
+            float distBack = 1.35f + step * 0.68f;
+            float curveYaw = v.Yaw - step * 0.032f;
+            float sy = MathF.Sin(curveYaw), cy = MathF.Cos(curveYaw);
+            float cx = v.X - sy * distBack;
+            float cz = v.Z - cy * distBack;
+            EmitTireTrackAt(cx - 0.84f * cy, cz + 0.84f * sy, curveYaw);
+            EmitTireTrackAt(cx + 0.84f * cy, cz - 0.84f * sy, curveYaw);
+        }
+        _lastTrackX = v.X;
+        _lastTrackZ = v.Z;
+    }
+
     private void StepVfxParticles(float dt)
     {
         for (int i = 0; i < _vfxPool.Length; i++)
@@ -649,6 +756,37 @@ void main() {
             p.Vx *= (1f - dt * 1.8f);
             p.Vz *= (1f - dt * 1.8f);
             p.Vy -= 1.25f * dt;
+        }
+
+        for (int i = 0; i < _tireTracks.Length; i++)
+        {
+            if (!_tireTracks[i].Active) continue;
+            _tireTracks[i].Age += dt;
+            if (_tireTracks[i].Age >= _tireTracks[i].Life) _tireTracks[i].Active = false;
+        }
+
+        for (int i = 0; i < _fallingFronds.Length; i++)
+        {
+            if (!_fallingFronds[i].Active) continue;
+            ref var f = ref _fallingFronds[i];
+            f.Age += dt;
+            if (f.Age >= f.Life) { f.Active = false; continue; }
+            if (f.Y > f.GroundY)
+            {
+                f.Vy -= 8.2f * dt;
+                f.X += f.Vx * dt;
+                f.Y += f.Vy * dt;
+                f.Z += f.Vz * dt;
+                f.Rx += 1.6f * dt;
+                f.Ry += 0.9f * dt;
+                f.Rz = MathF.Sin(f.Age * 5.5f) * 0.35f;
+                if (f.Y <= f.GroundY)
+                {
+                    f.Y = f.GroundY;
+                    f.Rx = 0f;
+                    f.Rz = 0f;
+                }
+            }
         }
     }
 
@@ -968,9 +1106,9 @@ void main() {
             SplashProgress = System.Math.Clamp(elapsed / 2.2f, 0.05f, 1.0f);
         }
         if (SplashProgress < 0.35f)
-            SplashStatus = "INISIALISASI SHADER PBR & SHADOW MAP...";
+            SplashStatus = "INISIALISASI SHADER PBR & 6-PLANE FRUSTUM CULLER...";
         else if (SplashProgress < 0.72f)
-            SplashStatus = "MEMUAT ATLAS TEKSTUR 2048x2048 & 41 MODEL 3D...";
+            SplashStatus = "MEMUAT ATLAS TEKSTUR 2048x2048 & 57 MODEL 3D...";
         else
             SplashStatus = "MEMBUKA GARASI SHOWROOM SAWIT...";
 
@@ -1019,8 +1157,30 @@ void main() {
             camYaw: CamYaw,
             boars: _boarsSnap);
 
-        // Emit realistic tire dust behind Canter dual rear wheels + diesel exhaust smoke!
+        // Emit terrain-conforming herringbone tire tracks behind Canter dual rear wheels!
         float speedAbs = MathF.Abs(Physics.MainTruck.SpeedMs);
+        if (speedAbs > 0.65f)
+        {
+            if (float.IsNaN(_lastTrackX))
+            {
+                _lastTrackX = Physics.MainTruck.X;
+                _lastTrackZ = Physics.MainTruck.Z;
+            }
+            float tdx = Physics.MainTruck.X - _lastTrackX;
+            float tdz = Physics.MainTruck.Z - _lastTrackZ;
+            if (tdx * tdx + tdz * tdz >= 0.72f * 0.72f)
+            {
+                _lastTrackX = Physics.MainTruck.X;
+                _lastTrackZ = Physics.MainTruck.Z;
+                float sy = MathF.Sin(Physics.MainTruck.Yaw), cy = MathF.Cos(Physics.MainTruck.Yaw);
+                float rearAxleX = Physics.MainTruck.X - 1.25f * sy;
+                float rearAxleZ = Physics.MainTruck.Z - 1.25f * cy;
+                EmitTireTrackAt(rearAxleX - 0.84f * cy, rearAxleZ + 0.84f * sy, Physics.MainTruck.Yaw);
+                EmitTireTrackAt(rearAxleX + 0.84f * cy, rearAxleZ - 0.84f * sy, Physics.MainTruck.Yaw);
+            }
+        }
+
+        // Emit realistic tire dust behind Canter dual rear wheels + diesel exhaust smoke!
         if (InTruck && Quality.ParticlesEnabled && speedAbs > 1.8f)
         {
             _dustEmitAccum += dt * (4.0f + speedAbs * 0.85f);
@@ -1083,6 +1243,12 @@ void main() {
             + (NearbyAngkongId >= 0 ? Physics.Angkongs[NearbyAngkongId].CargoUnits : 0);
         float rdx = PlayerX - PlantationWorld.RamX, rdz = PlayerZ - PlantationWorld.RamZ;
         NearRamWeighbridge = totalSellableCargo > 0 && MathF.Sqrt(rdx * rdx + rdz * rdz) < 11.5f;
+
+        float sdx = PlayerX - PlantationWorld.SpbuX, sdz = PlayerZ - PlantationWorld.SpbuZ;
+        NearSpbuSolar = (sdx * sdx + sdz * sdz) < 8.5f * 8.5f;
+
+        float wdx = PlayerX - PlantationWorld.WarungX, wdz = PlayerZ - PlantationWorld.WarungZ;
+        NearWarungKopi = !InTruck && (wdx * wdx + wdz * wdz) < 6.5f * 6.5f;
 
         if (now >= _nextNetSyncSec)
         {
@@ -1264,9 +1430,20 @@ void main() {
 
         _net.CopyRenderState(_peersSnap, _boarsSnap, _chatSnap, dt);
 
-        float fx = lookX - eyeX, fy = lookY - eyeY, fz = lookZ - eyeZ;
-        float fl = MathF.Max(1e-4f, MathF.Sqrt(fx * fx + fy * fy + fz * fz));
-        SimdCuller.SelectLodBatch(_treePositionsXyz, _trees.Count, eyeX, eyeY, eyeZ, fx / fl, fy / fl, fz / fl, q.Lod0Distance, q.Lod1Distance, q.MaxDrawDistance, _treeLodResult);
+        Mat4Utils.CreatePerspective(_proj, fovDeg * MathF.PI / 180f, _surfaceWidth / (float)_surfaceHeight, 0.30f, 260f);
+        Mat4Utils.CreateLookAt(_view, eyeX, eyeY, eyeZ, lookX, lookY, lookZ);
+        Mat4Utils.Multiply(_vp, _proj, _view);
+        InvertMatrix4(_vp, _invVp);
+
+        SimdCuller.ExtractFrustumPlanes(_vp, _frustumPlanes24);
+        SimdCuller.CullFrustum6Plane(
+            _treePositionsXyz, _trees.Count, _frustumPlanes24,
+            eyeX, eyeY, eyeZ, centerYOffset: 4.5f, boundRadius: 5.5f,
+            q.Lod0Distance, q.Lod1Distance, q.MaxDrawDistance, _treeLodResult);
+        SimdCuller.CullFrustum6Plane(
+            _saplingPositionsXyz, _saplings.Count, _frustumPlanes24,
+            eyeX, eyeY, eyeZ, centerYOffset: 0.7f, boundRadius: 1.65f,
+            q.Lod0Distance, q.Lod1Distance, q.MaxDrawDistance, _saplingLodResult);
 
         int drawCalls = 0, tris = 0;
         float windAmp = storm ? 2.0f : 0.82f;
@@ -1300,11 +1477,6 @@ void main() {
         GLES30.GlViewport(0, 0, _surfaceWidth, _surfaceHeight);
         GLES30.GlClearColor(0.28f, 0.56f, 0.84f, 1.0f);
         GLES30.GlClear(GLES30.GlColorBufferBit | GLES30.GlDepthBufferBit);
-
-        Mat4Utils.CreatePerspective(_proj, fovDeg * MathF.PI / 180f, _surfaceWidth / (float)_surfaceHeight, 0.30f, 260f);
-        Mat4Utils.CreateLookAt(_view, eyeX, eyeY, eyeZ, lookX, lookY, lookZ);
-        Mat4Utils.Multiply(_vp, _proj, _view);
-        InvertMatrix4(_vp, _invVp);
 
         // Volumetric Cumulus Sky Dome
         GLES30.GlDepthMask(false);
@@ -1436,6 +1608,60 @@ void main() {
         c = Mat4Utils.WriteInstanceTRS(_instStaging, c, 28f, PlantationWorld.TerrainHeight(28f, PlantationWorld.CanalZ - 4.7f), PlantationWorld.CanalZ, 0, 0, 0, 1, 1, 1);
         DrawNamed(MeshCatalog.WoodenBridge, 0, _instStaging, c, ref drawCalls, ref tris);
 
+        // 2.2. v6.0 Expanded Estate Landmarks & Interactive Field Props (SPBU Solar, Warung Kopi, Gudang Pupuk, Gapura Offroad)
+        float spbuY = PlantationWorld.TerrainHeight(PlantationWorld.SpbuX, PlantationWorld.SpbuZ);
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, PlantationWorld.SpbuX, spbuY, PlantationWorld.SpbuZ, 0f, PlantationWorld.SpbuRotY, 0f, 1f, 1f, 1f);
+        DrawNamed(MeshCatalog.SpbuSolar, 0, _instStaging, c, ref drawCalls, ref tris);
+
+        c = 0;
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.SpbuX - 2.35f, spbuY, PlantationWorld.SpbuZ - 1.35f, 0f, 0.35f, 0f, 1f, 1f, 1f);
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.SpbuX - 2.35f, spbuY, PlantationWorld.SpbuZ - 0.85f, 0f, -0.22f, 0f, 1f, 1f, 1f);
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.SpbuX - 2.10f, spbuY, PlantationWorld.SpbuZ + 1.55f, 0f, 0.78f, 0f, 1f, 1f, 1f);
+        DrawNamed(MeshCatalog.ItemSolarCan, 0, _instStaging, c, ref drawCalls, ref tris);
+
+        float warungY = PlantationWorld.TerrainHeight(PlantationWorld.WarungX, PlantationWorld.WarungZ);
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, PlantationWorld.WarungX, warungY, PlantationWorld.WarungZ, 0f, PlantationWorld.WarungRotY, 0f, 1f, 1f, 1f);
+        DrawNamed(MeshCatalog.WarungKopi, 0, _instStaging, c, ref drawCalls, ref tris);
+
+        c = 0;
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.WarungX + 1.85f, warungY + 0.88f, PlantationWorld.WarungZ - 0.55f, 0f, 0.4f, 0f, 0.9f, 0.9f, 0.9f);
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.WarungX + 1.85f, warungY + 0.88f, PlantationWorld.WarungZ + 0.35f, 0f, -0.6f, 0f, 0.9f, 0.9f, 0.9f);
+        DrawNamed(MeshCatalog.ItemCoffeeCup, 0, _instStaging, c, ref drawCalls, ref tris);
+
+        c = 0;
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.WarungX + 2.45f, warungY, PlantationWorld.WarungZ + 1.85f, 0f, 0.25f, 0f, 1f, 1f, 1f);
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.WarungX + 2.45f, warungY + 0.46f, PlantationWorld.WarungZ + 1.85f, 0f, 0.55f, 0f, 0.95f, 0.95f, 0.95f);
+        DrawNamed(MeshCatalog.ItemCuanCrate, 0, _instStaging, c, ref drawCalls, ref tris);
+
+        float gudangY = PlantationWorld.TerrainHeight(PlantationWorld.GudangX, PlantationWorld.GudangZ);
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, PlantationWorld.GudangX, gudangY, PlantationWorld.GudangZ, 0f, PlantationWorld.GudangRotY, 0f, 1f, 1f, 1f);
+        DrawNamed(MeshCatalog.GudangPupuk, 0, _instStaging, c, ref drawCalls, ref tris);
+
+        c = 0;
+        for (int sk = 0; sk < 6; sk++)
+        {
+            float rowX = PlantationWorld.GudangX + 3.95f + (sk % 2) * 0.62f;
+            float rowZ = PlantationWorld.GudangZ - 1.25f + (sk / 2) * 0.95f;
+            c = Mat4Utils.WriteInstanceTRS(_instStaging, c, rowX, PlantationWorld.TerrainHeight(rowX, rowZ), rowZ, 0f, sk * 0.45f, 0f, 1f, 1f, 1f);
+        }
+        DrawNamed(MeshCatalog.ItemNpkSack, 0, _instStaging, c, ref drawCalls, ref tris);
+
+        c = 0;
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.ArchNorthX, PlantationWorld.TerrainHeight(PlantationWorld.ArchNorthX, PlantationWorld.ArchNorthZ), PlantationWorld.ArchNorthZ, 0f, 0f, 0f, 1f, 1f, 1f);
+        c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.ArchBridgeX, PlantationWorld.TerrainHeight(PlantationWorld.ArchBridgeX, PlantationWorld.ArchBridgeZ), PlantationWorld.ArchBridgeZ, 0f, 0f, 0f, 1f, 1f, 1f);
+        DrawNamed(MeshCatalog.OffroadArch, 0, _instStaging, c, ref drawCalls, ref tris);
+
+        // 2.3. Terrain-Conforming Canter Herringbone Tire Tracks (1 instanced draw call, zero floating over water!)
+        int nTracks = 0;
+        for (int i = 0; i < _tireTracks.Length; i++)
+        {
+            if (!_tireTracks[i].Active) continue;
+            ref var tr = ref _tireTracks[i];
+            float fade = 1f - System.Math.Clamp((tr.Age - 20f) / 16f, 0f, 0.72f);
+            nTracks = Mat4Utils.WriteInstanceTRS(_instStaging, nTracks, tr.X, tr.Y, tr.Z, tr.Rx, tr.Ry, tr.Rz, 1.08f * fade, 1f, 1.04f, 0.76f, 0.70f, 0.64f, 0f);
+        }
+        if (nTracks > 0) DrawNamed(MeshCatalog.TireTrackSegment, 0, _instStaging, nTracks, ref drawCalls, ref tris);
+
         // 2.5. Angkong Wheelbarrows
         int nCart = 0, nCartWheel = 0, nCartExtraFruit = 0;
         for (int i = 0; i < Physics.Angkongs.Length; i++)
@@ -1495,9 +1721,21 @@ void main() {
             DrawNamed(MeshCatalog.PalmTrunk, tier, _treeLodStaging[0], nTrunk, ref drawCalls, ref tris);
             DrawNamed(MeshCatalog.PalmCrown, tier, _treeLodStaging[1], nCrown, ref drawCalls, ref tris);
             DrawNamed(MeshCatalog.TbsBunch, tier, _fruitStaging, nBunch, ref drawCalls, ref tris);
+
+            int nSapling = 0;
+            for (int i = 0; i < _saplings.Count; i++)
+            {
+                if (_saplingLodResult[i] != tier) continue;
+                var sp = _saplings[i];
+                nSapling = Mat4Utils.WriteInstanceTRS(
+                    _treeLodStaging[2], nSapling,
+                    sp.X, sp.Y, sp.Z, 0f, sp.RotY, 0f,
+                    sp.Scale, sp.Scale, sp.Scale, 1f, 1f, 1f, tier < 2 ? windAmp * 0.72f : 0f);
+            }
+            if (nSapling > 0) DrawNamed(MeshCatalog.PalmSapling, tier, _treeLodStaging[2], nSapling, ref drawCalls, ref tris);
         }
 
-        // 3.5. Fallen Ground TBS & Thrown Arcs
+        // 3.5. Fallen Ground TBS, Thrown Arcs & Severed Cut Palm Fronds ("Pelepah Sawit Jatuh")
         int nDynFruit = 0;
         for (int i = 0; i < Physics.GroundFruits.Length; i++)
         {
@@ -1517,6 +1755,15 @@ void main() {
                 ar.IsGold ? 2.35f : 1.04f, ar.IsGold ? 1.80f : 1.02f, ar.IsGold ? 0.45f : 1.0f, 0f);
         }
         if (nDynFruit > 0) DrawNamed(MeshCatalog.TbsBunch, 0, _goldStaging, nDynFruit, ref drawCalls, ref tris);
+
+        int nFronds = 0;
+        for (int i = 0; i < _fallingFronds.Length; i++)
+        {
+            if (!_fallingFronds[i].Active) continue;
+            ref var fr = ref _fallingFronds[i];
+            nFronds = Mat4Utils.WriteInstanceTRS(_instStaging, nFronds, fr.X, fr.Y, fr.Z, fr.Rx, fr.Ry, fr.Rz, 1f, 1f, 1f, 1f, 1f, 1f, 0.25f);
+        }
+        if (nFronds > 0) DrawNamed(MeshCatalog.CutPalmFrond, 0, _instStaging, nFronds, ref drawCalls, ref tris);
 
         // 4. Undergrowth Alpha-Cutout Ferns & Granite Boulders
         if (q.DrawUndergrowthFerns)
@@ -1768,6 +2015,23 @@ void main() {
             DrawNamed(MeshCatalog.PksFactory, 2, _instStaging, c, ref drawCalls, ref tris);
         }
 
+        if ((PlantationWorld.SpbuX - focusX) * (PlantationWorld.SpbuX - focusX) + (PlantationWorld.SpbuZ - focusZ) * (PlantationWorld.SpbuZ - focusZ) < 38f * 38f)
+        {
+            c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, PlantationWorld.SpbuX, PlantationWorld.TerrainHeight(PlantationWorld.SpbuX, PlantationWorld.SpbuZ), PlantationWorld.SpbuZ, 0f, PlantationWorld.SpbuRotY, 0f, 1f, 1f, 1f);
+            DrawNamed(MeshCatalog.SpbuSolar, 2, _instStaging, c, ref drawCalls, ref tris);
+        }
+        if ((PlantationWorld.WarungX - focusX) * (PlantationWorld.WarungX - focusX) + (PlantationWorld.WarungZ - focusZ) * (PlantationWorld.WarungZ - focusZ) < 36f * 36f)
+        {
+            c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, PlantationWorld.WarungX, PlantationWorld.TerrainHeight(PlantationWorld.WarungX, PlantationWorld.WarungZ), PlantationWorld.WarungZ, 0f, PlantationWorld.WarungRotY, 0f, 1f, 1f, 1f);
+            DrawNamed(MeshCatalog.WarungKopi, 2, _instStaging, c, ref drawCalls, ref tris);
+        }
+        c = 0;
+        if ((PlantationWorld.ArchNorthX - focusX) * (PlantationWorld.ArchNorthX - focusX) + (PlantationWorld.ArchNorthZ - focusZ) * (PlantationWorld.ArchNorthZ - focusZ) < 36f * 36f)
+            c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.ArchNorthX, PlantationWorld.TerrainHeight(PlantationWorld.ArchNorthX, PlantationWorld.ArchNorthZ), PlantationWorld.ArchNorthZ, 0f, 0f, 0f, 1f, 1f, 1f);
+        if ((PlantationWorld.ArchBridgeX - focusX) * (PlantationWorld.ArchBridgeX - focusX) + (PlantationWorld.ArchBridgeZ - focusZ) * (PlantationWorld.ArchBridgeZ - focusZ) < 36f * 36f)
+            c = Mat4Utils.WriteInstanceTRS(_instStaging, c, PlantationWorld.ArchBridgeX, PlantationWorld.TerrainHeight(PlantationWorld.ArchBridgeX, PlantationWorld.ArchBridgeZ), PlantationWorld.ArchBridgeZ, 0f, 0f, 0f, 1f, 1f, 1f);
+        if (c > 0) DrawNamed(MeshCatalog.OffroadArch, 2, _instStaging, c, ref drawCalls, ref tris);
+
         if (!InTruck)
         {
             c = Mat4Utils.WriteInstanceTRS(_instStaging, 0, PlayerX, PlayerY + 0.88f, PlayerZ, 0, Physics.Player.Yaw, 0, 1, 1, 1);
@@ -1821,10 +2085,12 @@ void main() {
         // 2 Front Steered Single Wheels + 4 Dual Rear Heavy Canter Wheels (6 wheels in ONE single instanced draw call!)
         float sy = MathF.Sin(v.Yaw), cy = MathF.Cos(v.Yaw);
         int nw = 0;
+        float frontAxleYSum = 0f, rearAxleYSum = 0f;
         for (int s = 0; s < 2; s++)
         {
             float sign = s == 0 ? -1f : 1f;
             float wyFront = v.WheelWorldY[s] > 0.001f ? v.WheelWorldY[s] : (v.Y + 0.48f);
+            frontAxleYSum += wyFront;
             float fxW = v.X + (sign * 0.88f) * cy + 1.55f * sy;
             float fzW = v.Z - (sign * 0.88f) * sy + 1.55f * cy;
             nw = Mat4Utils.BoneMat.TRS(fxW, wyFront, fzW, ry: v.Yaw + v.SteerAngle)
@@ -1832,6 +2098,7 @@ void main() {
                 .Emit(_instStaging, nw);
 
             float wyRear = v.WheelWorldY[2 + s] > 0.001f ? v.WheelWorldY[2 + s] : (v.Y + 0.48f);
+            rearAxleYSum += wyRear;
             float innerX = sign * 0.74f, outerX = sign * 0.95f;
             nw = Mat4Utils.BoneMat.TRS(v.X + innerX * cy - 1.25f * sy, wyRear, v.Z - innerX * sy - 1.25f * cy, ry: v.Yaw)
                 .Child(0f, 0f, 0f, rx: v.WheelSpinRad)
@@ -1841,6 +2108,37 @@ void main() {
                 .Emit(_instStaging, nw);
         }
         DrawNamed(MeshCatalog.TruckWheel, 0, _instStaging, nw, ref drawCalls, ref tris);
+
+        // Live Heavy-Duty Leaf-Spring Solid Axles ("Gardan & Per Daun Baja") + Spinning Propeller Driveshaft ("Kopel")!
+        float fAxleY = frontAxleYSum * 0.5f;
+        float rAxleY = rearAxleYSum * 0.5f;
+        int nAxle = 0;
+        nAxle = Mat4Utils.BoneMat.TRS(v.X + 1.55f * sy, fAxleY, v.Z + 1.55f * cy, ry: v.Yaw + MathF.PI, rz: v.RollRad * 0.35f)
+            .Emit(_instStaging, nAxle);
+        nAxle = Mat4Utils.BoneMat.TRS(v.X - 1.25f * sy, rAxleY, v.Z - 1.25f * cy, ry: v.Yaw, rz: v.RollRad * 0.35f)
+            .Emit(_instStaging, nAxle);
+        DrawNamed(MeshCatalog.CanterAxleSuspension, 0, _instStaging, nAxle, ref drawCalls, ref tris);
+
+        var shaftMat = chassis.Child(0f, 0.50f, -1.08f, rz: v.WheelSpinRad * 2.8f, sx: 1f, sy: 1f, sz: 1.48f);
+        DrawNamed(MeshCatalog.CanterDriveshaft, 0, _instStaging, shaftMat.Emit(_instStaging, 0), ref drawCalls, ref tris);
+
+        // Warm Halogen Headlight Beams during storm ("HUJAN_BADAI") or Turbo Solar Boost!
+        bool beamsOn = (_net?.EventKind == "HUJAN_BADAI") || (hasDriver && BoostTimer > 0.05f);
+        if (beamsOn && Stage == AppSceneStage.Gameplay)
+        {
+            int nb = 0;
+            nb = chassis.Child(-0.72f, 0.76f, 2.30f).Emit(_instStaging, nb, 1.15f, 1.08f, 0.85f, 0.42f);
+            nb = chassis.Child(0.72f, 0.76f, 2.30f).Emit(_instStaging, nb, 1.15f, 1.08f, 0.85f, 0.42f);
+            GLES30.GlUniform1i(_uRenderMode, 2);
+            GLES30.GlEnable(GLES30.GlBlend);
+            GLES30.GlBlendFunc(GLES30.GlSrcAlpha, GLES30.GlOne);
+            GLES30.GlDepthMask(false);
+            DrawNamed(MeshCatalog.CanterHeadlightBeam, 0, _instStaging, nb, ref drawCalls, ref tris);
+            GLES30.GlDepthMask(true);
+            GLES30.GlBlendFunc(GLES30.GlSrcAlpha, GLES30.GlOneMinusSrcAlpha);
+            GLES30.GlDisable(GLES30.GlBlend);
+            GLES30.GlUniform1i(_uRenderMode, 0);
+        }
 
         if (cargoUnits > 0)
         {
@@ -1855,6 +2153,7 @@ void main() {
             DrawNamed(MeshCatalog.CharTorsoHead, 0, _instStaging, drvTorso.Emit(_instStaging, 0, cr, cg, cb), ref drawCalls, ref tris);
             var drvHead = drvTorso.Child(0f, 0.58f, 0.01f, ry: v.SteerAngle * 0.55f);
             DrawNamed(MeshCatalog.CharHead, 0, _instStaging, drvHead.Emit(_instStaging, 0), ref drawCalls, ref tris);
+            DrawNamed(MeshCatalog.CharFaceNeutral, 0, _instStaging, drvHead.Emit(_instStaging, 0), ref drawCalls, ref tris);
             if (av.Glasses)
                 DrawNamed(MeshCatalog.AccGlasses, 0, _instStaging, drvHead.Emit(_instStaging, 0), ref drawCalls, ref tris);
             if (!string.IsNullOrEmpty(av.Hat) && av.Hat != "none")
@@ -1897,16 +2196,18 @@ void main() {
         float bob = moving ? MathF.Abs(MathF.Cos(walkPhase)) * 0.046f : breath * 0.5f;
 
         float squatK = pickupTimer > 0.001f ? MathF.Sin(System.Math.Clamp(pickupTimer / 0.40f, 0f, 1f) * MathF.PI) : 0f;
-        float tgtHipOffset = 0.88f + bob - squatK * 0.34f;
-        float tgtTorsoRx = squatK * 0.54f + (moving ? 0.09f : 0.015f + breath * 0.6f);
+        float carryBrace = stance == HoldStance.CarryingTbs ? 1.0f : 0f;
+        float tgtHipOffset = 0.88f + bob - squatK * 0.34f - carryBrace * 0.032f;
+        float tgtTorsoRx = squatK * 0.54f + carryBrace * 0.078f + (moving ? 0.09f : 0.015f + breath * 0.6f);
 
-        float tgtThighL = -stride * 0.60f - squatK * 0.90f;
-        float tgtThighR = stride * 0.60f - squatK * 0.90f;
-        float tgtKneeL = (moving ? MathF.Max(0f, MathF.Cos(walkPhase)) * 0.66f : 0.05f) + squatK * 1.45f;
-        float tgtKneeR = (moving ? MathF.Max(0f, -MathF.Cos(walkPhase)) * 0.66f : 0.05f) + squatK * 1.45f;
+        float tgtThighL = -stride * 0.60f - squatK * 0.90f - carryBrace * 0.06f;
+        float tgtThighR = stride * 0.60f - squatK * 0.90f - carryBrace * 0.06f;
+        float tgtKneeL = (moving ? MathF.Max(0f, MathF.Cos(walkPhase)) * 0.66f : 0.05f) + squatK * 1.45f + carryBrace * 0.11f;
+        float tgtKneeR = (moving ? MathF.Max(0f, -MathF.Cos(walkPhase)) * 0.66f : 0.05f) + squatK * 1.45f + carryBrace * 0.11f;
 
         float tgtUaLRx, tgtUaLRz, tgtFaLRx, tgtFaLRy;
         float tgtUaRRx, tgtUaRRz, tgtFaRRx, tgtFaRRy;
+        float slashLookUpRx = 0f;
 
         if (pickupTimer > 0.001f)
         {
@@ -1926,20 +2227,26 @@ void main() {
         }
         else if (slashTimer > 0.001f)
         {
-            float sk = 1f - System.Math.Clamp(slashTimer / 0.46f, 0f, 1f);
-            float swing = MathF.Sin(sk * MathF.PI);
-            tgtUaLRx = -0.84f - swing * 1.15f; tgtUaLRz = -0.28f;
-            tgtFaLRx = -0.44f + swing * 0.26f; tgtFaLRy = 0.28f;
-            tgtUaRRx = -0.68f - swing * 1.22f; tgtUaRRz = 0.20f;
-            tgtFaRRx = -0.54f + swing * 0.26f; tgtFaRRy = -0.18f;
+            // Two-Phase 5.05m Telescopic SBL Egrek Cut-and-Lift:
+            //   Phase 1 (0.00..0.44): High overhead reach & hook into tall palm crown
+            //   Phase 2 (0.44..1.00): Powerful downward pull-slice ("Tarik Egrek")
+            float sk = 1f - System.Math.Clamp(slashTimer / 0.68f, 0f, 1f);
+            float reach = sk < 0.44f ? MathF.Sin((sk / 0.44f) * (MathF.PI * 0.5f)) : MathF.Cos(((sk - 0.44f) / 0.56f) * (MathF.PI * 0.5f));
+            float pull = sk >= 0.44f ? MathF.Sin(((sk - 0.44f) / 0.56f) * MathF.PI) : 0f;
+            tgtTorsoRx -= reach * 0.18f - pull * 0.14f;
+            slashLookUpRx = -reach * 0.34f;
+            tgtUaLRx = -0.90f - reach * 1.18f + pull * 0.62f; tgtUaLRz = -0.24f;
+            tgtFaLRx = -0.48f + reach * 0.32f - pull * 0.22f; tgtFaLRy = 0.26f;
+            tgtUaRRx = -0.78f - reach * 1.24f + pull * 0.68f; tgtUaRRz = 0.18f;
+            tgtFaRRx = -0.56f + reach * 0.34f - pull * 0.24f; tgtFaRRy = -0.18f;
         }
         else if (stance == HoldStance.CarryingTbs)
         {
             float carryBob = moving ? MathF.Sin(walkPhase * 2f) * 0.055f : breath;
-            tgtUaLRx = -0.74f + carryBob; tgtUaLRz = -0.20f;
-            tgtFaLRx = -0.74f;            tgtFaLRy = 0.28f;
-            tgtUaRRx = -0.74f + carryBob; tgtUaRRz = 0.20f;
-            tgtFaRRx = -0.74f;            tgtFaRRy = -0.28f;
+            tgtUaLRx = -0.82f + carryBob; tgtUaLRz = -0.22f;
+            tgtFaLRx = -0.82f;            tgtFaLRy = 0.30f;
+            tgtUaRRx = -0.82f + carryBob; tgtUaRRz = 0.22f;
+            tgtFaRRx = -0.82f;            tgtFaRRy = -0.30f;
         }
         else if (stance == HoldStance.PushingAngkong)
         {
@@ -1998,7 +2305,7 @@ void main() {
         var torsoMat = hipRoot.Child(0f, 0f, 0f, rx: tgtTorsoRx, ry: moving ? stride * 0.07f : 0f);
         var headMat = torsoMat.Child(
             0f, 0.58f + breath * 0.35f, 0.01f,
-            rx: -tgtTorsoRx * 0.45f + MathF.Sin(breathPhase * 0.6f) * 0.028f,
+            rx: -tgtTorsoRx * 0.45f + slashLookUpRx + MathF.Sin(breathPhase * 0.6f) * 0.028f,
             ry: moving ? -stride * 0.05f : MathF.Sin(breathPhase * 0.42f) * 0.095f);
 
         var thighL = hipRoot.Child(-0.105f, 0f, 0f, rx: tgtThighL, rz: -0.025f);
@@ -2013,6 +2320,8 @@ void main() {
 
         DrawNamed(MeshCatalog.CharTorsoHead, 0, _instStaging, torsoMat.Emit(_instStaging, 0, cr, cg, cb), ref drawCalls, ref tris);
         DrawNamed(MeshCatalog.CharHead, 0, _instStaging, headMat.Emit(_instStaging, 0), ref drawCalls, ref tris);
+        bool strainedFace = slashTimer > 0.001f || pickupTimer > 0.001f || throwTimer > 0.001f || stance == HoldStance.CarryingTbs;
+        DrawNamed(strainedFace ? MeshCatalog.CharFaceStrain : MeshCatalog.CharFaceNeutral, 0, _instStaging, headMat.Emit(_instStaging, 0), ref drawCalls, ref tris);
 
         int nThigh = 0;
         nThigh = thighL.Emit(_instStaging, nThigh);
@@ -2068,10 +2377,17 @@ void main() {
         }
         else
         {
-            float slashPitch = slashTimer > 0.001f
-                ? -0.55f + MathF.Sin((1f - slashTimer / 0.46f) * MathF.PI) * 1.35f
-                : 0.14f;
-            var toolMat = torsoMat.Child(0.03f, 0.22f, 0.34f, rx: slashPitch, rz: 0.08f);
+            float slashPitch = 0.14f;
+            float slashLiftY = 0.22f;
+            if (slashTimer > 0.001f)
+            {
+                float sk = 1f - System.Math.Clamp(slashTimer / 0.68f, 0f, 1f);
+                float reach = sk < 0.44f ? MathF.Sin((sk / 0.44f) * (MathF.PI * 0.5f)) : MathF.Cos(((sk - 0.44f) / 0.56f) * (MathF.PI * 0.5f));
+                float pull = sk >= 0.44f ? MathF.Sin(((sk - 0.44f) / 0.56f) * MathF.PI) : 0f;
+                slashPitch = 0.14f - reach * 0.46f + pull * 0.88f;
+                slashLiftY = 0.22f + reach * 0.58f - pull * 0.26f;
+            }
+            var toolMat = torsoMat.Child(0.03f, slashLiftY, 0.34f, rx: slashPitch, rz: 0.08f);
             DrawNamed(toolMesh, 0, _instStaging, toolMat.Emit(_instStaging, 0), ref drawCalls, ref tris);
         }
     }

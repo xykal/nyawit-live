@@ -37,16 +37,27 @@ public enum VectorIconKind : byte
     PlayChevron = 17,
     SettingsGear = 18,
     CloseCross = 19,
+    SteerLeft = 20,
+    SteerRight = 21,
+    PedalGas = 22,
+    PedalBrake = 23,
+}
+
+public enum VehicleControlMode : byte
+{
+    PedalsAndArrows = 0, // Default v6.0: Left/Right Steering Arrows + Gas & Brake/Reverse Pedals
+    AnalogJoystick = 1,  // Optional selectable mode in Pengaturan: 360-deg Analog Joystick
 }
 
 public enum ActiveModalOverlay : byte
 {
     None = 0,
-    Settings = 1,      // Pengaturan Sistem, Grafik, Frame Rate (30/60/90/120), Bayangan, Awan, Partikel & Audio!
+    Settings = 1,      // Pengaturan Sistem, Grafik, Frame Rate (30/60/90/120), Bayangan, Awan, Partikel & Kontrol!
     Wardrobe = 2,      // Lemari Pakaian & Aksesoris Pemanen Lengkap!
     SocialRoom = 3,    // Server Live, Room Kebun & Quick Chat!
     Ranking = 4,       // Papan Peringkat & Turnamen Mingguan!
     DailyReward = 5,   // Absensi & Bonus Harian!
+    TextInput = 6,     // 100% Custom Canvas QWERTY Text Input (Chat / Rename — ZERO stock EditText/AlertDialog!)
 }
 
 /// <summary>
@@ -86,7 +97,7 @@ public sealed class HudOverlayView : View
     private readonly Rect _srcRect = new();
     private readonly RectF _dstRect = new();
 
-    private readonly HitZoneSlot[] _hitZones = new HitZoneSlot[64];
+    private readonly HitZoneSlot[] _hitZones = new HitZoneSlot[96];
     private int _hitCount;
 
     private int _joyPointerId = -1;
@@ -94,11 +105,28 @@ public sealed class HudOverlayView : View
     private int _camPointerId = -1;
     private float _camLastX, _camLastY;
 
+    // Multi-touch Canter Arrow Steering + Gas/Brake Pedal Rectangles & Active States
+    private readonly RectF _steerLeftRect = new();
+    private readonly RectF _steerRightRect = new();
+    private readonly RectF _gasPedalRect = new();
+    private readonly RectF _brakePedalRect = new();
+    private bool _steerLeftHeld;
+    private bool _steerRightHeld;
+    private bool _gasHeld;
+    private bool _brakeHeld;
+
     private string _toastText = "";
     private long _toastUntilMs;
 
+    private string _textInputTitle = "KETIK TEKS";
+    private string _textInputBuffer = "";
+    private int _textInputMaxLen = 48;
+    private Action<string>? _textInputSubmit;
+    private ActiveModalOverlay _textInputReturnModal = ActiveModalOverlay.None;
+
     public ActiveModalOverlay ActiveModal { get; private set; } = ActiveModalOverlay.None;
     public int SettingsTabIndex { get; set; } // 0 = GRAFIK & FPS, 1 = VISUAL & BAYANGAN, 2 = AUDIO & KONTROL
+    public VehicleControlMode TruckControlMode { get; set; } = VehicleControlMode.PedalsAndArrows;
 
     private readonly List<LeaderboardRow> _leaderCache = new(16);
     private readonly List<RoomDescriptor> _roomsCache = new(8);
@@ -127,6 +155,8 @@ public sealed class HudOverlayView : View
     public event Action? OnTruckTogglePressed;
     public event Action? OnHornPressed;
     public event Action? OnProfileModified;
+    public event Action<VehicleControlMode>? OnVehicleControlModeChanged;
+    public event Action? OnEstatePoiActionPressed;
 
     private static readonly string[] HatCycle = [MeshCatalog.HatCaping, MeshCatalog.HatSafety, MeshCatalog.HatHeadband, MeshCatalog.HatCowboy, MeshCatalog.HatCrownGold];
     private static readonly string[] HatLabels = ["CAPING BAMBU", "HELM PROYEK", "IKAT KEPALA", "TOPI MANDOR", "MAHKOTA SULTAN"];
@@ -452,6 +482,36 @@ public sealed class HudOverlayView : View
                 canvas.DrawLine(cx - r * 0.65f, cy - r * 0.65f, cx + r * 0.65f, cy + r * 0.65f, _iconPaint);
                 canvas.DrawLine(cx + r * 0.65f, cy - r * 0.65f, cx - r * 0.65f, cy + r * 0.65f, _iconPaint);
                 break;
+
+            case VectorIconKind.SteerLeft:
+                _iconPath.MoveTo(cx + r * 0.42f, cy - r * 0.72f);
+                _iconPath.LineTo(cx - r * 0.56f, cy);
+                _iconPath.LineTo(cx + r * 0.42f, cy + r * 0.72f);
+                canvas.DrawPath(_iconPath, _iconPaint);
+                canvas.DrawLine(cx - r * 0.50f, cy, cx + r * 0.72f, cy, _iconPaint);
+                break;
+
+            case VectorIconKind.SteerRight:
+                _iconPath.MoveTo(cx - r * 0.42f, cy - r * 0.72f);
+                _iconPath.LineTo(cx + r * 0.56f, cy);
+                _iconPath.LineTo(cx - r * 0.42f, cy + r * 0.72f);
+                canvas.DrawPath(_iconPath, _iconPaint);
+                canvas.DrawLine(cx - r * 0.72f, cy, cx + r * 0.50f, cy, _iconPaint);
+                break;
+
+            case VectorIconKind.PedalGas:
+                canvas.DrawRect(cx - r * 0.45f, cy - r * 0.80f, cx + r * 0.45f, cy + r * 0.80f, _iconPaint);
+                canvas.DrawLine(cx - r * 0.28f, cy - r * 0.42f, cx + r * 0.28f, cy - r * 0.42f, _iconPaint);
+                canvas.DrawLine(cx - r * 0.28f, cy, cx + r * 0.28f, cy, _iconPaint);
+                canvas.DrawLine(cx - r * 0.28f, cy + r * 0.42f, cx + r * 0.28f, cy + r * 0.42f, _iconPaint);
+                break;
+
+            case VectorIconKind.PedalBrake:
+                canvas.DrawRect(cx - r * 0.72f, cy - r * 0.48f, cx + r * 0.72f, cy + r * 0.48f, _iconPaint);
+                canvas.DrawLine(cx - r * 0.35f, cy - r * 0.32f, cx - r * 0.35f, cy + r * 0.32f, _iconPaint);
+                canvas.DrawLine(cx, cy - r * 0.32f, cx, cy + r * 0.32f, _iconPaint);
+                canvas.DrawLine(cx + r * 0.35f, cy - r * 0.32f, cx + r * 0.35f, cy + r * 0.32f, _iconPaint);
+                break;
         }
     }
 
@@ -509,8 +569,9 @@ public sealed class HudOverlayView : View
         }
 
         // Anti-Lag UI Refresh Governor:
-        // Active joystick/toast refreshes smoothly at 20 Hz; idle HUD refreshes passively at 6 Hz (zero GPU overdraw choke!)
-        long nextDelay = (_joyPointerId != -1 || nowMs < _toastUntilMs) ? 50L : 170L;
+        // Active controls/toast refresh smoothly at 20 Hz; idle HUD refreshes passively at 6 Hz (zero GPU overdraw choke!)
+        bool controlsActive = _joyPointerId != -1 || _steerLeftHeld || _steerRightHeld || _gasHeld || _brakeHeld;
+        long nextDelay = (controlsActive || nowMs < _toastUntilMs) ? 50L : 170L;
         PostInvalidateDelayed(nextDelay);
     }
 
@@ -799,10 +860,14 @@ public sealed class HudOverlayView : View
         canvas.DrawLine(mcx, pad + Dp(4f), mcx, pad + mapSize - Dp(4f), _strokePaint);
         canvas.DrawLine(pad + Dp(4f), mcy, pad + mapSize - Dp(4f), mcy, _strokePaint);
 
-        // RAM PKS marker (gold square)
+        // RAM PKS marker (gold square) + SPBU Solar marker (amber dot)
         float ramMx = mcx + PlantationWorld.RamX * mScale, ramMz = mcy + PlantationWorld.RamZ * mScale;
         _fillPaint.Color = Color.Argb(255, 245, 196, 66);
         canvas.DrawRect(ramMx - Dp(3.5f), ramMz - Dp(3.5f), ramMx + Dp(3.5f), ramMz + Dp(3.5f), _fillPaint);
+
+        float spbuMx = mcx + PlantationWorld.SpbuX * mScale, spbuMz = mcy + PlantationWorld.SpbuZ * mScale;
+        _fillPaint.Color = Color.Argb(255, 251, 146, 60);
+        canvas.DrawCircle(spbuMx, spbuMz, Dp(2.6f), _fillPaint);
 
         // Main Canter marker (cyan square)
         float trkMx = mcx + _renderer.Physics.MainTruck.X * mScale, trkMz = mcy + _renderer.Physics.MainTruck.Z * mScale;
@@ -870,28 +935,64 @@ public sealed class HudOverlayView : View
             canvas.DrawText(tel, w - pad - Dp(8f), pad + btnS + Dp(15.5f), _textPaint);
         }
 
-        // 4. Bottom-Left Precision Analog Joystick
-        float baseR = Dp(56f);
-        float jcx = _joyPointerId != -1 ? _joyOriginX : pad + baseR + Dp(18f);
-        float jcy = _joyPointerId != -1 ? _joyOriginY : h - pad - baseR - Dp(12f);
-        float kx = _joyPointerId != -1 ? _joyKnobX : jcx;
-        float ky = _joyPointerId != -1 ? _joyKnobY : jcy;
+        // 4. Bottom-Left Movement / Steering Controls:
+        //    - Default in Canter (v6.0): Ergonomic Multi-Touch Left/Right Steering Arrows ([ < KIRI ] [ KANAN > ])
+        //    - On-Foot OR AnalogJoystick Mode: Smooth 360-deg Analog Joystick
+        bool usePedalsMode = _renderer.InTruck && TruckControlMode == VehicleControlMode.PedalsAndArrows;
+        if (usePedalsMode)
+        {
+            float stW = Dp(82f), stH = Dp(68f), stGap = Dp(10f);
+            float stTop = h - pad - stH;
+            _steerLeftRect.Set(pad, stTop, pad + stW, h - pad);
+            _steerRightRect.Set(pad + stW + stGap, stTop, pad + stW * 2f + stGap, h - pad);
 
-        _fillPaint.Color = Color.Argb(88, 10, 18, 22);
-        canvas.DrawCircle(jcx, jcy, baseR, _fillPaint);
-        _strokePaint.Color = Color.Argb(175, 74, 222, 128);
-        _strokePaint.StrokeWidth = Dp(1.6f);
-        canvas.DrawCircle(jcx, jcy, baseR, _strokePaint);
+            bool leftActive = _steerLeftHeld || (_renderer.LockShowcaseCam && _renderer.JoyX < -0.25f);
+            bool rightActive = _steerRightHeld || (_renderer.LockShowcaseCam && _renderer.JoyX > 0.25f);
 
-        _fillPaint.Color = Color.Argb(220, 34, 197, 94);
-        canvas.DrawCircle(kx, ky, Dp(21f), _fillPaint);
+            DrawSharpButton(
+                canvas, _steerLeftRect.Left, _steerLeftRect.Top, _steerLeftRect.Right, _steerLeftRect.Bottom,
+                "KIRI", VectorIconKind.SteerLeft,
+                leftActive ? Color.Argb(238, 22, 163, 74) : Color.Argb(214, 14, 24, 30),
+                leftActive ? Color.Argb(255, 187, 247, 208) : Color.Argb(190, 74, 222, 128),
+                Color.White, null, 9.2f, 8f);
 
-        // 5. Bottom-Right Ergonomic Action Cluster (Clean, Spacious, Zero Clutter!)
+            DrawSharpButton(
+                canvas, _steerRightRect.Left, _steerRightRect.Top, _steerRightRect.Right, _steerRightRect.Bottom,
+                "KANAN", VectorIconKind.SteerRight,
+                rightActive ? Color.Argb(238, 22, 163, 74) : Color.Argb(214, 14, 24, 30),
+                rightActive ? Color.Argb(255, 187, 247, 208) : Color.Argb(190, 74, 222, 128),
+                Color.White, null, 9.2f, 8f);
+        }
+        else
+        {
+            _steerLeftRect.SetEmpty();
+            _steerRightRect.SetEmpty();
+
+            float baseR = Dp(56f);
+            float jcx = _joyPointerId != -1 ? _joyOriginX : pad + baseR + Dp(18f);
+            float jcy = _joyPointerId != -1 ? _joyOriginY : h - pad - baseR - Dp(12f);
+            float kx = _joyPointerId != -1 ? _joyKnobX : jcx;
+            float ky = _joyPointerId != -1 ? _joyKnobY : jcy;
+
+            _fillPaint.Color = Color.Argb(88, 10, 18, 22);
+            canvas.DrawCircle(jcx, jcy, baseR, _fillPaint);
+            _strokePaint.Color = Color.Argb(175, 74, 222, 128);
+            _strokePaint.StrokeWidth = Dp(1.6f);
+            canvas.DrawCircle(jcx, jcy, baseR, _strokePaint);
+
+            _fillPaint.Color = Color.Argb(220, 34, 197, 94);
+            canvas.DrawCircle(kx, ky, Dp(21f), _fillPaint);
+        }
+
+        // 5. Bottom-Right Ergonomic Action / Pedal Cluster (Clean, Spacious, Zero Clutter!)
         float mainS = Dp(72f);
         float hx = w - pad - mainS, hy = h - pad - mainS;
 
         if (!_renderer.InTruck)
         {
+            _gasPedalRect.SetEmpty();
+            _brakePedalRect.SetEmpty();
+
             // Primary: PANEN EGREK / DODOS / TOJOK
             LastHarvestButtonRect = new RectF(hx, hy, hx + mainS, hy + mainS);
             bool treeReady = _renderer.NearestRipeTreeId >= 0;
@@ -927,9 +1028,48 @@ public sealed class HudOverlayView : View
                 Color.Argb(185, 74, 222, 128), Color.White,
                 () => OnAngkongTogglePressed?.Invoke(), 8.0f, 8f);
         }
+        else if (usePedalsMode)
+        {
+            // Authentic Canter Gas & Air-Brake/Reverse Pedals + Cabin Auxiliary Row Above!
+            float gasW = Dp(68f), gasH = Dp(104f);
+            float brkW = Dp(64f), brkH = Dp(78f), pGap = Dp(12f);
+            float gasL = w - pad - gasW, gasT = h - pad - gasH;
+            float brkR = gasL - pGap, brkL = brkR - brkW, brkT = h - pad - brkH;
+
+            _gasPedalRect.Set(gasL, gasT, w - pad, h - pad);
+            _brakePedalRect.Set(brkL, brkT, brkR, h - pad);
+
+            DrawSharpButton(
+                canvas, _gasPedalRect.Left, _gasPedalRect.Top, _gasPedalRect.Right, _gasPedalRect.Bottom,
+                "GAS", VectorIconKind.PedalGas,
+                _gasHeld ? Color.Argb(245, 22, 163, 74) : Color.Argb(224, 15, 42, 32),
+                _gasHeld ? Color.Argb(255, 187, 247, 208) : Color.Argb(220, 74, 222, 128),
+                Color.White, null, 10.0f, 8f);
+
+            DrawSharpButton(
+                canvas, _brakePedalRect.Left, _brakePedalRect.Top, _brakePedalRect.Right, _brakePedalRect.Bottom,
+                "REM", VectorIconKind.PedalBrake,
+                _brakeHeld ? Color.Argb(245, 185, 28, 28) : Color.Argb(224, 42, 20, 20),
+                _brakeHeld ? Color.Argb(255, 254, 202, 202) : Color.Argb(215, 248, 113, 113),
+                Color.White, null, 9.6f, 8f);
+
+            float auxH = Dp(46f), auxTop = gasT - auxH - Dp(10f);
+            LastHarvestButtonRect = new RectF(gasL, auxTop, w - pad, auxTop + auxH);
+            DrawSharpButton(canvas, gasL, auxTop, w - pad, auxTop + auxH, "TURBO", VectorIconKind.BasuriHorn,
+                Color.Argb(235, 180, 83, 9), Color.Argb(255, 253, 224, 71), Color.White,
+                () => OnHornPressed?.Invoke(), 8.8f, 7f);
+
+            LastTruckButtonRect = new RectF(brkL, auxTop, brkR, auxTop + auxH);
+            DrawSharpButton(canvas, brkL, auxTop, brkR, auxTop + auxH, "TURUN", VectorIconKind.SteeringWheel,
+                Color.Argb(220, 16, 28, 36), Color.Argb(225, 56, 189, 248), Color.White,
+                () => OnTruckTogglePressed?.Invoke(), 8.8f, 7f);
+        }
         else
         {
-            // Driving COE Mitsubishi Canter HUD Cluster: TURBO KLAKSON + TURUN KABIN
+            _gasPedalRect.SetEmpty();
+            _brakePedalRect.SetEmpty();
+
+            // Joystick Driving Mode HUD Cluster: TURBO KLAKSON + TURUN KABIN
             LastHarvestButtonRect = new RectF(hx, hy, hx + mainS, hy + mainS);
             DrawSharpButton(canvas, hx, hy, hx + mainS, hy + mainS, "TURBO", VectorIconKind.BasuriHorn,
                 Color.Argb(235, 180, 83, 9), Color.Argb(255, 253, 224, 71), Color.White,
@@ -943,7 +1083,7 @@ public sealed class HudOverlayView : View
                 () => OnTruckTogglePressed?.Invoke(), 8.8f, 8f);
         }
 
-        // Contextual Sell Button when near RAM PKS Weighbridge
+        // Contextual Sell Button when near RAM PKS Weighbridge, or Estate SPBU Solar / Warung Kopi Buff!
         if (_renderer.NearRamWeighbridge)
         {
             float sw = Dp(196f), sh = Dp(46f);
@@ -952,6 +1092,16 @@ public sealed class HudOverlayView : View
                 "JUAL SETOR RAM PKS", VectorIconKind.SellPks,
                 Color.Argb(242, 202, 138, 4), Color.Argb(255, 254, 249, 195), Color.White,
                 () => OnSellPressed?.Invoke(), 11f, 8f);
+        }
+        else if (_renderer.NearSpbuSolar || _renderer.NearWarungKopi)
+        {
+            float sw = Dp(192f), sh = Dp(42f);
+            float sl = (w - sw) * 0.5f, st = h - pad - sh;
+            string poiLabel = _renderer.NearSpbuSolar ? "ISI SOLAR TURBO GRATIS" : "NGOPI STAMINA SEGAR";
+            DrawSharpButton(canvas, sl, st, sl + sw, st + sh,
+                poiLabel, _renderer.NearSpbuSolar ? VectorIconKind.CanterTruck : VectorIconKind.DailyCrate,
+                Color.Argb(236, 15, 118, 110), Color.Argb(255, 153, 246, 228), Color.White,
+                () => OnEstatePoiActionPressed?.Invoke(), 9.8f, 7f);
         }
     }
 
@@ -975,6 +1125,7 @@ public sealed class HudOverlayView : View
             ActiveModalOverlay.SocialRoom => "SERVER DAN CHAT",
             ActiveModalOverlay.Ranking => "PERINGKAT PKS",
             ActiveModalOverlay.DailyReward => "HADIAH HARIAN",
+            ActiveModalOverlay.TextInput => _textInputTitle,
             _ => "MENU",
         };
 
@@ -1009,7 +1160,125 @@ public sealed class HudOverlayView : View
             case ActiveModalOverlay.DailyReward:
                 DrawDailyModalBody(canvas, ml, mt + Dp(60f), mr, mb);
                 break;
+            case ActiveModalOverlay.TextInput:
+                DrawTextInputModalBody(canvas, ml, mt + Dp(60f), mr, mb);
+                break;
         }
+    }
+
+    public void OpenTextInputModal(string title, string initialText, int maxLen, Action<string> onSubmit)
+    {
+        _textInputReturnModal = ActiveModal == ActiveModalOverlay.TextInput ? ActiveModalOverlay.None : ActiveModal;
+        _textInputTitle = title;
+        _textInputBuffer = initialText ?? "";
+        _textInputMaxLen = System.Math.Clamp(maxLen, 4, 80);
+        _textInputSubmit = onSubmit;
+        ActiveModal = ActiveModalOverlay.TextInput;
+        PostInvalidate();
+    }
+
+    public bool HandleHardwareKeyText(Keycode keyCode, KeyEvent? e)
+    {
+        if (ActiveModal != ActiveModalOverlay.TextInput) return false;
+        if (keyCode == Keycode.Del)
+        {
+            if (_textInputBuffer.Length > 0) _textInputBuffer = _textInputBuffer[..^1];
+            PostInvalidate();
+            return true;
+        }
+        if (keyCode == Keycode.Enter)
+        {
+            string val = _textInputBuffer;
+            ActiveModal = _textInputReturnModal;
+            _textInputSubmit?.Invoke(val);
+            PostInvalidate();
+            return true;
+        }
+        int uni = e?.UnicodeChar ?? 0;
+        if (uni >= 32 && uni <= 126 && _textInputBuffer.Length < _textInputMaxLen)
+        {
+            _textInputBuffer += (char)uni;
+            PostInvalidate();
+            return true;
+        }
+        return false;
+    }
+
+    private static readonly string[] QwertyRows = ["1234567890", "QWERTYUIOP", "ASDFGHJKL!", "ZXCVBNM.-_"];
+
+    private void DrawTextInputModalBody(Canvas canvas, float ml, float bodyTop, float mr, float mb)
+    {
+        float innerL = ml + Dp(20f), innerR = mr - Dp(20f);
+        float boxTop = bodyTop + Dp(2f), boxBot = boxTop + Dp(42f);
+        DrawSharpPanel(canvas, innerL, boxTop, innerR, boxBot,
+            Color.Argb(245, 7, 12, 16), Color.Argb(235, 56, 189, 248), 6f, 1.5f);
+
+        _textPaint.TextAlign = Paint.Align.Left;
+        _textPaint.TextSize = Dp(12.5f);
+        _textPaint.Color = Color.White;
+        string cursor = ((Java.Lang.JavaSystem.CurrentTimeMillis() / 450L) % 2L == 0L) ? "|" : "";
+        canvas.DrawText($"{_textInputBuffer}{cursor}", innerL + Dp(14f), boxTop + Dp(26f), _textPaint);
+
+        _textPaint.TextAlign = Paint.Align.Right;
+        _textPaint.TextSize = Dp(9.0f);
+        _textPaint.Color = Color.Argb(185, 148, 163, 184);
+        canvas.DrawText($"{_textInputBuffer.Length}/{_textInputMaxLen}", innerR - Dp(12f), boxTop + Dp(25f), _textPaint);
+
+        float ky = boxBot + Dp(10f);
+        float keyH = Dp(36f), gap = Dp(5f);
+        for (int r = 0; r < QwertyRows.Length; r++)
+        {
+            string row = QwertyRows[r];
+            float kw = (innerR - innerL - gap * (row.Length - 1)) / row.Length;
+            for (int c = 0; c < row.Length; c++)
+            {
+                char ch = row[c];
+                float kl = innerL + c * (kw + gap);
+                DrawSharpButton(canvas, kl, ky, kl + kw, ky + keyH, ch.ToString(), VectorIconKind.None,
+                    Color.Argb(228, 18, 28, 36), Color.Argb(175, 74, 222, 128), Color.White,
+                    () =>
+                    {
+                        if (_textInputBuffer.Length < _textInputMaxLen)
+                        {
+                            _sfx?.Play("ui_click");
+                            _textInputBuffer += ch;
+                            PostInvalidate();
+                        }
+                    }, 10.2f, 5f);
+            }
+            ky += keyH + gap;
+        }
+
+        float bTop = mb - Dp(48f), bBot = mb - Dp(10f);
+        float wSpace = (innerR - innerL) * 0.42f;
+        float wBtn = (innerR - innerL - wSpace - gap * 3f) / 3f;
+        float cx = innerL;
+
+        DrawSharpButton(canvas, cx, bTop, cx + wBtn, bBot, "HAPUS", VectorIconKind.None,
+            Color.Argb(235, 127, 29, 29), Color.Argb(220, 248, 113, 113), Color.White,
+            () => { _sfx?.Play("ui_click"); if (_textInputBuffer.Length > 0) _textInputBuffer = _textInputBuffer[..^1]; PostInvalidate(); }, 9.2f, 6f);
+        cx += wBtn + gap;
+
+        DrawSharpButton(canvas, cx, bTop, cx + wSpace, bBot, "SPASI", VectorIconKind.None,
+            Color.Argb(228, 20, 34, 44), Color.Argb(195, 56, 189, 248), Color.White,
+            () => { _sfx?.Play("ui_click"); if (_textInputBuffer.Length < _textInputMaxLen) _textInputBuffer += ' '; PostInvalidate(); }, 9.5f, 6f);
+        cx += wSpace + gap;
+
+        DrawSharpButton(canvas, cx, bTop, cx + wBtn, bBot, "BERSIH", VectorIconKind.None,
+            Color.Argb(225, 30, 41, 59), Color.Argb(180, 148, 163, 184), Color.White,
+            () => { _sfx?.Play("ui_click"); _textInputBuffer = ""; PostInvalidate(); }, 9.2f, 6f);
+        cx += wBtn + gap;
+
+        DrawSharpButton(canvas, cx, bTop, innerR, bBot, "SIMPAN", VectorIconKind.PlayChevron,
+            Color.Argb(245, 22, 163, 74), Color.Argb(255, 187, 247, 208), Color.White,
+            () =>
+            {
+                _sfx?.Play("ui_open");
+                string val = _textInputBuffer;
+                ActiveModal = _textInputReturnModal;
+                _textInputSubmit?.Invoke(val);
+                PostInvalidate();
+            }, 9.5f, 6f);
     }
 
     private void DrawSettingsModalBody(Canvas canvas, float ml, float bodyTop, float mr, float mb)
@@ -1017,7 +1286,7 @@ public sealed class HudOverlayView : View
         var q = _renderer!.Quality;
         float innerL = ml + Dp(20f), innerR = mr - Dp(20f);
         float tabW = (innerR - innerL - Dp(16f)) / 3f;
-        string[] tabs = ["GRAFIK & FPS", "VISUAL & BAYANGAN", "AUDIO & SISTEM"];
+        string[] tabs = ["GRAFIK & FPS", "VISUAL & BAYANGAN", "AUDIO & KONTROL"];
         for (int i = 0; i < 3; i++)
         {
             float tl = innerL + i * (tabW + Dp(8f));
@@ -1121,28 +1390,46 @@ public sealed class HudOverlayView : View
         }
         else
         {
+            float ctlRowH = Dp(38f), ctlStep = Dp(46f);
             bool sfxOn = _sfx?.Muted == false;
             DrawSettingLabel(canvas, innerL, y, "EFEK SUARA MESIN & PANEN", sfxOn ? "AKTIF" : "BISU");
-            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, ctlRowH,
                 ["BISU", "SUARA AKTIF"],
                 sfxOn ? 1 : 0,
                 idx => { if (_sfx != null) _sfx.Muted = idx == 0; _sfx?.Play("ui_click"); PostInvalidate(); });
-            y += rowStep;
+            y += ctlStep;
+
+            DrawSettingLabel(
+                canvas, innerL, y,
+                "KONTROL KEMUDI TRUK CANTER",
+                TruckControlMode == VehicleControlMode.PedalsAndArrows ? "PANAH + GAS/REM" : "JOYSTICK ANALOG");
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, ctlRowH,
+                ["PANAH + GAS/REM", "JOYSTICK ANALOG"],
+                (int)TruckControlMode,
+                idx =>
+                {
+                    _sfx?.Play("ui_click");
+                    TruckControlMode = (VehicleControlMode)idx;
+                    ResetDrivingPedalStates();
+                    OnVehicleControlModeChanged?.Invoke(TruckControlMode);
+                    PostInvalidate();
+                });
+            y += ctlStep;
 
             int sensIdx = _renderer.CameraSensitivity < 0.85f ? 0 : (_renderer.CameraSensitivity > 1.25f ? 2 : 1);
             DrawSettingLabel(canvas, innerL, y, "SENSITIVITAS KAMERA 3D", sensIdx == 0 ? "RENDAH" : (sensIdx == 2 ? "CEPAT" : "NORMAL"));
-            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, rowH,
+            DrawOptionStrip(canvas, innerL + Dp(185f), y, innerR, ctlRowH,
                 ["RENDAH", "NORMAL", "CEPAT"],
                 sensIdx,
                 idx => { float[] sv = [0.68f, 1.0f, 1.45f]; _renderer.CameraSensitivity = sv[idx]; _sfx?.Play("ui_click"); PostInvalidate(); });
-            y += rowStep + Dp(8f);
+            y += ctlStep + Dp(6f);
 
             if (_renderer.Stage == AppSceneStage.Gameplay)
             {
-                DrawSharpButton(canvas, innerL, y, innerR, y + Dp(46f),
+                DrawSharpButton(canvas, innerL, y, innerR, y + Dp(42f),
                     "KEMBALI KE GARASI SHOWROOM LOBBY", VectorIconKind.LobbyGrid,
                     Color.Argb(235, 30, 58, 138), Color.Argb(235, 96, 165, 250), Color.White,
-                    () => { CloseModal(); OnReturnLobbyRequested?.Invoke(); }, 10.5f, 7f);
+                    () => { CloseModal(); OnReturnLobbyRequested?.Invoke(); }, 10.2f, 7f);
             }
         }
     }
@@ -1373,6 +1660,61 @@ public sealed class HudOverlayView : View
         PostInvalidate();
     }
 
+    public void ResetDrivingPedalStates()
+    {
+        _steerLeftHeld = _steerRightHeld = _gasHeld = _brakeHeld = false;
+        _joyPointerId = -1;
+        if (_renderer != null && !_renderer.LockShowcaseCam)
+        {
+            _renderer.JoyX = 0f;
+            _renderer.JoyY = 0f;
+        }
+    }
+
+    private bool IsInsidePedalOrArrowZone(float x, float y)
+    {
+        return _steerLeftRect.Contains(x, y) || _steerRightRect.Contains(x, y) ||
+               _gasPedalRect.Contains(x, y) || _brakePedalRect.Contains(x, y);
+    }
+
+    private void SyncPedalAndSteerPointers(MotionEvent e, int liftedIndex)
+    {
+        if (_renderer == null) return;
+        bool left = false, right = false, gas = false, brake = false;
+        var act = e.ActionMasked;
+        if (act != MotionEventActions.Up && act != MotionEventActions.Cancel)
+        {
+            for (int p = 0; p < e.PointerCount; p++)
+            {
+                if (p == liftedIndex) continue;
+                int id = e.GetPointerId(p);
+                if (id == _camPointerId) continue;
+                float px = e.GetX(p), py = e.GetY(p);
+                if (_steerLeftRect.Contains(px, py)) left = true;
+                else if (_steerRightRect.Contains(px, py)) right = true;
+                if (_gasPedalRect.Contains(px, py)) gas = true;
+                if (_brakePedalRect.Contains(px, py)) brake = true;
+            }
+        }
+
+        bool changed = left != _steerLeftHeld || right != _steerRightHeld || gas != _gasHeld || brake != _brakeHeld;
+        _steerLeftHeld = left;
+        _steerRightHeld = right;
+        _gasHeld = gas;
+        _brakeHeld = brake;
+
+        if (left || right || gas || brake)
+            _renderer.LockShowcaseCam = false;
+
+        if (!_renderer.LockShowcaseCam)
+        {
+            _renderer.JoyX = left == right ? 0f : (left ? -1f : 1f);
+            _renderer.JoyY = brake ? 1f : (gas ? -1f : 0f);
+        }
+
+        if (changed) PostInvalidate();
+    }
+
     public override bool OnTouchEvent(MotionEvent? e)
     {
         if (e == null || _renderer == null) return false;
@@ -1380,6 +1722,10 @@ public sealed class HudOverlayView : View
         int idx = e.ActionIndex;
         int pid = e.GetPointerId(idx);
         float x = e.GetX(idx), y = e.GetY(idx);
+        bool usePedalsMode = _renderer.Stage == AppSceneStage.Gameplay
+                          && ActiveModal == ActiveModalOverlay.None
+                          && _renderer.InTruck
+                          && TruckControlMode == VehicleControlMode.PedalsAndArrows;
 
         if (action == MotionEventActions.Down || action == MotionEventActions.PointerDown)
         {
@@ -1404,9 +1750,17 @@ public sealed class HudOverlayView : View
 
             if (ActiveModal != ActiveModalOverlay.None) return true;
 
-            // 2. Left-half analog movement stick in Gameplay!
-            if (_renderer.Stage == AppSceneStage.Gameplay && _joyPointerId == -1 && x < Width * 0.44f && y > Height * 0.30f)
+            // 2a. Canter Arrow Steering + Gas/Brake Pedals Mode (multi-touch hold!)
+            if (usePedalsMode && IsInsidePedalOrArrowZone(x, y))
             {
+                SyncPedalAndSteerPointers(e, -1);
+                return true;
+            }
+
+            // 2b. Left-half analog movement stick in On-Foot or AnalogJoystick Mode!
+            if (!usePedalsMode && _renderer.Stage == AppSceneStage.Gameplay && _joyPointerId == -1 && x < Width * 0.44f && y > Height * 0.30f)
+            {
+                _renderer.LockShowcaseCam = false;
                 _joyPointerId = pid;
                 _joyOriginX = x;
                 _joyOriginY = y;
@@ -1429,12 +1783,15 @@ public sealed class HudOverlayView : View
         }
         else if (action == MotionEventActions.Move)
         {
+            if (usePedalsMode)
+                SyncPedalAndSteerPointers(e, -1);
+
             float maxR = Dp(56f);
             for (int p = 0; p < e.PointerCount; p++)
             {
                 int id = e.GetPointerId(p);
                 float px = e.GetX(p), py = e.GetY(p);
-                if (id == _joyPointerId)
+                if (!usePedalsMode && id == _joyPointerId)
                 {
                     float dx = px - _joyOriginX, dy = py - _joyOriginY;
                     float len = MathF.Sqrt(dx * dx + dy * dy);
@@ -1458,6 +1815,7 @@ public sealed class HudOverlayView : View
                     }
                     else
                     {
+                        _renderer.LockShowcaseCam = false;
                         _renderer.CamYaw -= dx * sens;
                         _renderer.CamPitch = System.Math.Clamp(_renderer.CamPitch + dy * sens * 0.72f, 0.06f, 0.88f);
                     }
@@ -1467,11 +1825,19 @@ public sealed class HudOverlayView : View
         }
         else if (action == MotionEventActions.Up || action == MotionEventActions.PointerUp || action == MotionEventActions.Cancel)
         {
+            if (usePedalsMode)
+            {
+                int lifted = action == MotionEventActions.PointerUp ? idx : -1;
+                SyncPedalAndSteerPointers(e, lifted);
+            }
             if (action == MotionEventActions.Cancel || pid == _joyPointerId)
             {
                 _joyPointerId = -1;
-                _renderer.JoyX = 0f;
-                _renderer.JoyY = 0f;
+                if (!usePedalsMode && !_renderer.LockShowcaseCam)
+                {
+                    _renderer.JoyX = 0f;
+                    _renderer.JoyY = 0f;
+                }
                 PostInvalidate();
             }
             if (action == MotionEventActions.Cancel || pid == _camPointerId)

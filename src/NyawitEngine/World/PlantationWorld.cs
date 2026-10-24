@@ -34,10 +34,29 @@ public struct FallingTbs
 public static class PlantationWorld
 {
     public const uint WorldSeed = 20261022u;
+    public const int MaturePalmCount = 220;
+    public const int JuvenileSaplingCount = 96;
     public const float CanalZ = -48.0f;
     public const float PksX = 0.0f, PksZ = -26.0f;
     public const float RamX = 0.0f, RamZ = -14.5f;
     public const float MandorX = -12.5f, MandorZ = -11.0f;
+
+    // v6.0 Expanded Plantation Estate Landmarks
+    public const float SpbuX = 21.0f, SpbuZ = -9.5f, SpbuRotY = -MathF.PI * 0.5f;
+    public const float WarungX = -12.5f, WarungZ = 3.5f, WarungRotY = MathF.PI * 0.5f;
+    public const float GudangX = -20.5f, GudangZ = -21.5f, GudangRotY = MathF.PI * 0.5f;
+    public const float ArchNorthX = 0.0f, ArchNorthZ = 5.5f;
+    public const float ArchBridgeX = 28.0f, ArchBridgeZ = -39.5f;
+
+    public static bool IsLandmarkPad(double x, double z)
+    {
+        if (System.Math.Abs(x - SpbuX) < 6.5 && System.Math.Abs(z - SpbuZ) < 6.8) return true;
+        if (System.Math.Abs(x - WarungX) < 5.2 && System.Math.Abs(z - WarungZ) < 5.5) return true;
+        if (System.Math.Abs(x - GudangX) < 6.2 && System.Math.Abs(z - GudangZ) < 6.5) return true;
+        if (System.Math.Abs(x - ArchNorthX) < 5.2 && System.Math.Abs(z - ArchNorthZ) < 3.5) return true;
+        if (System.Math.Abs(x - ArchBridgeX) < 5.2 && System.Math.Abs(z - ArchBridgeZ) < 3.5) return true;
+        return false;
+    }
 
     public static Func<double> CreateMulberry32(uint seed)
     {
@@ -99,25 +118,26 @@ public static class PlantationWorld
     }
 
     /// <summary>
-    /// Generates the exact same 180 oil palm tree coordinates & orientations as server/src/worldSpec.js!
+    /// Generates the exact same 220 harvestable mature oil palm tree coordinates & orientations as server/src/worldSpec.js!
     /// </summary>
     public static List<PalmTreeNode> GenerateTrees()
     {
         var rng = CreateMulberry32(WorldSeed);
-        var trees = new List<PalmTreeNode>(180);
-        for (double gx = -94.0; gx <= 94.0 && trees.Count < 180; gx += 11.5)
+        var trees = new List<PalmTreeNode>(MaturePalmCount);
+        for (double gx = -98.0; gx <= 98.0 && trees.Count < MaturePalmCount; gx += 10.8)
         {
-            for (double gz = -92.0; gz <= 94.0 && trees.Count < 180; gz += 11.5)
+            for (double gz = -98.0; gz <= 98.0 && trees.Count < MaturePalmCount; gz += 10.8)
             {
-                double x = System.Math.Round(gx + (rng() - 0.5) * 3.8, 2);
-                double z = System.Math.Round(gz + (rng() - 0.5) * 3.8, 2);
-                double rot = System.Math.Round(rng() * System.Math.PI * 2.0, 3);
-                double scale = System.Math.Round(0.84 + rng() * 0.34, 3);
+                double x = System.Math.Round(gx + (rng() - 0.5) * 3.8, 2, MidpointRounding.AwayFromZero);
+                double z = System.Math.Round(gz + (rng() - 0.5) * 3.8, 2, MidpointRounding.AwayFromZero);
+                double rot = System.Math.Round(rng() * System.Math.PI * 2.0, 3, MidpointRounding.AwayFromZero);
+                double scale = System.Math.Round(0.84 + rng() * 0.34, 3, MidpointRounding.AwayFromZero);
                 if (System.Math.Sqrt(x * x + (z + 15.0) * (z + 15.0)) < 22.0) continue;
                 if (System.Math.Abs(z - CanalZ) < 6.4) continue;
                 if (RoadFactor(x, z) > 0.35f) continue;
+                if (IsLandmarkPad(x, z)) continue;
 
-                float y = (float)System.Math.Round(TerrainHeight(x, z), 2);
+                float y = (float)System.Math.Round(TerrainHeight(x, z), 2, MidpointRounding.AwayFromZero);
                 trees.Add(new PalmTreeNode
                 {
                     Id = trees.Count,
@@ -133,6 +153,55 @@ public static class PlantationWorld
         return trees;
     }
 
+    /// <summary>
+    /// Generates 96 decorative juvenile palms ("Bibit Sawit TBM") planted along estate inter-rows,
+    /// kept strictly separate from the server's 220 harvestable mature palm list.
+    /// </summary>
+    public static List<StaticPropInstance> GenerateJuvenileSaplings(IReadOnlyList<PalmTreeNode> matureTrees)
+    {
+        var rng = CreateMulberry32(60062026u);
+        var saplings = new List<StaticPropInstance>(JuvenileSaplingCount);
+        int guard = 0;
+        while (saplings.Count < JuvenileSaplingCount && guard++ < 4000)
+        {
+            double x = System.Math.Round((rng() - 0.5) * 184.0, 2);
+            double z = System.Math.Round((rng() - 0.5) * 184.0, 2);
+            double rot = rng() * System.Math.PI * 2.0;
+            double scale = 0.85 + rng() * 0.42;
+
+            if (System.Math.Sqrt(x * x + (z + 15.0) * (z + 15.0)) < 20.5) continue;
+            if (System.Math.Abs(z - CanalZ) < 6.2) continue;
+            if (RoadFactor(x, z) > 0.25f) continue;
+            if (IsLandmarkPad(x, z)) continue;
+
+            bool tooClose = false;
+            for (int i = 0; i < matureTrees.Count; i++)
+            {
+                float dx = (float)x - matureTrees[i].X;
+                float dz = (float)z - matureTrees[i].Z;
+                if (dx * dx + dz * dz < 9.0f) { tooClose = true; break; }
+            }
+            if (tooClose) continue;
+            for (int i = 0; i < saplings.Count; i++)
+            {
+                float dx = (float)x - saplings[i].X;
+                float dz = (float)z - saplings[i].Z;
+                if (dx * dx + dz * dz < 16.0f) { tooClose = true; break; }
+            }
+            if (tooClose) continue;
+
+            saplings.Add(new StaticPropInstance
+            {
+                X = (float)x,
+                Y = TerrainHeight(x, z) - 0.03f,
+                Z = (float)z,
+                RotY = (float)rot,
+                Scale = (float)scale,
+            });
+        }
+        return saplings;
+    }
+
     public static (List<StaticPropInstance> Ferns, List<StaticPropInstance> Rocks) GenerateScatterProps()
     {
         var rng = CreateMulberry32(991177u);
@@ -143,14 +212,14 @@ public static class PlantationWorld
         {
             double x = (rng() - 0.5) * 190.0;
             double z = (rng() - 0.5) * 190.0;
-            if (RoadFactor(x, z) > 0.3f || System.Math.Sqrt(x * x + (z + 15.0) * (z + 15.0)) < 18.0) continue;
+            if (RoadFactor(x, z) > 0.3f || System.Math.Sqrt(x * x + (z + 15.0) * (z + 15.0)) < 18.0 || IsLandmarkPad(x, z)) continue;
             ferns.Add(new StaticPropInstance { X = (float)x, Y = TerrainHeight(x, z) - 0.05f, Z = (float)z, RotY = (float)(rng() * 6.283), Scale = (float)(0.75 + rng() * 0.55) });
         }
         for (int i = 0; i < 42; i++)
         {
             double x = (rng() - 0.5) * 195.0;
             double z = (rng() - 0.5) * 195.0;
-            if (RoadFactor(x, z) > 0.25f || System.Math.Sqrt(x * x + (z + 15.0) * (z + 15.0)) < 20.0) continue;
+            if (RoadFactor(x, z) > 0.25f || System.Math.Sqrt(x * x + (z + 15.0) * (z + 15.0)) < 20.0 || IsLandmarkPad(x, z)) continue;
             rocks.Add(new StaticPropInstance { X = (float)x, Y = TerrainHeight(x, z) - 0.12f, Z = (float)z, RotY = (float)(rng() * 6.283), Scale = (float)(0.70 + rng() * 0.80) });
         }
         return (ferns, rocks);

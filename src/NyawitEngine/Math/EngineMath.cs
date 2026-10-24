@@ -196,6 +196,24 @@ public static class SimdCuller
 {
     private static bool _nativeChecked;
     private static bool _nativeAvailable;
+    private static bool _native6PlaneChecked;
+    private static bool _native6PlaneAvailable;
+
+    [DllImport("nyawit_simd", CallingConvention = CallingConvention.Cdecl)]
+    private static extern unsafe void nyawit_extract_frustum_planes(
+        float* vpColMajor,
+        float* outPlanes24);
+
+    [DllImport("nyawit_simd", CallingConvention = CallingConvention.Cdecl)]
+    private static extern unsafe int nyawit_cull_frustum_6plane(
+        float* positionsXyz,
+        int count,
+        float* planes24,
+        float eyeX, float eyeY, float eyeZ,
+        float centerYOffset,
+        float boundRadius,
+        float lod0Dist, float lod1Dist, float renderDist,
+        sbyte* outLod);
 
     [DllImport("nyawit_simd", CallingConvention = CallingConvention.Cdecl)]
     private static extern unsafe int nyawit_cull_and_select_lod(
@@ -206,6 +224,148 @@ public static class SimdCuller
         float lod0Dist, float lod1Dist, float maxDist,
         float minCosFov,
         sbyte* outLod);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void NormalizePlane(float a, float b, float c, float d, Span<float> dst4)
+    {
+        float len2 = a * a + b * b + c * c;
+        float inv = len2 > 1e-12f ? (1f / MathF.Sqrt(len2)) : 1f;
+        dst4[0] = a * inv;
+        dst4[1] = b * inv;
+        dst4[2] = c * inv;
+        dst4[3] = d * inv;
+    }
+
+    public static unsafe void ExtractFrustumPlanes(float[] vpColMajor16, float[] outPlanes24)
+    {
+        EnsureNative6PlaneProbed();
+        if (_native6PlaneAvailable)
+        {
+            fixed (float* vp = vpColMajor16)
+            fixed (float* pl = outPlanes24)
+            {
+                nyawit_extract_frustum_planes(vp, pl);
+                return;
+            }
+        }
+        ExtractFrustumPlanesManaged(vpColMajor16, outPlanes24);
+    }
+
+    public static void ExtractFrustumPlanesManaged(ReadOnlySpan<float> vp, Span<float> outPlanes24)
+    {
+        float r0x = vp[0], r0y = vp[4], r0z = vp[8],  r0w = vp[12];
+        float r1x = vp[1], r1y = vp[5], r1z = vp[9],  r1w = vp[13];
+        float r2x = vp[2], r2y = vp[6], r2z = vp[10], r2w = vp[14];
+        float r3x = vp[3], r3y = vp[7], r3z = vp[11], r3w = vp[15];
+
+        NormalizePlane(r3x + r0x, r3y + r0y, r3z + r0z, r3w + r0w, outPlanes24.Slice(0, 4));
+        NormalizePlane(r3x - r0x, r3y - r0y, r3z - r0z, r3w - r0w, outPlanes24.Slice(4, 4));
+        NormalizePlane(r3x + r1x, r3y + r1y, r3z + r1z, r3w + r1w, outPlanes24.Slice(8, 4));
+        NormalizePlane(r3x - r1x, r3y - r1y, r3z - r1z, r3w - r1w, outPlanes24.Slice(12, 4));
+        NormalizePlane(r3x + r2x, r3y + r2y, r3z + r2z, r3w + r2w, outPlanes24.Slice(16, 4));
+        NormalizePlane(r3x - r2x, r3y - r2y, r3z - r2z, r3w - r2w, outPlanes24.Slice(20, 4));
+    }
+
+    private static unsafe void EnsureNative6PlaneProbed()
+    {
+        if (_native6PlaneChecked) return;
+        _native6PlaneChecked = true;
+        try
+        {
+            float* vp = stackalloc float[16];
+            float* pl = stackalloc float[24];
+            sbyte* lo = stackalloc sbyte[1];
+            vp[0] = vp[5] = vp[10] = vp[15] = 1f;
+            nyawit_extract_frustum_planes(vp, pl);
+            nyawit_cull_frustum_6plane(vp, 0, pl, 0f, 0f, 0f, 0f, 1f, 10f, 20f, 50f, lo);
+            _native6PlaneAvailable = true;
+        }
+        catch
+        {
+            _native6PlaneAvailable = false;
+        }
+    }
+
+    public static unsafe int CullFrustum6Plane(
+        float[] positionsXyz,
+        int count,
+        float[] planes24,
+        float eyeX, float eyeY, float eyeZ,
+        float centerYOffset,
+        float boundRadius,
+        float lod0Dist, float lod1Dist, float renderDist,
+        sbyte[] outLod)
+    {
+        EnsureNative6PlaneProbed();
+        if (_native6PlaneAvailable)
+        {
+            fixed (float* pos = positionsXyz)
+            fixed (float* pl = planes24)
+            fixed (sbyte* ol = outLod)
+            {
+                return nyawit_cull_frustum_6plane(
+                    pos, count, pl, eyeX, eyeY, eyeZ,
+                    centerYOffset, boundRadius, lod0Dist, lod1Dist, renderDist, ol);
+            }
+        }
+        return CullFrustum6PlaneManaged(
+            positionsXyz, count, planes24, eyeX, eyeY, eyeZ,
+            centerYOffset, boundRadius, lod0Dist, lod1Dist, renderDist, outLod);
+    }
+
+    public static int CullFrustum6PlaneManaged(
+        ReadOnlySpan<float> positionsXyz,
+        int count,
+        ReadOnlySpan<float> planes24,
+        float eyeX, float eyeY, float eyeZ,
+        float centerYOffset,
+        float boundRadius,
+        float lod0Dist, float lod1Dist, float renderDist,
+        Span<sbyte> outLod)
+    {
+        float l0Sq = lod0Dist * lod0Dist;
+        float l1Sq = lod1Dist * lod1Dist;
+        float maxSq = renderDist * renderDist;
+        float negR = -boundRadius;
+        int visible = 0;
+
+        for (int i = 0; i < count; i++)
+        {
+            float px = positionsXyz[i * 3 + 0];
+            float py = positionsXyz[i * 3 + 1] + centerYOffset;
+            float pz = positionsXyz[i * 3 + 2];
+
+            float dx = px - eyeX;
+            float dy = py - eyeY;
+            float dz = pz - eyeZ;
+            float d2 = dx * dx + dy * dy + dz * dz;
+
+            if (d2 > maxSq)
+            {
+                outLod[i] = -1;
+                continue;
+            }
+
+            bool outside = false;
+            for (int p = 0; p < 24; p += 4)
+            {
+                if (planes24[p + 0] * px + planes24[p + 1] * py + planes24[p + 2] * pz + planes24[p + 3] < negR)
+                {
+                    outside = true;
+                    break;
+                }
+            }
+            if (outside)
+            {
+                outLod[i] = -1;
+                continue;
+            }
+
+            outLod[i] = d2 < l0Sq ? (sbyte)0 : (d2 < l1Sq ? (sbyte)1 : (sbyte)2);
+            visible++;
+        }
+        return visible;
+    }
 
     public static unsafe int SelectLodBatch(
         float[] positionsXyz,

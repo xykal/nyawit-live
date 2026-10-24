@@ -9,12 +9,14 @@ public static class MeshCatalog
 {
     public const string PalmTrunk = "palm_trunk";
     public const string PalmCrown = "palm_crown";
+    public const string PalmSapling = "palm_sapling";
     public const string TbsBunch = "tbs_bunch";
     public const string TropicalFern = "tropical_fern";
     public const string RockBoulder = "rock_boulder";
     public const string CanterTruckBody = "canter_truck_body";
     public const string CanterSteeringWheel = "canter_steering_wheel";
     public const string TruckWheel = "truck_wheel";
+    public const string TireTrackSegment = "tire_track_segment";
     public const string TruckCargoHeap = "truck_cargo_heap";
     public const string AngkongCart = "angkong_cart";
     public const string PksFactory = "pks_factory";
@@ -29,6 +31,8 @@ public static class MeshCatalog
     public const string BoarLeg = "boar_leg";
     public const string CharTorsoHead = "char_torso_head";
     public const string CharHead = "char_head";
+    public const string CharFaceNeutral = "char_face_neutral";
+    public const string CharFaceStrain = "char_face_strain";
     public const string CharArm = "char_arm";
     public const string CharForearmHand = "char_forearm_hand";
     public const string CharLeg = "char_leg";
@@ -53,17 +57,33 @@ public static class MeshCatalog
     public const string ToolTojok = "tool_tojok";
     public const string ToolEgrekDragon = "tool_egrek_dragon";
 
+    public const string CanterAxleSuspension = "canter_axle_suspension";
+    public const string CanterDriveshaft = "canter_driveshaft";
+    public const string CanterHeadlightBeam = "canter_headlight_beam";
+    public const string CutPalmFrond = "cut_palm_frond";
+    public const string SpbuSolar = "spbu_solar";
+    public const string WarungKopi = "warung_kopi";
+    public const string GudangPupuk = "gudang_pupuk";
+    public const string OffroadArch = "offroad_arch";
+    public const string ItemSolarCan = "item_solar_can";
+    public const string ItemCoffeeCup = "item_coffee_cup";
+    public const string ItemNpkSack = "item_npk_sack";
+    public const string ItemCuanCrate = "item_cuan_crate";
+
     public static readonly string[] AllRequiredNames =
     [
-        PalmTrunk, PalmCrown, TbsBunch, TropicalFern, RockBoulder,
-        CanterTruckBody, CanterSteeringWheel, TruckWheel, TruckCargoHeap, AngkongCart,
+        PalmTrunk, PalmCrown, PalmSapling, TbsBunch, TropicalFern, RockBoulder,
+        CanterTruckBody, CanterSteeringWheel, TruckWheel, TireTrackSegment, TruckCargoHeap, AngkongCart,
         PksFactory, PksFan, SteamPuff, WeighbridgeRam, MandorPost, WoodenBridge,
         GarageShowroom, VfxPuffQuad, CelengBoar, BoarLeg,
-        CharTorsoHead, CharHead, CharArm, CharForearmHand, CharLeg, CharCalfBoot,
+        CharTorsoHead, CharHead, CharFaceNeutral, CharFaceStrain, CharArm, CharForearmHand, CharLeg, CharCalfBoot,
         HatCaping, HatSafety, HatHeadband, HatCowboy, HatCrownGold,
         AccGlasses, AccParangWaist,
         BackBasket, BackPack, BackCape, BackWingsGold,
-        ToolEgrek, ToolDodos, ToolTojok, ToolEgrekDragon
+        ToolEgrek, ToolDodos, ToolTojok, ToolEgrekDragon,
+        CanterAxleSuspension, CanterDriveshaft, CanterHeadlightBeam, CutPalmFrond,
+        SpbuSolar, WarungKopi, GudangPupuk, OffroadArch,
+        ItemSolarCan, ItemCoffeeCup, ItemNpkSack, ItemCuanCrate
     ];
 }
 
