@@ -234,7 +234,7 @@ precision mediump float;
 in float vAlpha;
 out vec4 fragColor;
 void main() {
-    fragColor = vec4(0.015, 0.035, 0.025, clamp(vAlpha * 0.48, 0.0, 0.56));
+    fragColor = vec4(0.008, 0.014, 0.020, clamp(vAlpha * 0.62, 0.0, 0.68));
 }";
 
     private const string VertexShaderSrc = @"#version 300 es
@@ -395,7 +395,13 @@ vec3 applySemiEnbGrade(vec3 hdr) {
 }
 
 float computeSunShadow(vec3 N, vec3 L, float camDist) {
-    if (uShadowMode <= 0 || camDist > 38.0) return 1.0;
+    if (uShadowMode <= 0 || camDist > 38.0) {
+        if (uRenderMode == 1) {
+            float dapple = sin(vWorldPos.x * 0.58 + 0.7) * cos(vWorldPos.z * 0.58 - 0.4) * 0.5 + 0.5;
+            return mix(1.0, mix(0.58, 1.0, smoothstep(0.32, 0.72, dapple)), (1.0 - clamp(vUV.x * 0.65, 0.0, 0.65)) * 0.55);
+        }
+        return 1.0;
+    }
     vec3 sc = vShadowCoord.xyz / max(vShadowCoord.w, 1e-4);
     sc = sc * 0.5 + 0.5;
     if (sc.x < 0.01 || sc.x > 0.99 || sc.y < 0.01 || sc.y > 0.99 || sc.z > 0.998) return 1.0;
@@ -1163,6 +1169,11 @@ void main() {
             {
                 int sleepMs = (int)((minFrameSec - elapsed) * 1000.0);
                 if (sleepMs > 1) Thread.Sleep(System.Math.Min(sleepMs, 24));
+            }
+            else if (SafeGles3ConfigChooser.IsSoftwareEmulator)
+            {
+                // Yield host vCPUs between software-rasterized frames so QEMU adbd & UI thread never starve on 2-core CI VMs!
+                Thread.Sleep(28);
             }
         }
 

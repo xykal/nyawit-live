@@ -170,6 +170,8 @@ public class MainActivity : Activity
             _voice = new VoiceChatManager(_net);
             _renderer = new Gles3InstancedRenderer(this, archive, trees, _net);
             RestoreGraphicsSettings();
+            if (SafeGles3ConfigChooser.IsSoftwareEmulator)
+                _renderer.Quality.ShadowTier = ShadowQualityTier.Medium;
 
             _glView = new GLSurfaceView(this);
             _glView.SetEGLContextClientVersion(3);
@@ -548,7 +550,7 @@ public class MainActivity : Activity
                     {
                         await Task.Delay(80);
                     }
-                    int targetFrame = (_renderer?.PresentedFrameCount ?? 0) + 3;
+                    int targetFrame = (_renderer?.PresentedFrameCount ?? 0) + 6;
                     while ((_renderer?.PresentedFrameCount ?? 0) < targetFrame && sw.ElapsedMilliseconds < 22000)
                     {
                         _glView?.RequestRender();
@@ -590,7 +592,7 @@ public class MainActivity : Activity
     private void ApplyStageByName(string stage)
     {
         if (string.IsNullOrWhiteSpace(stage) || _renderer == null || _hud == null || _net == null) return;
-        // Lock native 1.00x Ultra (1024x1024 Sun Shadows & Volumetric Clouds, zero EGL surface resize thrash!)
+        // Lock native 1.00x Ultra, 1024x1024 Sun Shadows & Volumetric Clouds (zero EGL surface resize thrash!)
         _renderer.Quality.SetManualPreset(GraphicsPreset.Ultra, disableAuto: true);
         if (SafeGles3ConfigChooser.IsSoftwareEmulator)
             _renderer.Quality.ShadowTier = ShadowQualityTier.Medium;
