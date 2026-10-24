@@ -324,50 +324,63 @@ def make_tube_segment(p0, p1, r0: float, r1: float, uv_rect, seg: int = 10, col=
 # ═══════════════════════════════════════════════════════════════════════════
 
 def build_palm_trunk(lod: int) -> MeshPart:
-    seg = (16, 11, 7)[lod]
-    n_rings = (14, 9, 5)[lod]
+    seg = (18, 12, 7)[lod]
+    n_rings = (15, 9, 5)[lod]
     rings = []
+    cols = []
     for i in range(n_rings):
         t = i / (n_rings - 1)
-        y = t * 6.45
-        lean_x = 0.28 * (t ** 1.35)
-        lean_z = 0.20 * math.sin(t * 1.45)
-        # Characteristic swollen bole at base tapering cleanly up to crown neck!
-        base_swell = 0.26 * math.exp(-t * 5.2)
-        swell_neck = 0.06 * math.exp(-((t - 0.96) ** 2) / 0.008)
-        r = 0.34 - 0.08 * t + base_swell + swell_neck + 0.018 * math.sin(t * 26.0)
+        y = t * 6.55
+        lean_x = 0.26 * (t ** 1.38)
+        lean_z = 0.18 * math.sin(t * 1.48)
+        # Characteristic swollen root-bole at base + subtle petiole ring reliefs + crown neck!
+        base_swell = 0.29 * math.exp(-t * 5.6)
+        swell_neck = 0.085 * math.exp(-((t - 0.96) ** 2) / 0.007)
+        r = 0.35 - 0.085 * t + base_swell + swell_neck + 0.016 * math.sin(t * 30.0)
         rings.append(ring_ellipse(r, r, y, seg, cx=lean_x, cz=lean_z))
 
-    parts = [make_loft(rings, UV_PALM_BARK, col=rgba(255, 255, 255, 42), cap_start=True, cap_end=True)]
+    trunk = make_loft(rings, UV_PALM_BARK, col=rgba(244, 240, 232, 36), cap_start=True, cap_end=True, u_rep=2.0, v_rep=3.0)
+    # Darken muddy root base & under-crown shadow naturally in vertex color
+    vy = np.clip(trunk.pos[:, 1] / 6.55, 0.0, 1.0)
+    shade = np.clip(0.62 + 0.42 * np.sin(vy * math.pi * 0.88), 0.58, 1.0)
+    trunk.col[:, 0] = (trunk.col[:, 0].astype(np.float32) * shade).astype(np.uint8)
+    trunk.col[:, 1] = (trunk.col[:, 1].astype(np.float32) * shade).astype(np.uint8)
+    trunk.col[:, 2] = (trunk.col[:, 2].astype(np.float32) * shade).astype(np.uint8)
+    parts = [trunk]
 
-    # Authentic Indonesian trunk epiphytic ferns ("pakis batang sawit" — see real plantation photo!)
+    # Authentic Sumatran trunk epiphytic ferns ("pakis batang sawit")
     if lod <= 1:
-        n_ferns = 8 if lod == 0 else 4
+        n_ferns = 9 if lod == 0 else 4
         for fi in range(n_ferns):
-            ft = 0.18 + 0.62 * (fi / max(1, n_ferns - 1))
-            fy = ft * 6.45
+            ft = 0.16 + 0.66 * (fi / max(1, n_ferns - 1))
+            fy = ft * 6.55
             fa = fi * 2.39996
-            fx = 0.28 * (ft ** 1.35) + math.sin(fa) * 0.31
-            fz = 0.20 * math.sin(ft * 1.45) + math.cos(fa) * 0.31
-            blade = make_quad((-0.44, 0.0, 0.0), (0.44, 0.0, 0.0), (0.52, 0.78, 0.28), (-0.52, 0.78, 0.28),
-                              UV_FERN, col=rgba(245, 255, 235, 55), double_sided=True)
-            parts.append(xform(blade, rx=0.42, ry=fa, translate=(fx, fy, fz)))
+            fx = 0.26 * (ft ** 1.38) + math.sin(fa) * 0.32
+            fz = 0.18 * math.sin(ft * 1.48) + math.cos(fa) * 0.32
+            blade = make_quad((-0.46, 0.0, 0.0), (0.46, 0.0, 0.0), (0.56, 0.82, 0.32), (-0.56, 0.82, 0.32),
+                              UV_FERN, col=rgba(225, 238, 212, 48), double_sided=True)
+            parts.append(xform(blade, rx=0.46, ry=fa, translate=(fx, fy, fz)))
     return merge_parts(parts)
 
 
 def make_arching_pinnate_frond(length: float, width: float, arch_up: float, droop: float, segs: int, tint_g: int = 255) -> MeshPart:
-    """Curved V-folded 3D pinnate oil palm frond sheet mapped directly onto 88-leaflet Alpha-Cutout UV_PALM_FROND!"""
-    pos, uv01, tris = [], [], []
-    # 3 vertices across width per station: left edge (-w), raised central midrib (0, +fold), right edge (+w)
+    """Curved V-folded 3D pinnate oil palm frond + woody petiole spine mapped onto Alpha-Cutout UV_PALM_FROND!"""
+    pos, uv01, cols, tris = [], [], [], []
+    # 3 vertices across width per station: left leaflet tips (-w), raised woody central rachis (0, +fold), right tips (+w)
     for i in range(segs + 1):
         t = i / segs  # 0 = trunk petiole base, 1 = drooping frond tip
         z = t * length
-        y = math.sin(t * math.pi * 0.58) * arch_up - (t ** 2.35) * droop
-        w = width * (0.22 + 0.85 * math.sin(min(1.0, t * 1.12) * math.pi * 0.82))
-        fold = 0.075 * width * (1.0 - 0.5 * t)
-        v_coord = 1.0 - t  # v=1 at base (bottom of tile), v=0 at tip (top of tile)
+        y = math.sin(t * math.pi * 0.56) * arch_up - (t ** 2.25) * droop
+        w = width * (0.20 + 0.88 * math.sin(min(1.0, t * 1.10) * math.pi * 0.84))
+        fold = 0.095 * width * (1.0 - 0.45 * t)
+        v_coord = 1.0 - t  # v=1 at base, v=0 at tip
         pos.extend([(-w, y - fold, z), (0.0, y + fold, z), (w, y - fold, z)])
         uv01.extend([[0.0, v_coord], [0.5, v_coord], [1.0, v_coord]])
+        # Subtle crown-interior AO near base (t=0) brightening along sunlit arch!
+        ao = 0.72 + 0.28 * min(1.0, t * 2.1)
+        cb = int(np.clip(tint_g * ao, 90, 255))
+        ct = int(np.clip(tint_g * (0.92 * ao), 85, 255))
+        cols.extend([rgba(ct, cb, ct, 56), rgba(min(255, cb + 12), min(255, cb + 14), ct, 64), rgba(ct, cb, ct, 56)])
 
     for i in range(segs):
         b0, b1 = i * 3, (i + 1) * 3
@@ -375,22 +388,32 @@ def make_arching_pinnate_frond(length: float, width: float, arch_up: float, droo
             [b0 + 0, b0 + 1, b1 + 1], [b0 + 0, b1 + 1, b1 + 0],
             [b0 + 1, b0 + 2, b1 + 2], [b0 + 1, b1 + 2, b1 + 1],
         ])
-    c = rgba(tint_g, tint_g, tint_g, 68)
     return MeshPart(np.array(pos, np.float32), map_uv(np.array(uv01, np.float32), UV_PALM_FROND),
-                    np.broadcast_to(c, (len(pos), 4)).copy(), np.array(tris, np.int32))
+                    np.array(cols, np.uint8), np.array(tris, np.int32))
 
 
 def build_palm_crown(lod: int) -> MeshPart:
-    # Lush fountain of 4 phyllotactic whorls just like mature Indonesian Tenera palms!
+    # Lush Sumatran Tenera Oil Palm Crown: pruned petiole collar + 3 hanging ripe TBS clusters + 34 arching fronds!
     whorls = [
         # (count, y_off, length, width, arch_up, droop, pitch_rx, brightness)
-        ((9, 6, 4)[lod], -0.18, 3.85, 0.92, 0.85, 2.05, 0.16, 222),  # Lower mature drooping fronds
-        ((9, 6, 4)[lod],  0.05, 3.95, 0.95, 1.45, 1.55, -0.08, 244), # Mid fountain fronds
-        ((7, 5, 3)[lod],  0.26, 3.55, 0.86, 1.85, 0.95, -0.36, 255), # Upper sunlit fronds
-        ((4, 3, 2)[lod],  0.42, 2.65, 0.62, 1.95, 0.35, -0.72, 255), # Central young spear leaves!
+        ((10, 7, 4)[lod], -0.22, 4.15, 1.02, 0.82, 2.25,  0.18, 204), # Skirt of heavy mature lower fronds
+        ((10, 7, 4)[lod],  0.02, 4.25, 1.06, 1.48, 1.65, -0.06, 232), # Full mid-canopy fountain fronds
+        ((8,  5, 3)[lod],  0.24, 3.75, 0.94, 1.88, 1.02, -0.34, 248), # Upper sunlit fountain fronds
+        ((6,  4, 2)[lod],  0.42, 2.80, 0.68, 1.98, 0.36, -0.70, 255), # Central young spear whorl ('pucuk tombak')
     ]
-    segs = (6, 4, 3)[lod]
-    parts = []
+    segs = (7, 4, 3)[lod]
+    parts = [
+        # Swollen woody crown meristem + pruned petiole collar so zero gap between trunk & fronds!
+        make_sphere_uv(0.42, 0.34, 0.42, UV_PALM_BARK, seg=(12, 8, 6)[lod], rings=5,
+                       col=rgba(165, 152, 132, 38), center=(0.0, -0.06, 0.0))
+    ]
+    # Fruiting crimson-black TBS bunches nestled at the frond axils!
+    if lod <= 1:
+        for bi in range(3 if lod == 0 else 2):
+            ba = bi * 2.094 + 0.55
+            parts.append(make_sphere_uv(0.24, 0.22, 0.24, UV_TBS_FRUIT, seg=8, rings=5,
+                                        col=rgba(235, 210, 195, 145),
+                                        center=(math.sin(ba) * 0.40, -0.10, math.cos(ba) * 0.40)))
     golden_angle = 2.399963
     idx_f = 0
     for count, y_off, ln, wd, up, drp, rx, br in whorls:
@@ -398,7 +421,7 @@ def build_palm_crown(lod: int) -> MeshPart:
         for k in range(count):
             az = idx_f * golden_angle
             idx_f += 1
-            parts.append(xform(frond, rx=rx, ry=az, rz=0.05 * math.sin(idx_f), translate=(0.0, y_off, 0.0)))
+            parts.append(xform(frond, rx=rx, ry=az, rz=0.055 * math.sin(idx_f * 1.3), translate=(0.0, y_off, 0.0)))
     return merge_parts(parts)
 
 
@@ -544,151 +567,173 @@ def build_rock_boulder(lod: int) -> MeshPart:
 
 def build_canter_truck_body(lod: int) -> MeshPart:
     parts = []
-    c_paint  = rgba(255, 255, 255, 168)  # Glossy automotive canary-gold enamel
-    c_frame  = rgba(38, 41, 46, 85)      # Matte heavy black steel chassis frame
-    c_chrome = rgba(248, 250, 255, 215)  # High-gloss chrome / silver steel
-    c_lamp   = rgba(255, 255, 255, 252)  # Emissive-capable crystal headlamp lens!
-    c_wood   = rgba(255, 255, 255, 82)   # Natural oiled Meranti timber
+    c_paint  = rgba(255, 255, 255, 178)  # Factory Mitsubishi Canary-Gold automotive clearcoat
+    c_frame  = rgba(30, 33, 38, 82)      # Matte heavy chassis steel
+    c_rubber = rgba(22, 24, 28, 52)      # Matte black rubber gaskets / mudflaps / trim
+    c_chrome = rgba(242, 246, 252, 222)  # High-gloss chrome / stainless garnish
+    c_lamp   = rgba(255, 255, 255, 252)  # Emissive-capable crystal headlamp & fog lens
+    c_wood   = rgba(255, 255, 255, 86)   # Oiled Sumatran Meranti timber
 
     # ── A. Heavy Twin C-Channel Steel Chassis Frame Rails + Crossmembers ──
     for sx in (-0.44, 0.44):
-        parts.append(make_box(0.11, 0.16, 4.72, UV_STEEL, c_frame, center=(sx, 0.62, -0.10)))
-    for cz in (-2.25, -1.25, -0.25, 0.75, 1.75):
+        parts.append(make_box(0.11, 0.16, 4.76, UV_STEEL, c_frame, center=(sx, 0.62, -0.10)))
+    for cz in (-2.28, -1.25, -0.25, 0.75, 1.75):
         parts.append(make_box(0.88, 0.11, 0.10, UV_STEEL, c_frame, center=(0.0, 0.62, cz)))
-    # Differential housing + driveshaft + axle beams + leaf spring packs!
+    # Differential housing + driveshaft + front/rear solid axles
     parts.append(make_sphere_uv(0.20, 0.20, 0.22, UV_STEEL, seg=8, rings=5, col=c_frame, center=(0.0, 0.48, -1.25)))
     parts.append(make_tube_segment((0.0, 0.50, -1.25), (0.0, 0.56, 1.15), 0.055, 0.055, UV_STEEL, seg=6, col=c_frame, ball_caps=False))
     parts.append(make_box(1.56, 0.08, 0.08, UV_STEEL, c_frame, center=(0.0, 0.48, 1.55)))
     parts.append(make_box(1.56, 0.09, 0.09, UV_STEEL, c_frame, center=(0.0, 0.48, -1.25)))
 
-    # ── B. HOLLOW STYLIZED 3D COE MITSUBISHI CANTER CAB (WITH VISIBLE 3D SEATS, DASHBOARD & BEVELS!) ──
-    # Lower Cab Body Tub (y = 0.70 .. 1.34) — leaves upper window zone 100% HOLLOW so players see right into the 3D cabin!
+    # ── B. AUTHENTIC SCULPTED COE MITSUBISHI FUSO CANTER FE 74 HD CAB ──
+    # Raked aerodynamic lower COE nose tub (y = 0.70 .. 1.20 full wrap, curving from z=2.255 at grille level back to z=2.165 at cowl)
     low_cab = [
-        (0.70, 0.93, 0.58, 2.16),
-        (1.02, 0.96, 0.58, 2.21),
-        (1.33, 0.95, 0.58, 2.17),
+        (0.70, 0.935, 0.58, 2.205),
+        (0.84, 0.960, 0.58, 2.234),
+        (1.08, 0.962, 0.58, 2.228),
+        (1.21, 0.955, 0.58, 2.192),
     ]
     low_rings = []
     for y, hw, zb, zf in low_cab:
         low_rings.append(np.array([
-            (-hw * 0.86, y, zf), (0.0, y, zf + 0.028), (hw * 0.86, y, zf),
-            (hw, y, zf - 0.13), (hw, y, (zf + zb) * 0.5), (hw, y, zb + 0.10),
-            (hw * 0.88, y, zb), (0.0, y, zb), (-hw * 0.88, y, zb),
-            (-hw, y, zb + 0.10), (-hw, y, (zf + zb) * 0.5), (-hw, y, zf - 0.13),
+            (-hw * 0.82, y, zf), (0.0, y, zf + 0.032), (hw * 0.82, y, zf),
+            (hw, y, zf - 0.16), (hw, y, (zf + zb) * 0.5), (hw, y, zb + 0.10),
+            (hw * 0.89, y, zb), (0.0, y, zb), (-hw * 0.89, y, zb),
+            (-hw, y, zb + 0.10), (-hw, y, (zf + zb) * 0.5), (-hw, y, zf - 0.16),
         ], dtype=np.float32))
     parts.append(make_loft(low_rings, UV_CANTER_PAINT, col=c_paint, cap_start=True, cap_end=True))
 
-    # Rounded Beveled Aero Roof Cap (y = 2.00 .. 2.16)
+    # Front windshield cowl panel (y = 1.20 .. 1.34) + Black Wiper Cowl Air Vent Grille!
+    parts.append(make_bevel_box(1.84, 0.14, 0.24, UV_CANTER_PAINT, c_paint, center=(0.0, 1.27, 2.08), bev=0.022))
+    parts.append(make_bevel_box(1.52, 0.045, 0.08, UV_STEEL, c_rubber, center=(0.0, 1.335, 2.13), bev=0.008))
+
+    # Signature Canter FE 74 HD Dipped Door Beltline ('lekukan pintu kaca Canter'):
+    # Rear half of door rises to y=1.34 (z=0.58..1.48), front half dips down to y=1.21 near the mirror/A-pillar!
+    for sx in (-1.0, 1.0):
+        parts.append(make_bevel_box(0.085, 0.15, 0.90, UV_CANTER_PAINT, c_paint, center=(sx * 0.915, 1.27, 1.03), bev=0.016))
+        # Diagonal door-sill ramp connecting z=1.48 (y=1.34) down to z=1.82 (y=1.21)
+        parts.append(xform(make_bevel_box(0.082, 0.11, 0.38, UV_CANTER_PAINT, c_paint, bev=0.014),
+                           rx=0.34, translate=(sx * 0.912, 1.255, 1.63)))
+
+    # Rounded Beveled Aero Roof Cap (y = 2.00 .. 2.17)
     roof_rings = []
-    for y, hw, zb, zf in [(2.00, 0.88, 0.62, 1.84), (2.11, 0.84, 0.65, 1.76), (2.16, 0.77, 0.70, 1.66)]:
+    for y, hw, zb, zf in [(2.00, 0.88, 0.62, 1.83), (2.11, 0.84, 0.65, 1.75), (2.17, 0.76, 0.70, 1.65)]:
         roof_rings.append(np.array([
-            (-hw * 0.86, y, zf), (0.0, y, zf + 0.02), (hw * 0.86, y, zf),
+            (-hw * 0.85, y, zf), (0.0, y, zf + 0.022), (hw * 0.85, y, zf),
             (hw, y, zf - 0.12), (hw, y, (zf + zb) * 0.5), (hw, y, zb + 0.10),
             (hw * 0.88, y, zb), (0.0, y, zb), (-hw * 0.88, y, zb),
             (-hw, y, zb + 0.10), (-hw, y, (zf + zb) * 0.5), (-hw, y, zf - 0.12),
         ], dtype=np.float32))
     parts.append(make_loft(roof_rings, UV_CANTER_PAINT, col=c_paint, cap_start=True, cap_end=True))
 
-    # Real 3D Slanted A-Pillars + Rear B-Pillars + Lower Rear Wall
+    # Real 3D Raked A-Pillars + Rear B-Pillars + Upper Roof Window Drip Rails + Rear Cab Panel
     for sx in (-1.0, 1.0):
-        parts.append(make_tube_segment((sx * 0.88, 1.32, 2.13), (sx * 0.82, 2.02, 1.81), 0.055, 0.048, UV_CANTER_PAINT, seg=6, col=c_paint, ball_caps=False))
-        parts.append(make_bevel_box(0.13, 0.72, 0.22, UV_CANTER_PAINT, c_paint, center=(sx * 0.86, 1.67, 0.72), bev=0.02))
-    parts.append(make_bevel_box(1.74, 0.26, 0.10, UV_CANTER_PAINT, c_paint, center=(0.0, 1.44, 0.63), bev=0.02))
+        parts.append(make_tube_segment((sx * 0.89, 1.22, 2.13), (sx * 0.82, 2.02, 1.80), 0.052, 0.046, UV_CANTER_PAINT, seg=6, col=c_paint, ball_caps=False))
+        parts.append(make_bevel_box(0.13, 0.72, 0.24, UV_CANTER_PAINT, c_paint, center=(sx * 0.86, 1.67, 0.71), bev=0.02))
+        parts.append(make_tube_segment((sx * 0.83, 2.00, 1.80), (sx * 0.85, 2.00, 0.72), 0.028, 0.028, UV_CANTER_PAINT, seg=5, col=c_paint, ball_caps=False))
+    parts.append(make_bevel_box(1.74, 0.34, 0.10, UV_CANTER_PAINT, c_paint, center=(0.0, 1.46, 0.63), bev=0.02))
 
-    # REAL 3D CABIN INTERIOR: Recessed Floor + Pedals + Shifter + Beveled Dashboard + Steering Column + TWO TAN RIBBED SEATS!
-    parts.append(make_box(1.66, 0.08, 1.34, UV_STEEL, rgba(34, 38, 44, 55), center=(0.0, 1.02, 1.36)))
-    parts.append(make_bevel_box(1.64, 0.28, 0.34, UV_STEEL, rgba(44, 48, 56, 75), center=(0.0, 1.24, 1.92), bev=0.03))
-    # Solid steering column housing connecting steering wheel hub (0.42, 1.44, 1.86) directly down into dash & floor!
-    parts.append(make_tube_segment((0.42, 1.06, 1.98), (0.42, 1.44, 1.86), 0.042, 0.034, UV_STEEL, seg=8, col=rgba(36, 40, 48, 95), ball_caps=True))
-    # Center 5-speed Canter gear stick + handbrake lever + gauge cluster dome + pedals + 4 Basuri horns + sun-visor!
-    parts.append(make_tube_segment((0.04, 1.05, 1.48), (0.08, 1.36, 1.44), 0.022, 0.014, UV_STEEL, seg=6, col=rgba(40, 44, 52, 110)))
-    parts.append(make_sphere_uv(0.032, 0.038, 0.032, UV_STEEL, seg=8, rings=5, col=rgba(28, 30, 36, 150), center=(0.08, 1.38, 1.44)))
-    parts.append(make_tube_segment((0.18, 1.08, 1.32), (0.18, 1.24, 1.48), 0.016, 0.014, UV_STEEL, seg=5, col=rgba(30, 34, 40, 140)))
-    parts.append(make_bevel_box(0.42, 0.14, 0.20, UV_STEEL, rgba(28, 32, 38, 120), center=(0.42, 1.41, 1.94), bev=0.022))
-    parts.append(make_quad((0.25, 1.36, 1.835), (0.59, 1.36, 1.835), (0.59, 1.46, 1.855), (0.25, 1.46, 1.855),
-                           UV_CONCRETE_CLEAN, col=rgba(86, 232, 255, 248), flip_u=True))
-    parts.append(make_bevel_box(0.22, 0.055, 0.03, UV_STEEL, rgba(36, 40, 48, 140), center=(0.0, 1.94, 1.78), bev=0.008))
+    # ── REAL 3D CABIN INTERIOR (Clean Matte Charcoal Dash + Subtle Instrument Cluster + Tan Vinyl Seats) ──
+    parts.append(make_box(1.66, 0.08, 1.34, UV_STEEL, rgba(28, 31, 36, 48), center=(0.0, 1.02, 1.36)))
+    parts.append(make_bevel_box(1.64, 0.28, 0.34, UV_STEEL, rgba(36, 40, 46, 68), center=(0.0, 1.24, 1.92), bev=0.03))
+    parts.append(make_tube_segment((0.42, 1.06, 1.98), (0.42, 1.44, 1.86), 0.042, 0.034, UV_STEEL, seg=8, col=rgba(32, 36, 42, 90), ball_caps=True))
+    parts.append(make_tube_segment((0.04, 1.05, 1.48), (0.08, 1.36, 1.44), 0.020, 0.013, UV_STEEL, seg=6, col=rgba(36, 40, 48, 105)))
+    parts.append(make_sphere_uv(0.030, 0.036, 0.030, UV_STEEL, seg=8, rings=5, col=rgba(22, 24, 28, 145), center=(0.08, 1.38, 1.44)))
+    parts.append(make_tube_segment((0.18, 1.08, 1.32), (0.18, 1.24, 1.48), 0.016, 0.014, UV_STEEL, seg=5, col=rgba(28, 32, 38, 130)))
+    parts.append(make_bevel_box(0.42, 0.13, 0.20, UV_STEEL, rgba(24, 27, 32, 105), center=(0.42, 1.40, 1.94), bev=0.022))
+    # Subtle dark instrument dial face (soft warm amber-green OEM gauges, zero neon cyan!)
+    parts.append(make_quad((0.26, 1.35, 1.835), (0.58, 1.35, 1.835), (0.58, 1.44, 1.855), (0.26, 1.44, 1.855),
+                           UV_STEEL, col=rgba(46, 58, 52, 175), flip_u=True))
+    parts.append(make_bevel_box(0.22, 0.052, 0.03, UV_STEEL, rgba(30, 34, 40, 130), center=(0.0, 1.94, 1.77), bev=0.008))
     for px_ped in (0.32, 0.44, 0.54):
-        parts.append(make_box(0.055, 0.09, 0.02, UV_STEEL, rgba(58, 64, 72, 120), center=(px_ped, 1.12, 1.90)))
+        parts.append(make_box(0.055, 0.09, 0.02, UV_STEEL, rgba(48, 54, 62, 110), center=(px_ped, 1.12, 1.90)))
     if lod <= 1:
-        # Custom Sumatera Cab Aero Sun-Visor ('Topi Kabin Canter') + 5 Amber Clearance LEDs + 4 Chrome Basuri Air Horns!
-        visor = make_bevel_box(1.74, 0.095, 0.24, UV_CANTER_PAINT, c_paint, center=(0.0, 0.0, 0.0), bev=0.02)
-        parts.append(xform(visor, rx=0.26, translate=(0.0, 2.06, 1.92)))
-        for sx_v in (-0.82, 0.82):
-            parts.append(make_box(0.04, 0.08, 0.16, UV_STEEL, c_frame, center=(sx_v, 2.03, 1.88)))
-        for hx_h in (-0.38, -0.24, 0.24, 0.38):
-            parts.append(make_tube_segment((hx_h, 2.18, 1.24), (hx_h, 2.23, 1.70), 0.018, 0.050, UV_STEEL, seg=8, col=c_chrome, ball_caps=False))
-            parts.append(make_box(0.03, 0.05, 0.04, UV_STEEL, c_frame, center=(hx_h, 2.15, 1.34)))
-        for mx_m in (-0.64, -0.32, 0.0, 0.32, 0.64):
-            parts.append(make_bevel_box(0.095, 0.042, 0.05, UV_CANTER_FOGLAMP, rgba(255, 192, 38, 252), center=(mx_m, 2.08, 2.03), bev=0.008))
-    c_seat = rgba(235, 168, 112, 85)
+        # Custom Sumatera Cab Aero Sun-Visor ('Topi Kabin Canter') + 5 Warm Amber Marker LEDs + Twin Chrome Roof Horns!
+        visor = make_bevel_box(1.72, 0.085, 0.22, UV_CANTER_PAINT, c_paint, center=(0.0, 0.0, 0.0), bev=0.02)
+        parts.append(xform(visor, rx=0.28, translate=(0.0, 2.06, 1.90)))
+        for sx_v in (-0.81, 0.81):
+            parts.append(make_box(0.035, 0.075, 0.15, UV_STEEL, c_rubber, center=(sx_v, 2.03, 1.86)))
+        for hx_h in (-0.34, 0.34):
+            parts.append(make_tube_segment((hx_h, 2.18, 1.24), (hx_h, 2.22, 1.68), 0.016, 0.044, UV_STEEL, seg=8, col=c_chrome, ball_caps=False))
+            parts.append(make_box(0.028, 0.045, 0.04, UV_STEEL, c_rubber, center=(hx_h, 2.15, 1.34)))
+        for mx_m in (-0.62, -0.31, 0.0, 0.31, 0.62):
+            parts.append(make_bevel_box(0.082, 0.036, 0.042, UV_CANTER_FOGLAMP, rgba(255, 178, 36, 248), center=(mx_m, 2.075, 2.005), bev=0.007))
+    c_seat = rgba(168, 118, 78, 72)
     for sx_s in (-0.44, 0.44):
         parts.append(make_bevel_box(0.48, 0.14, 0.46, UV_WOOD_PLAIN, c_seat, center=(sx_s, 1.18, 1.26), bev=0.03))
         if lod <= 1:
             for rib in range(3):
                 parts.append(make_bevel_box(0.45, 0.16, 0.12, UV_WOOD_PLAIN, c_seat, center=(sx_s, 1.34 + rib * 0.165, 1.04 - rib * 0.015), bev=0.025))
-            # Sculpted seat headrest + steel headrest posts
-            parts.append(make_bevel_box(0.28, 0.15, 0.10, UV_WOOD_PLAIN, c_seat, center=(sx_s, 1.86, 0.99), bev=0.025))
+            parts.append(make_bevel_box(0.26, 0.15, 0.10, UV_WOOD_PLAIN, c_seat, center=(sx_s, 1.86, 0.99), bev=0.025))
 
-    # 1. Flush Front Turquoise Cel-Reflection Windshield + Twin Sculpted Windshield Wipers!
+    # 1. Flush Smoked Laminated Windshield + Matte Rubber Gasket + Twin Black Wiper Blades
     parts.append(make_quad(
-        (-0.84, 1.33, 2.16), (0.84, 1.33, 2.16),
-        (0.79, 2.01, 1.83), (-0.79, 2.01, 1.83),
-        UV_CANTER_GLASS, col=rgba(255, 255, 255, 215), double_sided=True
+        (-0.85, 1.335, 2.148), (0.85, 1.335, 2.148),
+        (0.79, 2.005, 1.815), (-0.79, 2.005, 1.815),
+        UV_CANTER_GLASS, col=rgba(240, 244, 248, 228), double_sided=True
     ))
     if lod <= 1:
         for wx_piv in (-0.44, 0.18):
-            parts.append(make_tube_segment((wx_piv, 1.33, 2.185), (wx_piv + 0.32, 1.56, 2.075), 0.012, 0.009, UV_STEEL, seg=5, col=c_frame, ball_caps=False))
-            parts.append(make_tube_segment((wx_piv + 0.14, 1.46, 2.125), (wx_piv + 0.48, 1.66, 2.025), 0.011, 0.010, UV_STEEL, seg=4, col=rgba(22, 24, 28, 140), ball_caps=False))
-    # 2. Side Cab Turquoise Cel-Reflection Windows (double-sided so visible from all angles!)
+            parts.append(make_tube_segment((wx_piv, 1.34, 2.165), (wx_piv + 0.32, 1.56, 2.058), 0.011, 0.008, UV_STEEL, seg=5, col=c_rubber, ball_caps=False))
+            parts.append(make_tube_segment((wx_piv + 0.14, 1.46, 2.108), (wx_piv + 0.48, 1.66, 2.008), 0.010, 0.009, UV_STEEL, seg=4, col=c_rubber, ball_caps=False))
+
+    # 2. Side Cab Smoked Windows (matching the dipped Canter front door sill!)
     parts.append(make_quad(
-        (0.90, 1.32, 2.06), (0.90, 1.32, 0.84),
-        (0.84, 2.00, 0.84), (0.84, 2.00, 1.79),
-        UV_CANTER_SIDE_GLS, col=rgba(255, 255, 255, 215), double_sided=True
+        (0.905, 1.22, 2.08), (0.905, 1.33, 0.83),
+        (0.842, 2.00, 0.83), (0.842, 2.00, 1.78),
+        UV_CANTER_SIDE_GLS, col=rgba(240, 244, 248, 224), double_sided=True
     ))
     parts.append(make_quad(
-        (-0.90, 1.32, 0.84), (-0.90, 1.32, 2.06),
-        (-0.84, 2.00, 1.79), (-0.84, 2.00, 0.84),
-        UV_CANTER_SIDE_GLS, col=rgba(255, 255, 255, 215), double_sided=True
+        (-0.905, 1.33, 0.83), (-0.905, 1.22, 2.08),
+        (-0.842, 2.00, 1.78), (-0.842, 2.00, 0.83),
+        UV_CANTER_SIDE_GLS, col=rgba(240, 244, 248, 224), double_sided=True
     ))
-    # Recessed black door handles + side amber turn repeaters on both doors!
-    parts.append(make_quad((0.964, 1.10, 0.96), (0.964, 1.10, 0.76), (0.964, 1.20, 0.76), (0.964, 1.20, 0.96), UV_CANTER_HANDLE, col=c_paint))
-    parts.append(make_quad((-0.964, 1.10, 0.76), (-0.964, 1.10, 0.96), (-0.964, 1.20, 0.96), (-0.964, 1.20, 0.76), UV_CANTER_HANDLE, col=c_paint))
+    # Recessed black vertical Canter door handles + fender turn-signal repeaters
+    parts.append(make_quad((0.962, 1.08, 0.96), (0.962, 1.08, 0.76), (0.962, 1.18, 0.76), (0.962, 1.18, 0.96), UV_CANTER_HANDLE, col=c_paint))
+    parts.append(make_quad((-0.962, 1.08, 0.76), (-0.962, 1.08, 0.96), (-0.962, 1.18, 0.96), (-0.962, 1.18, 0.76), UV_CANTER_HANDLE, col=c_paint))
     if lod <= 1:
         for sx in (-1.0, 1.0):
-            parts.append(make_bevel_box(0.03, 0.055, 0.11, UV_CANTER_FOGLAMP, rgba(255, 178, 32, 245), center=(sx * 0.962, 0.96, 1.88), bev=0.006))
+            parts.append(make_bevel_box(0.028, 0.052, 0.11, UV_CANTER_FOGLAMP, rgba(255, 172, 28, 245), center=(sx * 0.962, 0.94, 1.86), bev=0.006))
 
-    # 3. Center Black Honeycomb Grille + Chrome Bezel & 3-Diamond Crest!
+    # 3. 3D Sculpted Recessed FUSO Front Grille Bezel + Chrome Top Alis Garnish + 3-Diamond Crest!
+    parts.append(make_bevel_box(0.98, 0.30, 0.055, UV_STEEL, c_rubber, center=(0.0, 0.94, 2.248), bev=0.014))
+    parts.append(make_bevel_box(0.96, 0.036, 0.062, UV_STEEL, c_chrome, center=(0.0, 1.095, 2.252), bev=0.008))
     parts.append(make_quad(
-        (-0.48, 0.80, 2.262), (0.48, 0.80, 2.262),
-        (0.51, 1.11, 2.272), (-0.51, 1.11, 2.272),
-        UV_CANTER_GRILLE, col=c_chrome
+        (-0.47, 0.80, 2.279), (0.47, 0.80, 2.279),
+        (0.49, 1.08, 2.274), (-0.49, 1.08, 2.274),
+        UV_CANTER_GRILLE, col=rgba(250, 252, 255, 195)
     ))
 
-    # 4. Swept-Back Crystal Multi-Reflector Headlamps + Outer Amber Turn Signals (cleanly proud of cab corners!)
+    # 4. 3D Sculpted Swept Canter FE 74 HD Crystal Headlamp Housings + Corner Wrap-Around Amber Turn Signals!
+    for sx in (-1.0, 1.0):
+        bezel = make_bevel_box(0.45, 0.33, 0.055, UV_STEEL, c_rubber, bev=0.012)
+        parts.append(xform(bezel, ry=sx * 0.075, translate=(sx * 0.715, 0.96, 2.226)))
+        # Wrap-around corner amber signal housing on cab cheek (z = 2.06..2.24)
+        parts.append(make_bevel_box(0.042, 0.31, 0.17, UV_CANTER_FOGLAMP, rgba(255, 164, 24, 248), center=(sx * 0.946, 0.96, 2.145), bev=0.008))
     parts.append(make_quad(
-        (-0.93, 0.81, 2.222), (-0.50, 0.80, 2.264),
-        (-0.52, 1.13, 2.274), (-0.935, 1.15, 2.212),
+        (-0.935, 0.805, 2.248), (-0.495, 0.800, 2.282),
+        (-0.505, 1.115, 2.275), (-0.940, 1.125, 2.238),
         UV_CANTER_HEADLAMP, col=c_lamp, flip_u=True
     ))
     parts.append(make_quad(
-        (0.50, 0.80, 2.264), (0.93, 0.81, 2.222),
-        (0.935, 1.15, 2.212), (0.52, 1.13, 2.274),
+        (0.495, 0.800, 2.282), (0.935, 0.805, 2.248),
+        (0.940, 1.125, 2.238), (0.505, 1.115, 2.275),
         UV_CANTER_HEADLAMP, col=c_lamp, flip_u=False
     ))
 
-    # 5. Front Yellow Steel Bumper + Intercooler Slat Grille + Tow Hooks + BM 8899 XY Plate + Twin Fog Lamps!
-    parts.append(make_bevel_box(1.94, 0.26, 0.17, UV_CANTER_PAINT, c_paint, center=(0.0, 0.62, 2.22), bev=0.025))
-    parts.append(make_box(0.74, 0.08, 0.04, UV_STEEL, rgba(22, 25, 30, 110), center=(0.0, 0.66, 2.295)))
+    # 5. Sumatera Heavy Steel Front Bumper + Air-Dam Slat Grille + Foot Steps + BM 8899 XY Plate + Recessed Fog Lamps!
+    parts.append(make_bevel_box(1.95, 0.27, 0.19, UV_CANTER_PAINT, c_paint, center=(0.0, 0.61, 2.23), bev=0.028))
+    parts.append(make_bevel_box(0.82, 0.085, 0.05, UV_STEEL, c_rubber, center=(0.0, 0.66, 2.31), bev=0.010))
     for sx in (-0.92, 0.92):
-        parts.append(make_bevel_box(0.16, 0.27, 0.22, UV_STEEL, c_frame, center=(sx, 0.62, 2.18), bev=0.02))
+        parts.append(make_bevel_box(0.16, 0.27, 0.23, UV_STEEL, c_rubber, center=(sx, 0.61, 2.19), bev=0.022))
     for sx_h in (-0.42, 0.42):
-        parts.append(make_bevel_box(0.05, 0.06, 0.09, UV_STEEL, c_frame, center=(sx_h, 0.48, 2.25), bev=0.01))
-    parts.append(make_quad((-0.26, 0.51, 2.312), (0.26, 0.51, 2.312), (0.26, 0.68, 2.312), (-0.26, 0.68, 2.312), UV_CANTER_PLATE, col=rgba(255, 255, 255, 160)))
-    for sx in (-0.64, 0.64):
-        parts.append(make_quad((sx - 0.13, 0.55, 2.312), (sx + 0.13, 0.55, 2.312), (sx + 0.13, 0.68, 2.312), (sx - 0.13, 0.68, 2.312), UV_CANTER_FOGLAMP, col=c_lamp))
+        parts.append(make_bevel_box(0.05, 0.06, 0.09, UV_STEEL, c_frame, center=(sx_h, 0.47, 2.26), bev=0.01))
+    parts.append(make_quad((-0.25, 0.50, 2.332), (0.25, 0.50, 2.332), (0.25, 0.65, 2.332), (-0.25, 0.65, 2.332), UV_CANTER_PLATE, col=rgba(255, 255, 255, 155)))
+    for sx in (-0.65, 0.65):
+        parts.append(make_bevel_box(0.26, 0.13, 0.04, UV_STEEL, c_rubber, center=(sx, 0.59, 2.315), bev=0.008))
+        parts.append(make_quad((sx - 0.115, 0.54, 2.338), (sx + 0.115, 0.54, 2.338), (sx + 0.115, 0.64, 2.338), (sx - 0.115, 0.64, 2.338), UV_CANTER_FOGLAMP, col=c_lamp))
 
-    # 6. Black Plastic Front Wheel Arch Fender Flares + Diamond-Tread Boarding Stirrups + Dual Mirrors!
+    # 6. Molded Black Wheel Arch Flares + Front Kepet Mudflaps + Boarding Stirrups + Dual Sumatera Stay Mirrors!
     if lod <= 1:
         for sx in (-1.0, 1.0):
             for ai in range(6):
@@ -696,72 +741,82 @@ def build_canter_truck_body(lod: int) -> MeshPart:
                 a1 = a0 + 0.38
                 r_arch = 0.56
                 parts.append(make_tube_segment(
-                    (sx * 0.93, 0.48 + math.cos(a0) * r_arch, 1.55 + math.sin(a0) * r_arch),
-                    (sx * 0.93, 0.48 + math.cos(a1) * r_arch, 1.55 + math.sin(a1) * r_arch),
-                    0.048, 0.048, UV_STEEL, seg=6, col=c_frame, ball_caps=False
+                    (sx * 0.935, 0.48 + math.cos(a0) * r_arch, 1.55 + math.sin(a0) * r_arch),
+                    (sx * 0.935, 0.48 + math.cos(a1) * r_arch, 1.55 + math.sin(a1) * r_arch),
+                    0.048, 0.048, UV_STEEL, seg=6, col=c_rubber, ball_caps=False
                 ))
-            # Cab entry boarding step stirrup ('injakan kaki pintu') with silver tread plate!
-            parts.append(make_bevel_box(0.16, 0.045, 0.44, UV_STEEL, c_chrome, center=(sx * 0.95, 0.56, 1.02), bev=0.008))
-            parts.append(make_box(0.04, 0.18, 0.42, UV_STEEL, c_frame, center=(sx * 0.88, 0.64, 1.02)))
-            # Tubular steel mirror arm + tall black rectangular mirror housing + round convex blind-spot mirror!
-            parts.append(make_tube_segment((sx * 0.90, 1.86, 1.84), (sx * 1.12, 1.80, 2.02), 0.016, 0.016, UV_STEEL, seg=5, col=c_frame, ball_caps=False))
-            parts.append(make_tube_segment((sx * 1.12, 1.80, 2.02), (sx * 1.12, 1.44, 2.02), 0.016, 0.016, UV_STEEL, seg=5, col=c_frame, ball_caps=False))
-            parts.append(make_tube_segment((sx * 1.12, 1.44, 2.02), (sx * 0.94, 1.38, 1.94), 0.016, 0.016, UV_STEEL, seg=5, col=c_frame, ball_caps=False))
-            parts.append(make_bevel_box(0.06, 0.30, 0.15, UV_STEEL, c_frame, center=(sx * 1.13, 1.65, 2.02), bev=0.012))
-            parts.append(make_sphere_uv(0.032, 0.065, 0.065, UV_STEEL, seg=8, rings=5, col=c_frame, center=(sx * 1.13, 1.43, 2.02)))
+            # Front rubber mudflap ('kepet lumpur depan') behind front wheel
+            parts.append(make_box(0.32, 0.28, 0.022, UV_STEEL, c_rubber, center=(sx * 0.84, 0.32, 1.02)))
+            # Cab boarding step stirrup with diamond steel tread
+            parts.append(make_bevel_box(0.16, 0.042, 0.42, UV_STEEL, c_chrome, center=(sx * 0.95, 0.56, 1.02), bev=0.008))
+            parts.append(make_box(0.04, 0.18, 0.40, UV_STEEL, c_frame, center=(sx * 0.88, 0.64, 1.02)))
+            # Tubular steel mirror C-stay + tall black aero mirror + round convex blind-spot mirror
+            parts.append(make_tube_segment((sx * 0.89, 1.88, 1.83), (sx * 1.12, 1.82, 2.02), 0.015, 0.015, UV_STEEL, seg=5, col=c_rubber, ball_caps=False))
+            parts.append(make_tube_segment((sx * 1.12, 1.82, 2.02), (sx * 1.12, 1.44, 2.02), 0.015, 0.015, UV_STEEL, seg=5, col=c_rubber, ball_caps=False))
+            parts.append(make_tube_segment((sx * 1.12, 1.44, 2.02), (sx * 0.93, 1.36, 1.94), 0.015, 0.015, UV_STEEL, seg=5, col=c_rubber, ball_caps=False))
+            parts.append(make_bevel_box(0.055, 0.30, 0.15, UV_STEEL, c_rubber, center=(sx * 1.13, 1.65, 2.02), bev=0.012))
+            parts.append(make_sphere_uv(0.030, 0.062, 0.062, UV_STEEL, seg=8, rings=5, col=c_rubber, center=(sx * 1.13, 1.43, 2.02)))
 
-    # ── C. STYLIZED PLANK-BY-PLANK BEVELED MERANTI "BAK KAYU" SAWIT CARGO BED ──
-    parts.append(make_bevel_box(2.00, 0.11, 2.94, UV_WOOD_PLAIN, c_wood, center=(0.0, 0.80, -0.96), bev=0.02))
-    n_planks = 6 if lod <= 1 else 3
-    for pi in range(n_planks):
-        py = 0.92 + pi * (1.06 / max(1, n_planks - 1))
-        ph = (1.02 / n_planks)
-        flare = 0.96 + (pi / max(1, n_planks - 1)) * 0.045
-        for sx in (-1.0, 1.0):
-            parts.append(make_bevel_box(0.065, ph, 2.92, UV_WOOD_PLAIN, c_wood, center=(sx * flare, py, -0.96), bev=0.015))
-        parts.append(make_bevel_box(flare * 2.0, ph, 0.065, UV_WOOD_PLAIN, c_wood, center=(0.0, py, -2.40), bev=0.015))
-        parts.append(make_bevel_box(2.00, ph, 0.065, UV_WOOD_PLAIN, c_wood, center=(0.0, py, 0.49), bev=0.015))
-    # Extra tall cab protector top header planks ("Kepala Bak") + steel top rail guard
-    parts.append(make_bevel_box(2.02, 0.16, 0.065, UV_WOOD_PLAIN, c_wood, center=(0.0, 2.15, 0.49), bev=0.015))
-    parts.append(make_bevel_box(2.06, 0.15, 0.14, UV_WOOD_PLAIN, c_wood, center=(0.0, 2.33, 0.52), bev=0.02))
-    parts.append(make_tube_segment((-0.96, 2.44, 0.52), (0.96, 2.44, 0.52), 0.022, 0.022, UV_STEEL, seg=6, col=c_frame))
+    # ── C. AUTHENTIC SUMATRAN BOLTED MERANTI "BAK KAYU" SAWIT CARGO BED ──
+    # Heavy steel bed subframe runners + floor deck + full-height UV_WOOD_BAK bolted plank walls!
+    for sx_sub in (-0.44, 0.44):
+        parts.append(make_box(0.09, 0.09, 2.94, UV_STEEL, c_frame, center=(sx_sub, 0.73, -0.96)))
+    parts.append(make_bevel_box(2.02, 0.11, 2.96, UV_WOOD_PLAIN, c_wood, center=(0.0, 0.80, -0.96), bev=0.02))
+    # Full bolted Meranti side walls & tailgate mapped directly to UV_WOOD_BAK (carriage bolts + grain + reflector tape!)
+    for sx in (-1.0, 1.0):
+        parts.append(make_bevel_box(0.072, 1.14, 2.94, UV_WOOD_BAK, c_wood, center=(sx * 0.985, 1.41, -0.96), bev=0.016))
+        # Top cap rail & bottom steel rub-rail along cargo bed
+        parts.append(make_bevel_box(0.092, 0.055, 2.98, UV_STEEL, c_frame, center=(sx * 0.99, 2.00, -0.96), bev=0.010))
+        parts.append(make_bevel_box(0.095, 0.070, 2.98, UV_STEEL, c_frame, center=(sx * 0.99, 0.83, -0.96), bev=0.010))
+    # Tailgate + Front Bulkhead wall mapped to UV_WOOD_BAK + heavy black corner steel angle-posts!
+    parts.append(make_bevel_box(1.98, 1.14, 0.072, UV_WOOD_BAK, c_wood, center=(0.0, 1.41, -2.41), bev=0.016))
+    parts.append(make_bevel_box(1.98, 1.16, 0.072, UV_WOOD_BAK, c_wood, center=(0.0, 1.42, 0.49), bev=0.016))
+    for sx_c in (-1.00, 1.00):
+        for cz_c in (-2.42, 0.50):
+            parts.append(make_bevel_box(0.085, 1.24, 0.085, UV_STEEL, c_frame, center=(sx_c, 1.42, cz_c), bev=0.012))
+
+    # Tall cab-protector header rack ('Kepala Bak Sawit Sumatera') + steel pipe guard
+    parts.append(make_bevel_box(2.02, 0.16, 0.068, UV_WOOD_PLAIN, c_wood, center=(0.0, 2.14, 0.49), bev=0.015))
+    parts.append(make_bevel_box(2.06, 0.14, 0.13, UV_WOOD_PLAIN, c_wood, center=(0.0, 2.31, 0.51), bev=0.02))
+    parts.append(make_tube_segment((-0.96, 2.43, 0.51), (0.96, 2.43, 0.51), 0.022, 0.022, UV_STEEL, seg=6, col=c_frame))
     for sx in (-0.92, 0.92):
-        parts.append(make_bevel_box(0.11, 0.08, 0.06, UV_CANTER_FOGLAMP, c_lamp, center=(sx, 2.34, 0.62), bev=0.01))
-    # Red/White Safety Reflector Strips along both sides!
-    for seg_i in range(6):
-        rz_s = 0.22 - seg_i * 0.48
-        s_col = rgba(242, 58, 44, 150) if seg_i % 2 == 0 else rgba(248, 250, 252, 150)
-        for sx in (-1.015, 1.015):
-            parts.append(make_box(0.02, 0.055, 0.40, UV_CONCRETE_CLEAN, s_col, center=(sx, 1.34, rz_s)))
-    # Rear heavy underrun bumper + 3-chamber red/amber/white taillights + rear license plate!
-    parts.append(make_bevel_box(1.94, 0.16, 0.14, UV_STEEL, c_frame, center=(0.0, 0.60, -2.44), bev=0.025))
-    parts.append(make_quad((0.24, 0.53, -2.515), (-0.24, 0.53, -2.515), (-0.24, 0.68, -2.515), (0.24, 0.68, -2.515), UV_CANTER_PLATE, col=rgba(255, 255, 255, 160)))
-    for sx in (-0.72, 0.72):
-        parts.append(make_bevel_box(0.32, 0.15, 0.08, UV_STEEL, c_frame, center=(sx, 0.62, -2.49), bev=0.012))
-        parts.append(make_bevel_box(0.11, 0.11, 0.04, UV_CANTER_FOGLAMP, rgba(255, 42, 36, 253), center=(sx + (0.09 if sx > 0 else -0.09), 0.62, -2.525), bev=0.008))
-        parts.append(make_bevel_box(0.09, 0.11, 0.04, UV_CANTER_FOGLAMP, rgba(255, 184, 28, 252), center=(sx, 0.62, -2.525), bev=0.008))
-        parts.append(make_bevel_box(0.07, 0.11, 0.04, UV_CONCRETE_CLEAN, rgba(248, 252, 255, 250), center=(sx - (0.08 if sx > 0 else -0.08), 0.62, -2.525), bev=0.008))
+        parts.append(make_bevel_box(0.10, 0.07, 0.055, UV_CANTER_FOGLAMP, rgba(255, 182, 32, 248), center=(sx, 2.32, 0.60), bev=0.01))
 
-    # External Vertical Steel Stakes + Rope Hooks + Rear Tailgate Latches + Diesel Tank + Air Brake Tank + Knalpot Srigala!
+    # Rear heavy underrun bumper + 3-chamber red/amber/white taillights + rear BM 8899 XY plate!
+    parts.append(make_bevel_box(1.94, 0.15, 0.14, UV_STEEL, c_frame, center=(0.0, 0.58, -2.44), bev=0.022))
+    parts.append(make_quad((0.24, 0.51, -2.515), (-0.24, 0.51, -2.515), (-0.24, 0.66, -2.515), (0.24, 0.66, -2.515), UV_CANTER_PLATE, col=rgba(255, 255, 255, 155)))
+    for sx in (-0.72, 0.72):
+        parts.append(make_bevel_box(0.34, 0.14, 0.08, UV_STEEL, c_rubber, center=(sx, 0.60, -2.49), bev=0.012))
+        parts.append(make_bevel_box(0.11, 0.10, 0.04, UV_CANTER_FOGLAMP, rgba(255, 38, 32, 253), center=(sx + (0.095 if sx > 0 else -0.095), 0.60, -2.525), bev=0.008))
+        parts.append(make_bevel_box(0.09, 0.10, 0.04, UV_CANTER_FOGLAMP, rgba(255, 178, 26, 252), center=(sx, 0.60, -2.525), bev=0.008))
+        parts.append(make_bevel_box(0.07, 0.10, 0.04, UV_CONCRETE_CLEAN, rgba(245, 248, 252, 248), center=(sx - (0.085 if sx > 0 else -0.085), 0.60, -2.525), bev=0.008))
+
+    # External Vertical Steel Stakes + Diagonal Gussets + Underslung Spare Tire + Battery/Air/Fuel/Knalpot Srigala!
     if lod <= 1:
-        for rz in (-2.28, -1.72, -1.16, -0.60, -0.04, 0.44):
+        for rz in (-1.92, -1.36, -0.80, -0.24, 0.24):
             for sx in (-1.015, 1.015):
-                parts.append(make_bevel_box(0.062, 1.24, 0.070, UV_STEEL, c_frame, center=(sx, 1.40, rz), bev=0.012))
+                parts.append(make_bevel_box(0.058, 1.20, 0.068, UV_STEEL, c_frame, center=(sx, 1.41, rz), bev=0.010))
                 if lod == 0:
-                    # Rope tie-down J-hook ('kait tambang bak') on every stake!
-                    parts.append(make_tube_segment((sx * 1.04, 1.04, rz), (sx * 1.07, 0.97, rz), 0.011, 0.009, UV_STEEL, seg=4, col=c_chrome, ball_caps=False))
-        # Rear tailgate vertical steel locking bars
+                    # Diagonal under-bed steel gusset brace + rope J-hook!
+                    parts.append(make_tube_segment((sx * 0.46, 0.64, rz), (sx * 0.96, 0.80, rz), 0.018, 0.018, UV_STEEL, seg=4, col=c_frame, ball_caps=False))
+                    parts.append(make_tube_segment((sx * 1.03, 1.02, rz), (sx * 1.06, 0.95, rz), 0.010, 0.008, UV_STEEL, seg=4, col=c_chrome, ball_caps=False))
+        # Rear tailgate vertical steel locking bars + chains
         for sx_l in (-0.62, 0.62):
-            parts.append(make_tube_segment((sx_l, 0.86, -2.445), (sx_l, 1.98, -2.445), 0.018, 0.018, UV_STEEL, seg=6, col=c_chrome))
-        for sx in (-0.92, 0.92):
-            parts.append(make_box(0.42, 0.36, 0.025, UV_STEEL, c_frame, center=(sx, 0.34, -1.82)))
-        # Right rail: Battery Box + Black Compressed-Air Brake Tank + Chrome Side Exhaust Pipe ('Knalpot Srigala')!
+            parts.append(make_tube_segment((sx_l, 0.86, -2.455), (sx_l, 1.98, -2.455), 0.018, 0.018, UV_STEEL, seg=6, col=c_chrome))
+        # Heavy Sumatran rear rubber mudflaps ('kepet lumpur belakang') + steel fender arch guards
+        for sx in (-0.90, 0.90):
+            parts.append(make_box(0.44, 0.04, 0.96, UV_STEEL, c_frame, center=(sx, 0.76, -1.25)))
+            parts.append(make_box(0.44, 0.38, 0.026, UV_STEEL, c_rubber, center=(sx, 0.36, -1.80)))
+        # Authentic Underslung Rear Spare Wheel ('ban serep kolong belakang Canter')!
+        spare = make_tube_segment((0.0, 0.44, -2.02), (0.0, 0.56, -2.02), 0.40, 0.40, UV_TIRE_TREAD, seg=14 if lod == 0 else 8, col=c_rubber, ball_caps=True)
+        parts.append(xform(spare, rx=0.14))
+        # Right rail: GS Battery Box + Black Compressed-Air Tank + Chrome Side Exhaust ('Knalpot Srigala')!
         parts.append(make_bevel_box(0.34, 0.25, 0.46, UV_STEEL, c_frame, center=(0.68, 0.56, 0.72), bev=0.02))
         parts.append(make_tube_segment((0.66, 0.54, -0.36), (0.66, 0.54, 0.18), 0.135, 0.135, UV_STEEL, seg=10, col=c_frame, ball_caps=True))
-        parts.append(make_sphere_uv(0.032, 0.032, 0.032, UV_CANTER_PAINT, seg=6, rings=4, col=rgba(235, 48, 38, 180), center=(0.80, 0.54, -0.10)))
-        parts.append(make_tube_segment((0.56, 0.42, 0.20), (0.88, 0.38, -0.58), 0.038, 0.044, UV_STEEL, seg=8, col=c_chrome, ball_caps=False))
-        # Left rail: Strapped Terracotta-Red Biosolar Fuel Tank + Chrome Filler Cap!
-        parts.append(make_tube_segment((-0.68, 0.54, 0.34), (-0.68, 0.54, 1.08), 0.19, 0.19, UV_WOOD_PLAIN, seg=12, col=rgba(186, 86, 56, 130), ball_caps=True))
+        parts.append(make_sphere_uv(0.030, 0.030, 0.030, UV_CANTER_PAINT, seg=6, rings=4, col=rgba(215, 42, 34, 175), center=(0.80, 0.54, -0.10)))
+        parts.append(make_tube_segment((0.56, 0.42, 0.20), (0.88, 0.37, -0.58), 0.038, 0.044, UV_STEEL, seg=8, col=c_chrome, ball_caps=False))
+        # Left rail: Strapped Dark-Steel Biosolar Fuel Tank + Chrome Filler Neck!
+        parts.append(make_tube_segment((-0.68, 0.54, 0.32), (-0.68, 0.54, 1.08), 0.19, 0.19, UV_STEEL, seg=12, col=rgba(46, 50, 56, 138), ball_caps=True))
         parts.append(make_tube_segment((-0.78, 0.68, 0.88), (-0.84, 0.75, 0.88), 0.036, 0.042, UV_STEEL, seg=8, col=c_chrome))
         for sz_st in (0.52, 0.90):
             parts.append(make_tube_segment((-0.68, 0.54, sz_st - 0.03), (-0.68, 0.54, sz_st + 0.03), 0.202, 0.202, UV_STEEL, seg=12, col=c_chrome, ball_caps=False))
@@ -862,72 +917,71 @@ def build_truck_wheel(lod: int) -> MeshPart:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def build_char_torso_head(lod: int) -> MeshPart:
-    """Athletic seamless human pelvis + work belt + V-tapered collared field shirt (y = -0.10 .. +0.58)."""
+    """Athletic seamless harvester pelvis + utility belt + V-tapered collared field work shirt (y = -0.10 .. +0.60)."""
     seg = (16, 12, 8)[lod]
-    # 1. Pelvis / hips in dark stitched work trousers (y = -0.11 .. +0.10) so zero gap when legs stride!
+    # 1. Pelvis / hips in dark ripstop field trousers (y = -0.11 .. +0.10)
     pelvis_rings = [
-        ring_ellipse(0.145, 0.105, -0.10, seg),
-        ring_ellipse(0.168, 0.122, -0.02, seg),
-        ring_ellipse(0.162, 0.116,  0.09, seg),
+        ring_ellipse(0.142, 0.102, -0.10, seg),
+        ring_ellipse(0.164, 0.118, -0.02, seg),
+        ring_ellipse(0.158, 0.112,  0.09, seg),
     ]
-    pelvis = make_loft(pelvis_rings, UV_DENIM, col=rgba(255, 255, 255, 60))
+    pelvis = make_loft(pelvis_rings, UV_DENIM, col=rgba(255, 255, 255, 52))
 
-    # 2. Leather utility belt + brass buckle (y = 0.08 .. 0.135)
-    belt = make_loft([ring_ellipse(0.168, 0.122, 0.08, seg), ring_ellipse(0.168, 0.122, 0.135, seg)],
-                     UV_WOOD_PLAIN, col=rgba(72, 48, 30, 95))
-    buckle = make_box(0.065, 0.052, 0.025, UV_STEEL, rgba(238, 196, 68, 190), center=(0.0, 0.108, 0.126))
+    # 2. Heavy leather plantation belt + brushed steel buckle + utility pouch (y = 0.08 .. 0.135)
+    belt = make_loft([ring_ellipse(0.165, 0.120, 0.08, seg), ring_ellipse(0.165, 0.120, 0.135, seg)],
+                     UV_WOOD_PLAIN, col=rgba(58, 38, 24, 88))
+    buckle = make_bevel_box(0.062, 0.050, 0.024, UV_STEEL, rgba(212, 182, 88, 185), center=(0.0, 0.108, 0.124), bev=0.005)
 
-    # 3. Athletic dyeable field shirt with natural chest/lat taper, collar & spherical shoulder sockets (y = 0.12 .. 0.53)
+    # 3. Athletic dyeable field work shirt with clean collar lapels & shoulder structure (y = 0.12 .. 0.53)
     shirt_stations = [
-        (0.12, 0.162, 0.115, 0.00),
-        (0.24, 0.172, 0.122, 0.005),
-        (0.37, 0.205, 0.138, 0.012),  # Pectoral / ribcage fullness
-        (0.47, 0.222, 0.132, 0.008),  # Broad natural deltoid/clavicle line
-        (0.525, 0.115, 0.092, 0.004), # Smooth trapezius slope into collar
+        (0.12, 0.158, 0.112, 0.00),
+        (0.24, 0.168, 0.118, 0.005),
+        (0.37, 0.200, 0.134, 0.012),
+        (0.47, 0.218, 0.128, 0.008),
+        (0.525, 0.112, 0.088, 0.004),
     ]
     shirt_rings = [ring_ellipse(rx, rz, y, seg, cz=cz) for y, rx, rz, cz in shirt_stations]
-    shirt = make_loft(shirt_rings, UV_SHIRT_FRONT, col=rgba(255, 255, 255, 58), dyeable=True)
+    shirt = make_loft(shirt_rings, UV_SHIRT_FRONT, col=rgba(255, 255, 255, 52), dyeable=True)
 
-    # Folded shirt collar + seamless skin neck column rising into head socket (y = 0.50 .. 0.61)
-    collar = make_loft([ring_ellipse(0.092, 0.088, 0.505, seg, cz=0.005), ring_ellipse(0.082, 0.080, 0.555, seg, cz=0.008)],
-                       UV_SHIRT_PLAIN, col=rgba(240, 240, 240, 55), dyeable=True)
-    neck = make_loft([ring_ellipse(0.064, 0.062, 0.52, seg, cz=0.008), ring_ellipse(0.058, 0.058, 0.61, seg, cz=0.010)],
-                     UV_SKIN, col=rgba(255, 255, 255, 65))
-    return merge_parts([pelvis, belt, buckle, shirt, collar, neck])
+    # Crisp V-neck shirt collar + seamless tanned neck column rising into head socket
+    collar = make_loft([ring_ellipse(0.094, 0.090, 0.502, seg, cz=0.005), ring_ellipse(0.084, 0.082, 0.558, seg, cz=0.008)],
+                       UV_SHIRT_PLAIN, col=rgba(242, 244, 248, 52), dyeable=True)
+    neck = make_loft([ring_ellipse(0.060, 0.058, 0.52, seg, cz=0.008), ring_ellipse(0.054, 0.054, 0.61, seg, cz=0.010)],
+                     UV_SKIN, col=rgba(255, 255, 255, 58))
+    parts = [pelvis, belt, buckle, shirt, collar, neck]
+    if lod <= 1:
+        # Side belt whetstone/tool pouch ('kantong batu asah egrek')
+        parts.append(make_bevel_box(0.045, 0.075, 0.058, UV_WOOD_PLAIN, rgba(64, 42, 26, 78), center=(-0.168, 0.092, 0.02), bev=0.008))
+    return merge_parts(parts)
 
 
 def build_char_head(lod: int) -> MeshPart:
-    """Natural 3D sculpted human head with smooth cranium, jawline, 3D nose, ears & layered hair mapped onto UV_FACE!"""
+    """Clean Stylized Anime Head with crisp V-jawline, sculpted nose bridge, ears & 3D layered hair locks mapped onto UV_FACE!"""
     seg = (20, 14, 9)[lod]
     ang = np.linspace(-math.pi, math.pi, seg, endpoint=False, dtype=np.float32)
-    # Profile from chin (y=0.02) to crown (y=0.255)
     profile = [
-        (0.020, 0.048, 0.055, 0.022),  # Chin tip
-        (0.052, 0.078, 0.086, 0.012),  # Jawline
-        (0.098, 0.092, 0.102, 0.006),  # Cheekbones / mouth level
-        (0.142, 0.096, 0.106, 0.004),  # Eye / brow ridge level
-        (0.195, 0.095, 0.105, -0.002), # Forehead
+        (0.020, 0.044, 0.052, 0.020),  # Crisp stylized chin apex
+        (0.054, 0.076, 0.085, 0.012),  # Tapered anime jawline
+        (0.098, 0.090, 0.100, 0.006),  # Cheekbones / mouth level
+        (0.144, 0.094, 0.104, 0.004),  # Anime iris / brow plane
+        (0.196, 0.093, 0.103, -0.002), # Forehead
         (0.236, 0.078, 0.088, -0.006), # Upper cranium
         (0.256, 0.042, 0.048, -0.008), # Crown apex
     ]
     pos_rows, uv_rows = [], []
     u0, v0, u1, v1 = UV_FACE
-    hu0, hv0, hu1, hv1 = UV_HAIR
     for ri, (y, rx, rz, cz) in enumerate(profile):
-        v_t = 1.0 - (ri / (len(profile) - 1.0))  # 1 at chin, 0 at top of forehead
+        v_t = 1.0 - (ri / (len(profile) - 1.0))
         ring = np.stack([np.sin(ang) * rx, np.full_like(ang, y), cz + np.cos(ang) * rz], axis=1)
-        # Subtle 3D nose bridge bulge right at front (ang == 0 -> cos(ang) == 1)!
         if ri in (2, 3):
-            nose_push = np.maximum(0.0, np.cos(ang)) ** 10.0 * (0.020 if ri == 2 else 0.012)
+            nose_push = np.maximum(0.0, np.cos(ang)) ** 12.0 * (0.017 if ri == 2 else 0.010)
             ring[:, 2] += nose_push
         ring_closed = np.vstack([ring, ring[0:1]])
         pos_rows.append(ring_closed.astype(np.float32))
 
-        # Front half (-pi/2 .. +pi/2) maps cleanly across UV_FACE; back of head maps onto skin/hair!
         u_row = np.empty((seg + 1, 2), dtype=np.float32)
         for j in range(seg + 1):
             a = -math.pi + (j / seg) * 2.0 * math.pi
-            # Map -1.05 .. +1.05 radians directly across full UV_FACE width!
             fu = 0.5 + (a / 2.15)
             u_row[j, 0] = u0 + np.clip(fu, 0.02, 0.98) * (u1 - u0)
             u_row[j, 1] = v0 + np.clip(0.10 + v_t * 0.82, 0.02, 0.98) * (v1 - v0)
@@ -941,9 +995,7 @@ def build_char_head(lod: int) -> MeshPart:
         b0, b1 = ri * stride, (ri + 1) * stride
         for j in range(seg):
             tris.extend([[b0 + j, b0 + j + 1, b1 + j + 1], [b0 + j, b1 + j + 1, b1 + j]])
-    # Cap chin & crown
-    c_bot = profile[0]
-    c_top = profile[-1]
+    c_bot, c_top = profile[0], profile[-1]
     pos_a = np.vstack([pos_a, [[0.0, c_bot[0], c_bot[3]], [0.0, c_top[0], c_top[3]]]])
     uv_a = np.vstack([uv_a, [[(u0 + u1) * 0.5, v1], [(u0 + u1) * 0.5, v0]]])
     ib, it = len(pos_a) - 2, len(pos_a) - 1
@@ -956,81 +1008,90 @@ def build_char_head(lod: int) -> MeshPart:
     vv0, vv1, vv2 = pos_a[idx_a[:, 0]], pos_a[idx_a[:, 1]], pos_a[idx_a[:, 2]]
     if float(np.sum(np.einsum("ij,ij->i", vv0, np.cross(vv1, vv2)))) < 0.0:
         idx_a = idx_a[:, [0, 2, 1]]
-    head_mesh = MeshPart(pos_a, uv_a, np.broadcast_to(rgba(255, 255, 255, 68), (len(pos_a), 4)).copy(), idx_a)
+    head_mesh = MeshPart(pos_a, uv_a, np.broadcast_to(rgba(255, 255, 255, 62), (len(pos_a), 4)).copy(), idx_a)
 
-    # Natural sculpted 3D hair volume cap covering back of head, sideburns & forehead fringe (leaves face open!)
+    # Sculpted 3D Anime Hair Volume + Feathered Forehead Fringe & Sideburn Locks!
     hair_rings = []
     h_seg = (16, 12, 8)[lod]
     hang = np.linspace(-math.pi, math.pi, h_seg, endpoint=False, dtype=np.float32)
-    for hi, (hy, hrx, hrz) in enumerate([
-        (0.095, 0.096, 0.104),
-        (0.155, 0.103, 0.112),
-        (0.208, 0.103, 0.113),
-        (0.252, 0.084, 0.094),
-        (0.272, 0.042, 0.048),
-    ]):
-        # Pull hair cleanly behind front face hemisphere so zero dark hair ever clips temples or brows!
-        front_mask = np.clip(1.45 - np.abs(hang), 0.0, 1.0)
-        tuck = front_mask * (0.068 if hy < 0.19 else 0.012)
+    for hy, hrx, hrz in [
+        (0.088, 0.095, 0.104),
+        (0.152, 0.103, 0.112),
+        (0.208, 0.105, 0.115),
+        (0.254, 0.086, 0.096),
+        (0.276, 0.040, 0.046),
+    ]:
+        front_mask = np.clip(1.42 - np.abs(hang), 0.0, 1.0)
+        tuck = front_mask * (0.070 if hy < 0.192 else 0.010)
         pts = np.stack([np.sin(hang) * (hrx - tuck * 0.45), np.full_like(hang, hy), -0.012 + np.cos(hang) * (hrz - tuck)], axis=1)
         hair_rings.append(pts)
-    hair = make_loft(hair_rings, UV_HAIR, col=rgba(255, 255, 255, 78))
+    hair = make_loft(hair_rings, UV_HAIR, col=rgba(255, 255, 255, 82))
 
     parts = [head_mesh, hair]
     if lod <= 1:
-        # Sculpted human ears on both sides!
+        # 5 tapered 3D anime forehead bangs & temple sideburn locks (stay cleanly above y=0.172 so eyes remain 100% clear!)
+        bang_specs = [
+            (-0.068, 0.215, 0.078, -0.078, 0.148, 0.068, 0.018),
+            (-0.036, 0.222, 0.094, -0.042, 0.176, 0.098, 0.017),
+            ( 0.002, 0.224, 0.098,  0.008, 0.178, 0.103, 0.018),
+            ( 0.038, 0.222, 0.094,  0.046, 0.176, 0.097, 0.017),
+            ( 0.068, 0.215, 0.078,  0.078, 0.148, 0.068, 0.018),
+        ]
+        for x0, y0, z0, x1, y1, z1, r0 in bang_specs:
+            parts.append(make_tube_segment((x0, y0, z0), (x1, y1, z1), r0, 0.004, UV_HAIR, seg=5, col=rgba(255, 255, 255, 84), ball_caps=False))
+        # Sculpted human ears on both sides
         for sx in (-1.0, 1.0):
-            parts.append(make_sphere_uv(0.016, 0.030, 0.020, UV_SKIN, seg=7, rings=5, col=rgba(245, 240, 238, 65), center=(sx * 0.094, 0.132, -0.004)))
+            parts.append(make_sphere_uv(0.015, 0.028, 0.019, UV_SKIN, seg=7, rings=5, col=rgba(245, 238, 234, 58), center=(sx * 0.092, 0.132, -0.004)))
     return merge_parts(parts)
 
 
 def build_char_face_neutral(lod: int) -> MeshPart:
-    """Visible low-poly facial details: expressive eyes, brows, and a relaxed mouth."""
-    seg = (9, 7, 5)[lod]
+    """Flush-contoured 3D anime upper-eyelash arcs + expressive tapered brows (zero protruding bug-eyeball spheres!)."""
+    seg = (8, 6, 5)[lod]
     parts = []
     for sx in (-1.0, 1.0):
-        parts.append(make_sphere_uv(0.013, 0.010, 0.008, UV_SKIN, seg=seg, rings=5,
-                                    col=rgba(250, 246, 230, 245), center=(sx * 0.037, 0.146, 0.094)))
-        parts.append(make_sphere_uv(0.0055, 0.0065, 0.004, UV_STEEL, seg=6, rings=4,
-                                    col=rgba(22, 24, 26, 245), center=(sx * 0.037, 0.145, 0.102)))
-        parts.append(make_tube_segment((sx * 0.066, 0.173, 0.079), (sx * 0.012, 0.178, 0.101),
-                                       0.007, 0.008, UV_HAIR, seg=6, col=rgba(54, 38, 28, 235), ball_caps=False))
-    parts.append(make_tube_segment((-0.020, 0.073, 0.099), (0.020, 0.073, 0.099),
-                                   0.0045, 0.0045, UV_SKIN, seg=6, col=rgba(104, 43, 39, 230), ball_caps=False))
+        # Sleek upper eyelash fold sitting cleanly along the top of the UV_FACE anime iris
+        parts.append(make_tube_segment((sx * 0.052, 0.153, 0.093), (sx * 0.022, 0.155, 0.101),
+                                       0.0032, 0.0028, UV_HAIR, seg=seg, col=rgba(24, 18, 15, 210), ball_caps=False))
+        # Confident tapered 3D eyebrow above the brow ridge
+        parts.append(make_tube_segment((sx * 0.060, 0.173, 0.084), (sx * 0.018, 0.176, 0.101),
+                                       0.0042, 0.0052, UV_HAIR, seg=seg, col=rgba(36, 26, 20, 215), ball_caps=False))
+    # Subtle flush lower-lip shadow crease
+    parts.append(make_tube_segment((-0.012, 0.072, 0.097), (0.012, 0.072, 0.097),
+                                   0.0024, 0.0024, UV_SKIN, seg=seg, col=rgba(148, 86, 68, 165), ball_caps=False))
     return merge_parts(parts)
 
 
 def build_char_face_strain(lod: int) -> MeshPart:
-    """Strained brow, open-mouth effort expression and sweat bead for the heavy TBS hoist pose."""
+    """Determined anime effort expression for heavy TBS hoist pose (furrowed brows + grit mouth, flush to face)."""
     parts = []
     seg = (8, 6, 5)[lod]
     for sx in (-1.0, 1.0):
-        # Narrowed eyes and brows pinched toward the nose under load.
-        parts.append(make_tube_segment((sx * 0.052, 0.148, 0.095), (sx * 0.020, 0.147, 0.108),
-                                       0.0055, 0.0055, UV_STEEL, seg=seg, col=rgba(25, 28, 31, 245), ball_caps=False))
-        parts.append(make_tube_segment((sx * 0.066, 0.179, 0.078), (sx * 0.012, 0.162, 0.104),
-                                       0.009, 0.010, UV_HAIR, seg=seg, col=rgba(48, 33, 24, 245), ball_caps=False))
-    parts.append(make_sphere_uv(0.020, 0.027, 0.010, UV_STEEL, seg=seg, rings=5,
-                                col=rgba(70, 30, 27, 242), center=(0.0, 0.074, 0.105)))
-    parts.append(make_sphere_uv(0.010, 0.004, 0.004, UV_SKIN, seg=6, rings=4,
-                                col=rgba(250, 240, 218, 245), center=(0.0, 0.092, 0.113)))
-    parts.append(make_sphere_uv(0.010, 0.016, 0.010, UV_CANTER_GLASS, seg=seg, rings=5,
-                                col=rgba(120, 226, 248, 220), center=(0.104, 0.205, 0.025)))
+        parts.append(make_tube_segment((sx * 0.052, 0.150, 0.094), (sx * 0.020, 0.148, 0.102),
+                                       0.0038, 0.0038, UV_HAIR, seg=seg, col=rgba(24, 18, 15, 225), ball_caps=False))
+        parts.append(make_tube_segment((sx * 0.062, 0.178, 0.082), (sx * 0.016, 0.165, 0.103),
+                                       0.0055, 0.0065, UV_HAIR, seg=seg, col=rgba(34, 24, 18, 225), ball_caps=False))
+    parts.append(make_sphere_uv(0.016, 0.012, 0.005, UV_STEEL, seg=seg, rings=5,
+                                col=rgba(78, 34, 30, 215), center=(0.0, 0.075, 0.099)))
+    parts.append(make_tube_segment((-0.011, 0.081, 0.102), (0.011, 0.081, 0.102),
+                                   0.0028, 0.0028, UV_CONCRETE_CLEAN, seg=6, col=rgba(242, 238, 228, 220), ball_caps=False))
     return merge_parts(parts)
 
 
 def build_char_arm(lod: int) -> MeshPart:
-    """Seamless ball-jointed upper arm: rolled shirt sleeve deltoid top + muscular bicep/tricep + spherical elbow cap!"""
+    """Seamless ball-jointed upper arm: rolled field-shirt sleeve cuff + toned bicep/tricep!"""
     seg = (12, 9, 6)[lod]
-    # Rolled sleeve covering shoulder ball socket (y = +0.045 .. -0.115)
     sleeve = make_loft([
-        ring_ellipse(0.058, 0.058,  0.045, seg),
-        ring_ellipse(0.064, 0.064, -0.015, seg),
-        ring_ellipse(0.056, 0.056, -0.115, seg),
-    ], UV_SHIRT_PLAIN, col=rgba(255, 255, 255, 58), dyeable=True)
-    # Bare muscular upper arm + spherical elbow ball cap (y = -0.105 .. -0.295)
-    bicep = make_tube_segment((0.0, -0.105, 0.0), (0.0, -0.275, 0.0), 0.048, 0.041, UV_SKIN, seg=seg, col=rgba(255, 255, 255, 68), ball_caps=True)
-    return merge_parts([sleeve, bicep])
+        ring_ellipse(0.056, 0.056,  0.045, seg),
+        ring_ellipse(0.062, 0.062, -0.015, seg),
+        ring_ellipse(0.055, 0.055, -0.105, seg),
+    ], UV_SHIRT_PLAIN, col=rgba(255, 255, 255, 52), dyeable=True)
+    cuff = make_loft([
+        ring_ellipse(0.060, 0.060, -0.095, seg),
+        ring_ellipse(0.059, 0.059, -0.122, seg),
+    ], UV_SHIRT_PLAIN, col=rgba(235, 238, 242, 50), dyeable=True)
+    bicep = make_tube_segment((0.0, -0.112, 0.0), (0.0, -0.275, 0.0), 0.046, 0.040, UV_SKIN, seg=seg, col=rgba(255, 255, 255, 62), ball_caps=True)
+    return merge_parts([sleeve, cuff, bicep])
 
 
 def build_char_forearm_hand(lod: int) -> MeshPart:

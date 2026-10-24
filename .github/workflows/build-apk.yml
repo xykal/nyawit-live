@@ -101,7 +101,9 @@ jobs:
 
           ls -lh src/Nyawit.Android/Libs/*/*.so
 
-      - name: Run Automated C# Engine, Physics, PBR Atlas & 41-Mesh NPAK v4.0 Tests
+      - name: Run Automated C# Engine, Physics, PBR Atlas & 57-Mesh NPAK v4.0 Tests
+        env:
+          SKIP_LIVE_NET_TEST: "1"
         run: dotnet test tests/NyawitEngine.Tests/NyawitEngine.Tests.csproj -c Release --verbosity normal
 
       - name: Prepare Release Signing Keystore

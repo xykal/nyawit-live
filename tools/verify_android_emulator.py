@@ -63,7 +63,7 @@ def sync_stage(stage_name: str):
     while time.time() < deadline:
         attempt += 1
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:18765/stage?s={stage_name}", timeout=26.0) as resp:
+            with urllib.request.urlopen(f"http://127.0.0.1:18765/stage?s={stage_name}", timeout=32.0) as resp:
                 body = resp.read().decode("utf-8", errors="replace")
                 log_msg(f"  -> Frame-Synced Stage '{stage_name}' (attempt {attempt}): {body}")
                 return

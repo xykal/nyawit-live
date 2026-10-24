@@ -113,8 +113,8 @@ public sealed class QualityGovernor
             if (_lowFpsStrikes >= 3)
             {
                 CurrentPreset = (GraphicsPreset)((int)CurrentPreset - 1);
-                if (ShadowTier > ShadowQualityTier.Off)
-                    ShadowTier = (ShadowQualityTier)((int)ShadowTier - 1);
+                if (ShadowTier > ShadowQualityTier.Medium)
+                    ShadowTier = ShadowQualityTier.Medium;
                 _lowFpsStrikes = 0;
                 return true;
             }

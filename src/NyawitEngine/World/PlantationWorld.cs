@@ -84,8 +84,13 @@ public static class PlantationWorld
 
     public static float MudFactor(double x, double z)
     {
-        double n = System.Math.Sin(x * 0.075 + 1.1) * System.Math.Cos(z * 0.068 - 0.7) + 0.5 * System.Math.Sin((x + z) * 0.11);
-        return (float)(System.Math.Clamp((n - 0.28) * 1.35, 0.0, 1.0) * (1.0 - RoadFactor(x, z) * 0.65));
+        double n = System.Math.Sin(x * 0.085 + 1.1) * System.Math.Cos(z * 0.078 - 0.7)
+                 + 0.55 * System.Math.Sin((x - z) * 0.13)
+                 + 0.35 * System.Math.Cos((x + z) * 0.21);
+        float road = RoadFactor(x, z);
+        float baseMud = (float)System.Math.Clamp((n + 0.12) * 0.78, 0.0, 1.0);
+        // Sumatran sawit haul roads are churned wet mud with rainwater puddles!
+        return System.Math.Clamp(baseMud * 0.55f + road * (0.48f + 0.45f * baseMud), 0.0f, 1.0f);
     }
 
     public static float TerrainHeight(double x, double z)
@@ -246,21 +251,21 @@ public static class PlantationWorld
 
                     float rd = RoadFactor(x, z);
                     float md = MudFactor(x, z);
-                    float yard = System.Math.Clamp(1f - (MathF.Sqrt(x * x + (z + 15f) * (z + 15f)) - 14f) / 5f, 0f, 1f);
-                    float dCanal = System.Math.Clamp(1f - MathF.Abs(z - CanalZ) / 6.2f, 0f, 1f);
+                    float yard = System.Math.Clamp(1f - (MathF.Sqrt(x * x + (z + 17.5f) * (z + 17.5f)) - 11.5f) / 4.5f, 0f, 1f);
+                    float dCanal = System.Math.Clamp(1f - MathF.Abs(z - CanalZ) / 6.5f, 0f, 1f);
                     float lushWave = 0.5f + 0.5f * MathF.Sin(x * 0.14f + MathF.Cos(z * 0.13f) * 1.6f);
 
-                    // Subtle natural macro tint modulated on top of multi-scale PBR Grass/Dirt/Concrete textures!
-                    float r = 226f + lushWave * 24f;
-                    float g = 232f + lushWave * 20f;
-                    float b = 212f + lushWave * 20f;
-                    r = r * (1f - md * 0.35f) + 190f * (md * 0.35f);
-                    g = g * (1f - md * 0.35f) + 168f * (md * 0.35f);
-                    b = b * (1f - md * 0.35f) + 146f * (md * 0.35f);
-                    r = r * (1f - dCanal * 0.35f) + 162f * (dCanal * 0.35f);
-                    g = g * (1f - dCanal * 0.35f) + 158f * (dCanal * 0.35f);
-                    b = b * (1f - dCanal * 0.35f) + 132f * (dCanal * 0.35f);
-                    float ao = 10f + yard * 36f + rd * 22f + md * 85f; // Low spec on dry grass/soil, wet sheen on mud!
+                    // Grounded Sumatran dark peat/humus & wet muddy road macro shading (zero bright pastel blowout!)
+                    float r = 196f + lushWave * 28f;
+                    float g = 204f + lushWave * 26f;
+                    float b = 186f + lushWave * 22f;
+                    r = r * (1f - md * 0.34f) + 148f * (md * 0.34f);
+                    g = g * (1f - md * 0.34f) + 132f * (md * 0.34f);
+                    b = b * (1f - md * 0.34f) + 116f * (md * 0.34f);
+                    r = r * (1f - dCanal * 0.42f) + 118f * (dCanal * 0.42f);
+                    g = g * (1f - dCanal * 0.42f) + 114f * (dCanal * 0.42f);
+                    b = b * (1f - dCanal * 0.42f) + 98f * (dCanal * 0.42f);
+                    float ao = 8f + yard * 28f + rd * 52f + md * 92f; // Wet sheen on muddy haul roads!
 
                     bw.Write(x); bw.Write(h); bw.Write(z);
                     bw.Write(nx); bw.Write(ny); bw.Write(nz);

@@ -4,17 +4,17 @@
   "models": [
     {
       "name": "palm_trunk",
-      "radius": 6.484,
+      "radius": 6.581,
       "lods": [
         {
           "lod": 0,
-          "verts": 304,
-          "tris": 480
+          "verts": 359,
+          "tris": 576
         },
         {
           "lod": 1,
-          "verts": 142,
-          "tris": 214
+          "verts": 151,
+          "tris": 232
         },
         {
           "lod": 2,
@@ -25,22 +25,22 @@
     },
     {
       "name": "palm_crown",
-      "radius": 4.185,
+      "radius": 4.573,
       "lods": [
         {
           "lod": 0,
-          "verts": 609,
-          "tris": 696
+          "verts": 1024,
+          "tris": 1312
         },
         {
           "lod": 1,
-          "verts": 300,
-          "tris": 320
+          "verts": 486,
+          "tris": 608
         },
         {
           "lod": 2,
-          "verts": 156,
-          "tris": 156
+          "verts": 193,
+          "tris": 216
         }
       ]
     },
@@ -130,22 +130,22 @@
     },
     {
       "name": "canter_truck_body",
-      "radius": 3.333,
+      "radius": 3.353,
       "lods": [
         {
           "lod": 0,
-          "verts": 5864,
-          "tris": 8656
+          "verts": 5909,
+          "tris": 8960
         },
         {
           "lod": 1,
-          "verts": 5660,
-          "tris": 8368
+          "verts": 5533,
+          "tris": 8408
         },
         {
           "lod": 2,
-          "verts": 2597,
-          "tris": 3552
+          "verts": 2956,
+          "tris": 4464
         }
       ]
     },
@@ -466,38 +466,38 @@
     },
     {
       "name": "char_torso_head",
-      "radius": 0.614,
+      "radius": 0.613,
       "lods": [
         {
           "lod": 0,
-          "verts": 272,
-          "tris": 460
+          "verts": 324,
+          "tris": 576
         },
         {
           "lod": 1,
-          "verts": 216,
-          "tris": 348
+          "verts": 268,
+          "tris": 464
         },
         {
           "lod": 2,
-          "verts": 160,
-          "tris": 236
+          "verts": 174,
+          "tris": 288
         }
       ]
     },
     {
       "name": "char_head",
-      "radius": 0.279,
+      "radius": 0.282,
       "lods": [
         {
           "lod": 0,
-          "verts": 320,
-          "tris": 580
+          "verts": 420,
+          "tris": 730
         },
         {
           "lod": 1,
-          "verts": 258,
-          "tris": 456
+          "verts": 358,
+          "tris": 606
         },
         {
           "lod": 2,
@@ -508,64 +508,64 @@
     },
     {
       "name": "char_face_neutral",
-      "radius": 0.213,
+      "radius": 0.209,
       "lods": [
         {
           "lod": 0,
-          "verts": 233,
-          "tris": 384
+          "verts": 145,
+          "tris": 240
         },
         {
           "lod": 1,
-          "verts": 213,
-          "tris": 344
+          "verts": 115,
+          "tris": 180
         },
         {
           "lod": 2,
-          "verts": 193,
-          "tris": 304
+          "verts": 100,
+          "tris": 150
         }
       ]
     },
     {
       "name": "char_face_strain",
-      "radius": 0.246,
+      "radius": 0.211,
       "lods": [
         {
           "lod": 0,
-          "verts": 240,
-          "tris": 400
+          "verts": 186,
+          "tris": 308
         },
         {
           "lod": 1,
-          "verts": 196,
-          "tris": 312
+          "verts": 152,
+          "tris": 240
         },
         {
           "lod": 2,
-          "verts": 174,
-          "tris": 268
+          "verts": 135,
+          "tris": 206
         }
       ]
     },
     {
       "name": "char_arm",
-      "radius": 0.29,
+      "radius": 0.289,
       "lods": [
         {
           "lod": 0,
-          "verts": 121,
-          "tris": 216
+          "verts": 149,
+          "tris": 264
         },
         {
           "lod": 1,
-          "verts": 94,
-          "tris": 162
+          "verts": 116,
+          "tris": 198
         },
         {
           "lod": 2,
-          "verts": 67,
-          "tris": 108
+          "verts": 83,
+          "tris": 132
         }
       ]
     },
@@ -1200,8 +1200,8 @@
       ]
     }
   ],
-  "total_lod0_tris": 60556,
-  "total_lod1_tris": 38722,
-  "total_lod2_tris": 26808,
-  "binary_bytes": 3820155
+  "total_lod0_tris": 61650,
+  "total_lod1_tris": 39134,
+  "total_lod2_tris": 27640,
+  "binary_bytes": 3868275
 }

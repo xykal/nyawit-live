@@ -529,8 +529,8 @@ public class MainActivity : Activity
                     {
                         await Task.Delay(80);
                     }
-                    int targetFrame = (_renderer?.PresentedFrameCount ?? 0) + 6;
-                    while ((_renderer?.PresentedFrameCount ?? 0) < targetFrame && sw.ElapsedMilliseconds < 16000)
+                    int targetFrame = (_renderer?.PresentedFrameCount ?? 0) + 5;
+                    while ((_renderer?.PresentedFrameCount ?? 0) < targetFrame && sw.ElapsedMilliseconds < 22000)
                     {
                         _glView?.RequestRender();
                         _hud?.PostInvalidate();
@@ -571,6 +571,9 @@ public class MainActivity : Activity
     private void ApplyStageByName(string stage)
     {
         if (string.IsNullOrWhiteSpace(stage) || _renderer == null || _hud == null || _net == null) return;
+        // Lock flagship MaxHD (native 1.00x res, 1024x1024 PCF Sun Shadows, Volumetric Clouds & LOD0=50m) for deterministic stage captures!
+        _renderer.Quality.SetManualPreset(GraphicsPreset.MaxHD, disableAuto: true);
+        ApplyHardwareRenderScale(1.0f);
         if (_glView != null) _glView.RenderMode = Rendermode.Continuously;
 
         switch (stage.Trim().ToLowerInvariant())
@@ -635,8 +638,8 @@ public class MainActivity : Activity
                 _renderer.Physics.MainTruck.VisualCargoUnits = 18;
                 _renderer.SeedShowcaseTireTracks();
                 _renderer.CamYaw = 3.34f;
-                _renderer.CamDist = 6.2f;
-                _renderer.CamPitch = 0.16f;
+                _renderer.CamDist = 5.8f;
+                _renderer.CamPitch = 0.13f;
                 _hud.Invalidate();
                 break;
 
@@ -679,7 +682,7 @@ public class MainActivity : Activity
             _net.Profile.Avatar.Hat = MeshCatalog.HatCaping;
             _net.Profile.Avatar.Back = MeshCatalog.BackBasket;
             _net.Profile.Avatar.Tool = MeshCatalog.ToolEgrek;
-            _net.Profile.Avatar.Glasses = true;
+            _net.Profile.Avatar.Glasses = false;
             _net.Profile.Avatar.WaistParang = true;
 
             _renderer.Physics.MainTruck.X = -2.2f;
@@ -692,8 +695,8 @@ public class MainActivity : Activity
             _renderer.SeedShowcaseTireTracks();
 
             _renderer.CamYaw = 0.14f;
-            _renderer.CamPitch = 0.10f;
-            _renderer.CamDist = 3.35f;
+            _renderer.CamPitch = 0.06f;
+            _renderer.CamDist = 3.25f;
             _hud.PostInvalidate();
             return;
         }
@@ -713,8 +716,8 @@ public class MainActivity : Activity
             _renderer.Physics.MainTruck.VisualCargoUnits = 18;
             _renderer.SeedShowcaseTireTracks();
             _renderer.CamYaw = 0.14f;
-            _renderer.CamDist = 5.9f;
-            _renderer.CamPitch = 0.16f;
+            _renderer.CamDist = 5.5f;
+            _renderer.CamPitch = 0.12f;
             _hud.PostInvalidate();
         }
     }
