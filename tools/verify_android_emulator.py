@@ -43,8 +43,13 @@ def inspect_png_stdlib(path: str, min_kb: float = 12.0):
     assert compressed_kb > min_kb, f"Frame appears blank/incomplete ({compressed_kb:.1f} KB < {min_kb} KB)"
 
 
-def run(cmd, check=True, binary=False):
-    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+def run(cmd, check=True, binary=False, timeout=45):
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if check:
+            raise RuntimeError(f"Command {cmd} timed out after {timeout}s")
+        return b"" if binary else f"<timeout after {timeout}s>"
     if check and res.returncode != 0:
         out = res.stdout.decode("utf-8", errors="replace")
         raise RuntimeError(f"Command {cmd} failed ({res.returncode}):\n{out}")
@@ -52,27 +57,29 @@ def run(cmd, check=True, binary=False):
 
 
 def sync_stage(stage_name: str):
-    deadline = time.time() + 65.0
+    deadline = time.time() + 55.0
     last_err = None
     attempt = 0
     while time.time() < deadline:
         attempt += 1
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:18765/stage?s={stage_name}", timeout=32.0) as resp:
+            with urllib.request.urlopen(f"http://127.0.0.1:18765/stage?s={stage_name}", timeout=26.0) as resp:
                 body = resp.read().decode("utf-8", errors="replace")
                 log_msg(f"  -> Frame-Synced Stage '{stage_name}' (attempt {attempt}): {body}")
                 return
         except Exception as ex:
             last_err = ex
-            pid_now = run(["adb", "shell", "pidof", "id.my.xyverse.nyawitlive"], check=False).strip()
+            pid_now = run(["adb", "shell", "pidof", "id.my.xyverse.nyawitlive"], check=False, timeout=8).strip()
             log_msg(f"  [retry stage={stage_name} attempt={attempt} pid='{pid_now}'] {ex}")
-            run(["adb", "forward", "tcp:18765", "tcp:18765"], check=False)
+            if "not found" in pid_now or "offline" in pid_now:
+                break
+            run(["adb", "forward", "tcp:18765", "tcp:18765"], check=False, timeout=8)
             time.sleep(0.6)
     raise RuntimeError(f"Timed out waiting for stage server '{stage_name}': {last_err}")
 
 
 def capture_screen(out_path: str):
-    png = subprocess.check_output(["adb", "exec-out", "screencap", "-p"])
+    png = subprocess.check_output(["adb", "exec-out", "screencap", "-p"], timeout=25)
     with open(out_path, "wb") as f:
         f.write(png)
     log_msg(f"Captured {out_path} ({len(png):,} bytes)")
